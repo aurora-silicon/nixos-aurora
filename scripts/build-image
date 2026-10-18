@@ -16,7 +16,6 @@ mkdir -p "$out" "$root/out/$profile-build"
 image=$root/out/$profile-build/aurora.raw
 size=8G;[[ $desktop == minimal ]] || size=24G
 truncate -s "$size" "$image"
-printf 'label: gpt\nsector-size: 4096\n\nstart=2048,size=131072,type=U\nsize=262144,type=BC13C2FF-59E6-4262-A352-B275FD6F7172\ntype=B921B045-1DF0-41C3-AF44-4C6F280D3FAE\n' | sfdisk --sector-size 4096 "$image"
 loop='';target=$(mktemp -d /tmp/aurora-nixos-image.XXXXXX);chmod 0755 "$target"
 cleanup() {
   local status=$? clean=1
@@ -32,7 +31,9 @@ p=json.load(open(sys.argv[1]))[sys.argv[2]]
 print(p['rootUUID'],p['bootUUID'],p['efiUUID'])
 PY
 )
-loop=$(losetup --find --show --partscan --sector-size 4096 "$image");udevadm settle
+loop=$(losetup --find --show --partscan --sector-size 4096 "$image")
+printf 'label: gpt\n\nstart=2048,size=131072,type=U\nsize=262144,type=BC13C2FF-59E6-4262-A352-B275FD6F7172\ntype=B921B045-1DF0-41C3-AF44-4C6F280D3FAE\n' | sfdisk "$loop"
+udevadm settle
 mkfs.vfat -F32 -i "${efi_uuid//-/}" -n AURORA_EFI "${loop}p1"
 mkfs.ext4 -F -U "$boot_uuid" -L AURORA_BOOT "${loop}p2"
 mkfs.btrfs -f -U "$root_uuid" -L AURORA_ROOT -s 4096 -n 16384 "${loop}p3"
