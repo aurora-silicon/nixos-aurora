@@ -2,6 +2,7 @@ final: prev:
 let
   pins = builtins.fromJSON (builtins.readFile ./sources.json);
   source = name: final.fetchurl {
+    name = "${name}-${pins.${name}.commit}.tar.gz";
     url = pins.${name}.source_url;
     hash = pins.${name}.nix_hash;
   };
