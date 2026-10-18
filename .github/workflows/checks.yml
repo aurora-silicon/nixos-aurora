@@ -19,6 +19,8 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+            extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
+            extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
       - name: Evaluate all profiles and hardware packages
         run: |
           nix flake check --no-build
@@ -34,6 +36,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
+            extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
       - name: Build the pinned Aurora hardware package
         run: nix build --max-jobs 1 --cores 4 --print-build-logs --json '.#${{ matrix.package }}^*' > build.json
       - name: Record output identity and closure
