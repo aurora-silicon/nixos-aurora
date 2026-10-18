@@ -4,7 +4,7 @@ let
     install -Dm755 ${../firmware/aurora-peripheral-firmware.sh} $out/bin/aurora-peripheral-admission
     patchShebangs $out/bin/aurora-peripheral-admission
   '';
-  firmwareTools = [ pkgs.coreutils pkgs.util-linux pkgs.cpio pkgs.kmod pkgs.gnugrep pkgs.bash ];
+  firmwareTools = [ pkgs.coreutils pkgs.util-linux pkgs.cpio pkgs.kmod pkgs.gnugrep pkgs.bash pkgs.systemd ];
   loadFirmware = pkgs.writeShellApplication {
     name = "aurora-load-vendor-firmware";
     runtimeInputs = firmwareTools;
@@ -19,6 +19,7 @@ let
       destination=/run/aurora-firmware
       mkdir -p "$destination" /run/aurora-esp
       if [ ! -s "$destination/vendorfw/.vendorfw.manifest" ]; then
+        udevadm wait --timeout=60 "/dev/disk/by-partuuid/$uuid"
         mount -t vfat -o ro "/dev/disk/by-partuuid/$uuid" /run/aurora-esp
         trap 'umount /run/aurora-esp' EXIT
         test -s /run/aurora-esp/vendorfw/firmware.cpio

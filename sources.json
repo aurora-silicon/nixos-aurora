@@ -91,11 +91,11 @@
   },
   "aurora-firstboot": {
     "repository": "https://github.com/aurora-silicon/aurora-platform",
-    "commit": "be0fd6950ee4ea50438e130457f9b4066b577539",
-    "version": "0.1.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/aurora-platform/tar.gz/be0fd6950ee4ea50438e130457f9b4066b577539",
-    "archive_root": "aurora-platform-be0fd6950ee4ea50438e130457f9b4066b577539",
-    "sha256": "ef045827186a5c76f0b894cff7ae6296a7c80a994cd81a546800505721160717",
-    "nix_hash": "sha256-7wRYJxhqXHbwuJTP965ilqfICplM2BpUaABQVyEWBxc="
+    "commit": "d77845baa86a436d5fd359125cabd4413128c140",
+    "version": "0.1.2",
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-platform/tar.gz/d77845baa86a436d5fd359125cabd4413128c140",
+    "archive_root": "aurora-platform-d77845baa86a436d5fd359125cabd4413128c140",
+    "sha256": "b35775fbc344da3c4ba0b735967337aa31b01c6bea684458f313ad01235d7dad",
+    "nix_hash": "sha256-s1d1+8NE2jxLoLc1lnM3qjGwHGvqaERY8xOtASNdfa0="
   }
 }
