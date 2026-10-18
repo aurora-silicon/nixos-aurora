@@ -16,7 +16,7 @@ in stdenvNoCC.mkDerivation {
       --replace-fail /usr/lib/aurora/vendor/omarchy-mac-encrypt $out/lib/aurora/vendor/omarchy-mac-encrypt
     patchShebangs $out/lib/aurora
     wrapProgram $out/lib/aurora/aurora-initrd-root --prefix PATH : ${lib.makeBinPath rootTools}
-    wrapProgram $out/lib/aurora/aurora-firstboot --prefix PATH : ${lib.makeBinPath (rootTools ++ [ python3 shadow sudo kbd glibc.bin ])}
+    wrapProgram $out/lib/aurora/aurora-firstboot --prefix PATH : ${lib.makeBinPath (rootTools ++ [ python3 shadow sudo kbd glibc.getent ])}
     # NixOS declares units through its modules rather than importing /usr paths.
     rm -r $out/lib/systemd
     runHook postInstall
