@@ -69,6 +69,33 @@ in {
         TTYPath = "/dev/tty1"; TTYReset = true; TTYVHangup = true;
       };
     };
+    # Until the owner performs the first rebuild, the factory generation still
+    # contains its generic hostname. Restore the chosen name after activation.
+    # Once owner.nix is built, its normal user declaration removes this bridge.
+    systemd.services.aurora-owner-hostname = lib.mkIf
+      (lib.filterAttrs (_: user: user.isNormalUser) config.users.users == {}) {
+      description = "Restore the Aurora owner's hostname before the first rebuild";
+      wantedBy = [ "multi-user.target" ];
+      wants = [ "network-pre.target" ];
+      after = [ "local-fs.target" ];
+      before = [ "network-pre.target" "NetworkManager.service" ];
+      unitConfig.ConditionPathExists = "/var/lib/aurora/firstboot/complete";
+      serviceConfig.Type = "oneshot";
+      path = [ pkgs.coreutils ];
+      script = ''
+        state=/var/lib/aurora/firstboot
+        [[ -f $state/owner && ! -L $state/owner ]] || exit 1
+        mapfile -t owner < "$state/owner"
+        (( ''${#owner[@]} == 2 )) || exit 1
+        [[ $(<"$state/complete") == "''${owner[0]}" ]] || exit 1
+        hostname=''${owner[1]}
+        [[ $hostname =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] || exit 1
+        printf '%s\n' "$hostname" > /etc/hostname.aurora-new
+        chmod 0644 /etc/hostname.aurora-new
+        mv -Tf /etc/hostname.aurora-new /etc/hostname
+        printf '%s\n' "$hostname" > /proc/sys/kernel/hostname
+      '';
+    };
     systemd.services.display-manager = lib.mkIf (config.aurora.desktop != "minimal") {
       requires = [ "aurora-firstboot.service" ];
       after = [ "aurora-firstboot.service" ];

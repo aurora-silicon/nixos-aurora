@@ -38,7 +38,7 @@
     services.displayManager.sddm.enable = config.aurora.desktop == "kde";
     services.desktopManager.gnome.enable = config.aurora.desktop == "gnome";
     services.displayManager.gdm.enable = config.aurora.desktop == "gnome";
-    environment.systemPackages = [ pkgs.aurora-bless pkgs.git ];
+    environment.systemPackages = [ pkgs.aurora-bless pkgs.git pkgs.cryptsetup pkgs.btrfs-progs ];
     system.stateVersion = "26.05";
   };
 }
