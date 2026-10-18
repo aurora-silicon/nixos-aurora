@@ -10,7 +10,7 @@ import tarfile
 import urllib.parse
 
 
-def prepare(source, destination, asset_base):
+def prepare(source, destination, asset_base, previous_metadata=None):
     if destination.exists():
         raise ValueError('output exists; use a new snapshot directory')
     url = urllib.parse.urlsplit(asset_base)
@@ -51,6 +51,21 @@ def prepare(source, destination, asset_base):
     shutil.copyfile(source / 'nix-cache-info', site / 'nix-cache-info')
     (destination / 'site/index.html').write_text('Aurora NixOS development binary cache\n')
     (assets / 'manifest.json').write_text(json.dumps({'schema': 1, 'asset_base': asset_base, 'paths': records}, indent=2) + '\n')
+    if previous_metadata is not None:
+        for previous in sorted(previous_metadata.glob('*.narinfo')):
+            if previous.is_symlink() or not re.fullmatch(r'[a-z0-9]{32}\.narinfo', previous.name):
+                raise ValueError('unsafe previous cache metadata')
+            target = site / previous.name
+            if target.exists():
+                def identity(path):
+                    fields = dict(line.split(': ', 1) for line in path.read_text().splitlines() if not line.startswith('Sig: '))
+                    return tuple(fields.get(name) for name in ('StorePath', 'NarHash', 'NarSize', 'References'))
+                if identity(previous) != identity(target):
+                    raise ValueError('conflicting signed store identity: ' + previous.name)
+            else:
+                # Keep each older immutable transport URL. Deployment verifies
+                # all signatures and NAR contents again before publishing.
+                shutil.copyfile(previous, target)
     with tarfile.open(assets / 'cache-metadata.tar.gz', 'w:gz') as archive:
         for path in sorted((destination / 'site').rglob('*')):
             if path.is_file():
@@ -63,5 +78,6 @@ if __name__ == '__main__':
     parser.add_argument('--cache', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--asset-base', required=True)
+    parser.add_argument('--previous-metadata', type=Path)
     args = parser.parse_args()
-    print(f'Prepared {len(prepare(args.cache, args.output, args.asset_base))} Nix cache paths')
+    print(f'Prepared {len(prepare(args.cache, args.output, args.asset_base, args.previous_metadata))} Nix cache paths')
