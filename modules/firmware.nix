@@ -48,7 +48,7 @@ in {
     serviceConfig.Type = "oneshot";
     serviceConfig.ExecStart = "${loadFirmware}/bin/aurora-load-vendor-firmware";
   };
-  boot.initrd.systemd.storePaths = lib.mkIf config.boot.initrd.systemd.enable ([ loadFirmware admission ] ++ firmwareTools);
+  boot.initrd.systemd.storePaths = lib.mkIf config.boot.initrd.systemd.enable ([ loadFirmware admission ] ++ map lib.getBin firmwareTools);
   systemd.services.aurora-vendor-firmware = {
     description = "Maintain Aurora per-device firmware handoff";
     wantedBy = [ "multi-user.target" ];

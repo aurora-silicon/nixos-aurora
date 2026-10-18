@@ -21,6 +21,6 @@ in stdenvNoCC.mkDerivation {
     rm -r $out/lib/systemd
     runHook postInstall
   '';
-  passthru.initrdInputs = rootTools;
+  passthru.initrdInputs = map lib.getBin rootTools;
   meta.license = lib.licenses.mit;
 }

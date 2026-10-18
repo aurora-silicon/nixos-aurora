@@ -68,10 +68,12 @@ out=Path(sys.argv[1]);revision,desktop=sys.argv[2:4];layout=json.load(open(sys.a
         ./machine.nix ./owner.nix
       ];
     };
-  in { nixosConfigurations.${system.config.networking.hostName} = system; };
+  in { nixosConfigurations = { aurora = system; } // {
+    ${system.config.networking.hostName} = system;
+  }; };
 }
 ''')
-(out/'README').write_text('Run sudo nixos-rebuild switch --flake /etc/nixos to rebuild this machine. machine.nix preserves its filesystem identities; owner.nix is written by firstboot. The password hash remains outside the Nix store.\n')
+(out/'README').write_text('Run sudo nixos-rebuild switch --flake /etc/nixos#aurora to rebuild this machine. The aurora output stays available when the hostname changes. machine.nix preserves its filesystem identities; owner.nix is written by firstboot. The password hash remains outside the Nix store.\n')
 PY
 # Empty identity and host keys are regenerated separately on each Mac.
 rm -f "$target/etc/machine-id" "$target/var/lib/systemd/random-seed" "$target/etc/ssh/"ssh_host_*

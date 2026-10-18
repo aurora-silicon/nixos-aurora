@@ -12,7 +12,7 @@
     nix.settings.extra-substituters = [ "https://aurorasilicon.org/nixos-aurora/cache" ];
     nix.settings.extra-trusted-public-keys = [ (lib.removeSuffix "\n" (builtins.readFile ../keys/cache.pub)) ];
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
-    networking.hostName = "aurora";
+    networking.hostName = lib.mkDefault "aurora";
     networking.networkmanager.enable = true;
     boot.loader.grub.enable = true;
     boot.loader.grub.efiSupport = true;
