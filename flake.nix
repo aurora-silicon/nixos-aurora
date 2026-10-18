@@ -25,11 +25,14 @@
         aurora-minimal = makeSystem "minimal";
       };
       packages.${system} = {
+        bindgen = pkgs.aurora-bindgen;
         aura = pkgs.m1n1;
         uboot = pkgs.uboot-asahi;
         kernel = pkgs.linux-asahi.kernel;
         mesa = pkgs.mesa;
         speakerguardd = pkgs.speakerguardd;
+        bankstown = pkgs.bankstown-lv2;
+        neo-platform = pkgs.aurora-neo-platform-config;
         aurora-bless = pkgs.aurora-bless;
       };
       checks.${system}.profiles = pkgs.runCommand "aurora-profile-evaluation" {

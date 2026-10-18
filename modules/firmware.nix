@@ -1,5 +1,9 @@
 { config, lib, pkgs, ... }:
 let
+  admission = pkgs.runCommand "aurora-peripheral-admission" { } ''
+    install -Dm755 ${../firmware/aurora-peripheral-firmware.sh} $out/bin/aurora-peripheral-admission
+    patchShebangs $out/bin/aurora-peripheral-admission
+  '';
   loadFirmware = pkgs.writeShellApplication {
     name = "aurora-load-vendor-firmware";
     runtimeInputs = [ pkgs.coreutils pkgs.util-linux pkgs.cpio pkgs.kmod pkgs.gnugrep ];
@@ -7,10 +11,10 @@ let
       property=/sys/firmware/devicetree/base/chosen/asahi,efi-system-partition
       if [ ! -r "$property" ]; then exit 0; fi
       uuid=$(tr -d '\000' < "$property")
-      case "$uuid" in
-        ????????-????-????-????-????????????) ;;
-        *) echo 'Invalid Apple EFI partition identity' >&2; exit 1 ;;
-      esac
+      [[ "$uuid" =~ ^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$ ]] || {
+        echo 'Invalid Apple EFI partition identity' >&2; exit 1;
+      }
+      uuid=''${uuid,,}
       destination=/run/aurora-firmware
       mkdir -p "$destination" /run/aurora-esp
       if [ ! -s "$destination/vendorfw/.vendorfw.manifest" ]; then
@@ -19,12 +23,12 @@ let
         test -s /run/aurora-esp/vendorfw/firmware.cpio
         (cd "$destination"; cpio --quiet --extract --no-absolute-filenames < /run/aurora-esp/vendorfw/firmware.cpio)
       fi
-      # Admit devices after their own Mac's firmware is available.
-      modprobe aop || true
-      if tr '\000' '\n' < /sys/firmware/devicetree/base/compatible | grep -qx apple,j700; then
-        modprobe mt7932-fullmac
-        modprobe mt7932_bt_pcie
+      export AURORA_FIRMWARE_ROOT="$destination/vendorfw"
+      export AURORA_ADMIT_BLUETOOTH=0
+      if [[ "''${1:-initrd}" == runtime ]]; then
+        export AURORA_ADMIT_BLUETOOTH=1
       fi
+      ${admission}/bin/aurora-peripheral-admission
     '';
   };
 in {
@@ -39,7 +43,7 @@ in {
     wantedBy = [ "initrd.target" ];
     after = [ "systemd-udev-settle.service" ];
     wants = [ "systemd-udev-settle.service" ];
-    before = [ "sysroot.mount" ];
+    before = [ "sysroot.mount" "cryptsetup-pre.target" "aurora-initrd-root.service" ];
     serviceConfig.Type = "oneshot";
     serviceConfig.ExecStart = "${loadFirmware}/bin/aurora-load-vendor-firmware";
   };
@@ -48,9 +52,10 @@ in {
     description = "Maintain Aurora per-device firmware handoff";
     wantedBy = [ "multi-user.target" ];
     after = [ "local-fs.target" ];
+    before = [ "bluetooth.service" ];
     serviceConfig.Type = "oneshot";
     serviceConfig.RemainAfterExit = true;
-    serviceConfig.ExecStart = "${loadFirmware}/bin/aurora-load-vendor-firmware";
+    serviceConfig.ExecStart = "${loadFirmware}/bin/aurora-load-vendor-firmware runtime";
   };
   # Use the same service-based early boot as Fedora to preserve firmware order.
   boot.initrd.systemd.enable = lib.mkDefault true;

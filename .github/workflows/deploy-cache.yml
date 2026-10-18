@@ -1,0 +1,47 @@
+name: Deploy authenticated Nix cache snapshot
+on:
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: Immutable release with signed NARs and cache-metadata.tar.gz
+        required: true
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: nix-cache-publication
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04-arm
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+      - name: Authenticate every cache entry and NAR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          [[ $RELEASE_TAG =~ ^cache-[A-Za-z0-9._-]+$ ]]
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern cache-metadata.tar.gz --dir snapshot
+          python3 - <<'PY'
+          import tarfile
+          with tarfile.open('snapshot/cache-metadata.tar.gz') as archive:
+              archive.extractall('site', filter='data')
+          PY
+          nix store verify --store "file://$PWD/site/cache" --all --sigs-needed 1 \
+            --trusted-public-keys "$(cat keys/cache.pub)"
+          cp keys/cache.pub site/cache.pub
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

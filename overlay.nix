@@ -1,5 +1,6 @@
 final: prev:
 let
+  kernelLLVM = final.llvmPackages_22;
   pins = builtins.fromJSON (builtins.readFile ./sources.json);
   source = name: final.fetchurl {
     name = "${name}-${pins.${name}.commit}.tar.gz";
@@ -14,34 +15,52 @@ let
     doCheck = true;
   } // extra);
 in {
+  aurora-bindgen = final.callPackage ./bindgen { llvmPackages = kernelLLVM; };
   linux-asahi = final.lib.makeOverridable ({ _kernelPatches ? [ ] }:
-    final.lib.recurseIntoAttrs (final.linuxPackagesFor (final.buildLinux {
-      pname = "linux-aurora";
-      version = "7.2.10";
-      modDirVersion = "7.2.10";
-      src = source "kernel-aurora";
-      extraMeta.branch = "7.2";
-      kernelPatches = [ { name = "Aurora Rust drivers"; patch = null; features.rust = true; } ] ++ _kernelPatches;
-      structuredExtraConfig = with final.lib.kernel; {
-      ARM64_4K_PAGES = no;
-      ARM64_16K_PAGES = yes;
-      DRM_ASAHI = module;
-      RUST = yes;
-      APPLE_WATCHDOG = yes;
-      APPLE_M1_CPU_PMU = yes;
-      SERIAL_APPLE_DOCKCHANNEL = yes;
-      SERIAL_APPLE_DOCKCHANNEL_EARLYCON = yes;
-      PCIE_APPLE_PIODMA_DIAG = yes;
-      MT7932_FULLMAC = module;
-      BT_MTK7932_PCIE = module;
-      SPI_APPLE_QSPI = module;
-      RTC_DRV_APPLE_PMU = module;
-      SND_SOC_APPLE_T8140_AOP_AUDIO = module;
-      DRM_ACCEL_ANE = module;
-      TRUSTED_KEYS = yes;
-      APPLE_SEP = yes;
-    };
-    }))) { };
+    final.lib.recurseIntoAttrs (final.linuxPackagesFor (((final.callPackage
+      (final.path + "/pkgs/os-specific/linux/kernel/build.nix") {
+        rust-bindgen-unwrapped = final.aurora-bindgen;
+      }) {
+        pname = "linux-aurora";
+        version = "7.2.10";
+        modDirVersion = "7.2.10";
+        src = source "kernel-aurora";
+        configfile = ./kernel/config;
+        stdenv = kernelLLVM.stdenv;
+        # Keep the native wrapped host compiler for host tools/RPATHs;
+        # compile the Apple kernel and Rust bindings with pinned LLVM.
+        extraMakeFlags = [ "LLVM=1" "LOCALVERSION=" "HOSTLDFLAGS=-fuse-ld=bfd -Wl,-rpath,${final.lib.getLib final.openssl}/lib"
+          "CC=${kernelLLVM.clang-unwrapped}/bin/clang"
+          "LD=${kernelLLVM.lld}/bin/ld.lld"
+          "AR=${kernelLLVM.llvm}/bin/llvm-ar"
+          "NM=${kernelLLVM.llvm}/bin/llvm-nm"
+          "STRIP=${kernelLLVM.llvm}/bin/llvm-strip"
+          "OBJCOPY=${kernelLLVM.llvm}/bin/llvm-objcopy"
+          "OBJDUMP=${kernelLLVM.llvm}/bin/llvm-objdump"
+          "READELF=${kernelLLVM.llvm}/bin/llvm-readelf"
+          "CFLAGS_MODULE=-I${final.lib.getLib kernelLLVM.clang-unwrapped}/lib/clang/${final.lib.versions.major kernelLLVM.clang-unwrapped.version}/include"
+          "CFLAGS_KERNEL=-I${final.lib.getLib kernelLLVM.clang-unwrapped}/lib/clang/${final.lib.versions.major kernelLLVM.clang-unwrapped.version}/include"
+        ];
+        extraMeta.branch = "7.2";
+        features.rust = true;
+        kernelPatches = _kernelPatches;
+      }).overrideAttrs (old: {
+        env = old.env // { RUSTC_BOOTSTRAP = "1"; };
+        nativeBuildInputs = old.nativeBuildInputs ++ [ final.binutils kernelLLVM.lld ];
+        # Refresh compiler capability probes using the same resolved hardware
+        # configuration as Fedora. Validate the shared fragments afterwards.
+        configurePhase = final.lib.replaceStrings
+          [ "ln -sv" " oldconfig" ] [ "cp -v" " olddefconfig" ] old.configurePhase;
+        postConfigure = ''
+          python3 ${./kernel/validate-config.py} ${./kernel/common.config} "$buildRoot/.config"
+          python3 ${./kernel/validate-config.py} ${./kernel/neo.config} "$buildRoot/.config"
+          grep -qx 'CONFIG_RUST=y' "$buildRoot/.config"
+          grep -qx 'CONFIG_ARM64_16K_PAGES=y' "$buildRoot/.config"
+          make "''${makeFlags[@]}" rustavailable
+          make "''${makeFlags[@]}" certs/
+          "$buildRoot/certs/extract-cert" "" "$TMPDIR/aurora-empty-cert"
+        '';
+      })))) { };
   m1n1 = (prev.m1n1.override { customLogo = null; }).overrideAttrs (old: {
     pname = "aura";
     version = pins.aura.version;
@@ -71,14 +90,7 @@ in {
     version = pins.uboot-aurora.version;
     patches = [ ];
   });
-  mesa = (prev.mesa.override {
-    galliumDrivers = [ "asahi" "zink" "softpipe" ];
-    vulkanDrivers = [ "asahi" ];
-  }).overrideAttrs (old: {
-    src = source "mesa-aurora";
-    version = pins.mesa-aurora.version;
-    patches = [ ];
-  });
+  mesa = final.callPackage ./mesa.nix { mesa = prev.mesa; src = source "mesa-aurora"; };
   asahi-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
     version = pins.aurora-audio.version;
@@ -93,7 +105,32 @@ in {
     postInstall = ''
       mkdir -p $out/share/speakerguardd
       cp -r conf/* $out/share/speakerguardd/
+      mkdir -p $out/lib/systemd/system $out/lib/udev/rules.d $out/libexec/speakerguardd
+      substitute speakerguardd.service $out/lib/systemd/system/speakerguardd.service \
+        --replace-fail "ExecStart=/usr/bin/speakerguardd -c /usr/share/speakerguardd" \
+          "ExecStart=$out/bin/speakerguardd -c $out/share/speakerguardd -C AppleJ700" \
+        --replace-fail "Description=Speaker Protection Daemon (feed-forward)" \
+          $'Description=Speaker Protection Daemon (feed-forward)\nStartLimitIntervalSec=60\nStartLimitBurst=10' \
+        --replace-fail $'StartLimitInterval=60\nStartLimitBurst=10\n' ""
+      cp 95-speakerguardd.rules $out/lib/udev/rules.d/
+      cp ${./firmware/use-feedback-guard} $out/libexec/speakerguardd/use-feedback-guard
+      chmod +x $out/libexec/speakerguardd/use-feedback-guard
+      patchShebangs $out/libexec/speakerguardd/use-feedback-guard
     '';
+  };
+  bankstown-lv2 = prev.bankstown-lv2.overrideAttrs (old: {
+    src = source "bankstown";
+    version = pins.bankstown.version;
+    cargoDeps = final.rustPlatform.importCargoLock { lockFile = ./locks/bankstown.Cargo.lock; };
+  });
+  aurora-neo-platform-config = final.stdenvNoCC.mkDerivation {
+    pname = "aurora-neo-platform-config";
+    version = pins.aurora-neo-platform-config.version;
+    src = source "aurora-neo-platform-config";
+    dontBuild = true;
+    doCheck = true;
+    checkPhase = "sh tests/run.sh";
+    installFlags = [ "PREFIX=$(out)" ];
   };
   aurora-bless = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
     cargoBuildFlags = [ "-p" "asahi-bless" ];

@@ -1,0 +1,6 @@
+{
+  "kernel_commit": "e0fa50d863ee7747de0af16525dfd974cdd826f8",
+  "config_source": "The shared Aurora config and common/Neo fragments, resolved by the native Fedora 44 build; compiler probes are refreshed with olddefconfig in the Nix toolchain.",
+  "rpm_sha256": "36ba552ea706c5d35d626f0e08a3702b7f2e0401aeb20e09ed138418f40b5383",
+  "config_sha256": "ad7fd6d9f67038844e6e68da65b69b8f08b478f0c04ef90aad04e3b93f60e399"
+}
