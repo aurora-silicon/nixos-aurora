@@ -15,6 +15,7 @@ let
     doCheck = true;
   } // extra);
 in {
+  aurora-firstboot = final.callPackage ./firstboot.nix { };
   aurora-bindgen = final.callPackage ./bindgen { llvmPackages = kernelLLVM; };
   linux-asahi = final.lib.makeOverridable ({ _kernelPatches ? [ ] }:
     final.lib.recurseIntoAttrs (final.linuxPackagesFor (((final.callPackage

@@ -36,8 +36,7 @@ jobs:
           with tarfile.open('snapshot/cache-metadata.tar.gz') as archive:
               archive.extractall('site', filter='data')
           PY
-          nix store verify --store "file://$PWD/site/cache" --all --sigs-needed 1 \
-            --trusted-public-keys "$(cat keys/cache.pub)"
+          python3 scripts/verify-published-cache.py --cache-dir site/cache --public-key keys/cache.pub
           cp keys/cache.pub site/cache.pub
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

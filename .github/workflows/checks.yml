@@ -22,7 +22,7 @@ jobs:
       - name: Evaluate all profiles and hardware packages
         run: |
           nix flake check --no-build
-          nix build --no-link .#checks.aarch64-linux.profiles
+          nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image
   hardware:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
@@ -30,7 +30,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        package: [aura, uboot, kernel, mesa, speakerguardd, bankstown, neo-platform, aurora-bless]
+        package: [firstboot, aura, uboot, kernel, mesa, speakerguardd, bankstown, neo-platform, aurora-bless]
     steps:
       - uses: actions/checkout@v5
       - uses: cachix/install-nix-action@v31

@@ -88,5 +88,14 @@
     "archive_root": "bankstown-8e6f96f06d0e51c2a1dc513cf2fdf57ab32a2a64",
     "sha256": "11caa8cb41dfe724692414a378faf7425a0319ced2ad90c2eeaa90710d3eee38",
     "nix_hash": "sha256-Ecqoy0Hf5yRpJBSjePr3QloDGc7SrZDC7qqQcQ0+7jg="
+  },
+  "aurora-firstboot": {
+    "repository": "https://github.com/aurora-silicon/aurora-platform",
+    "commit": "be0fd6950ee4ea50438e130457f9b4066b577539",
+    "version": "0.1.1",
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-platform/tar.gz/be0fd6950ee4ea50438e130457f9b4066b577539",
+    "archive_root": "aurora-platform-be0fd6950ee4ea50438e130457f9b4066b577539",
+    "sha256": "ef045827186a5c76f0b894cff7ae6296a7c80a994cd81a546800505721160717",
+    "nix_hash": "sha256-7wRYJxhqXHbwuJTP965ilqfICplM2BpUaABQVyEWBxc="
   }
 }

@@ -28,7 +28,7 @@ if grep -aq 'apple,j700' "$compatible"; then
     mediatek/MT7932B1_OS_TypeB_0.1.133.0_260128190103.bin \
     mediatek/MT7932_PTB_IzubaA_0.1.0.0_20251021141303.ptx \
     mediatek/j700-mt7932-btcal.bin mediatek/j700-mt7932-bdaddr.bin \
-    mediatek/mt7932/policy/US.bin mediatek/mt7932/policy/world-XZ.bin; do
+    mediatek/mt7932/policy/world-XZ.bin; do
     if ! has_firmware "$name"; then
       echo "Aurora: required firmware is missing: $name; peripheral probe deferred" >&2
       radio_ready=false

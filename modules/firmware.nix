@@ -4,9 +4,10 @@ let
     install -Dm755 ${../firmware/aurora-peripheral-firmware.sh} $out/bin/aurora-peripheral-admission
     patchShebangs $out/bin/aurora-peripheral-admission
   '';
+  firmwareTools = [ pkgs.coreutils pkgs.util-linux pkgs.cpio pkgs.kmod pkgs.gnugrep pkgs.bash ];
   loadFirmware = pkgs.writeShellApplication {
     name = "aurora-load-vendor-firmware";
-    runtimeInputs = [ pkgs.coreutils pkgs.util-linux pkgs.cpio pkgs.kmod pkgs.gnugrep ];
+    runtimeInputs = firmwareTools;
     text = ''
       property=/sys/firmware/devicetree/base/chosen/asahi,efi-system-partition
       if [ ! -r "$property" ]; then exit 0; fi
@@ -47,7 +48,7 @@ in {
     serviceConfig.Type = "oneshot";
     serviceConfig.ExecStart = "${loadFirmware}/bin/aurora-load-vendor-firmware";
   };
-  boot.initrd.systemd.storePaths = lib.mkIf config.boot.initrd.systemd.enable [ loadFirmware ];
+  boot.initrd.systemd.storePaths = lib.mkIf config.boot.initrd.systemd.enable ([ loadFirmware admission ] ++ firmwareTools);
   systemd.services.aurora-vendor-firmware = {
     description = "Maintain Aurora per-device firmware handoff";
     wantedBy = [ "multi-user.target" ];
