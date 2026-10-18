@@ -78,7 +78,7 @@ in {
       wantedBy = [ "multi-user.target" ];
       wants = [ "network-pre.target" ];
       after = [ "local-fs.target" ];
-      before = [ "network-pre.target" "NetworkManager.service" ];
+      before = [ "network-pre.target" "NetworkManager.service" "systemd-hostnamed.service" ];
       unitConfig.ConditionPathExists = "/var/lib/aurora/firstboot/complete";
       serviceConfig.Type = "oneshot";
       path = [ pkgs.coreutils ];
@@ -95,6 +95,12 @@ in {
         mv -Tf /etc/hostname.aurora-new /etc/hostname
         printf '%s\n' "$hostname" > /proc/sys/kernel/hostname
       '';
+    };
+    # NixOS normally directs hostnamed to its immutable generation's hostname.
+    # The factory generation must instead read the owner-updated /etc file.
+    systemd.services.systemd-hostnamed = lib.mkIf
+      (lib.filterAttrs (_: user: user.isNormalUser) config.users.users == {}) {
+      environment.SYSTEMD_ETC_HOSTNAME = lib.mkForce "/etc/hostname";
     };
     systemd.services.display-manager = lib.mkIf (config.aurora.desktop != "minimal") {
       requires = [ "aurora-firstboot.service" ];
