@@ -19,6 +19,19 @@
     boot.loader.grub.efiInstallAsRemovable = true;
     boot.loader.grub.device = "nodev";
     boot.loader.efi.canTouchEfiVariables = false;
+    # The Apple kernel profile has no AHCI driver. Keep the Apple/USB/NVMe
+    # initrd set explicit instead of inheriting generic PC storage modules.
+    boot.initrd.availableKernelModules = lib.mkForce [
+      "apple-mailbox" "apple_nvmem_spmi" "nvme_apple" "pinctrl-apple-gpio"
+      "macsmc" "macsmc-power" "macsmc-input" "macsmc-hwmon" "macsmc-reboot"
+      "i2c-pasemi-platform" "tps6598x" "sn201202x" "apple-dart" "dwc3"
+      "dwc3-of-simple" "xhci-pci" "pcie-apple" "gpio_macsmc" "phy-apple-atc"
+      "nvmem_apple_efuses" "spi-apple" "spi-hid-apple" "spi-hid-apple-of"
+      "rtc-macsmc" "spmi-apple-controller" "apple-dockchannel" "dockchannel-hid"
+      "apple-rtkit-helper" "usb-storage" "xhci-plat-hcd" "usbhid" "hid_generic"
+      "nvme" "virtio_blk" "virtio_pci" "uas" "sd_mod"
+      "vfat" "dm-crypt" "btrfs" "ext4" "aop" "mt7932-fullmac" "mt7932_bt_pcie"
+    ];
     boot.supportedFilesystems = [ "ext4" "btrfs" ];
     hardware.graphics.enable = true;
     services.desktopManager.plasma6.enable = config.aurora.desktop == "kde";
