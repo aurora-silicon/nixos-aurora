@@ -9,6 +9,8 @@
   config = {
     hardware.asahi.enable = true;
     nixpkgs.hostPlatform = "aarch64-linux";
+    nix.settings.extra-substituters = [ "https://aurorasilicon.org/nixos-aurora/cache" ];
+    nix.settings.extra-trusted-public-keys = [ (lib.removeSuffix "\n" (builtins.readFile ../keys/cache.pub)) ];
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
     networking.hostName = "aurora";
     networking.networkmanager.enable = true;

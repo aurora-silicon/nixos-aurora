@@ -1,0 +1,17 @@
+{
+  "kde": {
+    "rootUUID": "8e3c084b-44d8-5293-a753-ae3288c9274b",
+    "bootUUID": "41dc57cf-2d07-50f9-ba96-7c95cde85ada",
+    "efiUUID": "1FE0-7AA4"
+  },
+  "gnome": {
+    "rootUUID": "d88beba4-826d-5e1e-bba8-b632ccfa92c4",
+    "bootUUID": "2025cecd-807c-5835-9ad4-e547cfdeb279",
+    "efiUUID": "64AA-96A5"
+  },
+  "minimal": {
+    "rootUUID": "3e38403c-c023-5cd8-ad8a-2b5201ea9a1e",
+    "bootUUID": "8fa8c04c-7c24-55db-bbf5-5b077e43a6a5",
+    "efiUUID": "1F0F-7CA6"
+  }
+}

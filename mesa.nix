@@ -2,7 +2,7 @@
 (mesa.override { stdenv = llvmPackages.stdenv; }).overrideAttrs (old: {
   inherit src;
   version = "26.3.0";
-  patches = [ ./mesa-test-assertions.patch ];
+  patches = [ (builtins.toFile "aurora-mesa-test-assertions.patch" (builtins.readFile ./mesa-test-assertions.patch)) ];
   outputs = [ "out" ];
   mesonAutoFeatures = "auto";
   # Nix splits Clang's library output from LLVM's library directory.

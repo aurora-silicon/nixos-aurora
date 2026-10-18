@@ -73,15 +73,15 @@ in {
       requires = [ "aurora-firstboot.service" ];
       after = [ "aurora-firstboot.service" ];
     };
-    environment.etc."systemd/system/getty@.service.d/aurora-firstboot.conf".text = ''
-      [Unit]
-      ConditionPathExists=!/var/lib/aurora/firstboot/pending
-      After=aurora-firstboot.service
-    '';
-    environment.etc."systemd/system/serial-getty@.service.d/aurora-firstboot.conf".text = ''
-      [Unit]
-      ConditionPathExists=!/var/lib/aurora/firstboot/pending
-      After=aurora-firstboot.service
-    '';
+    systemd.services."getty@" = {
+      overrideStrategy = "asDropin";
+      unitConfig.ConditionPathExists = "!/var/lib/aurora/firstboot/pending";
+      after = [ "aurora-firstboot.service" ];
+    };
+    systemd.services."serial-getty@" = {
+      overrideStrategy = "asDropin";
+      unitConfig.ConditionPathExists = "!/var/lib/aurora/firstboot/pending";
+      after = [ "aurora-firstboot.service" ];
+    };
   };
 }

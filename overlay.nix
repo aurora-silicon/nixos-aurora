@@ -1,5 +1,11 @@
 final: prev:
 let
+  stableFile = path: final.writeText (builtins.baseNameOf path) (builtins.readFile path);
+  kernelConfig = final.lib.listToAttrs (final.lib.concatMap (line:
+    let matched = builtins.match "(CONFIG_[^=]+)=([ym])" line;
+    in final.lib.optional (matched != null) {
+      name = builtins.elemAt matched 0; value = builtins.elemAt matched 1;
+    }) (final.lib.splitString "\n" (builtins.readFile ./kernel/config)));
   kernelLLVM = final.llvmPackages_22;
   pins = builtins.fromJSON (builtins.readFile ./sources.json);
   source = name: final.fetchurl {
@@ -26,7 +32,8 @@ in {
         version = "7.2.10";
         modDirVersion = "7.2.10";
         src = source "kernel-aurora";
-        configfile = ./kernel/config;
+        configfile = stableFile ./kernel/config;
+        config = kernelConfig;
         stdenv = kernelLLVM.stdenv;
         # Keep the native wrapped host compiler for host tools/RPATHs;
         # compile the Apple kernel and Rust bindings with pinned LLVM.
@@ -53,8 +60,8 @@ in {
         configurePhase = final.lib.replaceStrings
           [ "ln -sv" " oldconfig" ] [ "cp -v" " olddefconfig" ] old.configurePhase;
         postConfigure = ''
-          python3 ${./kernel/validate-config.py} ${./kernel/common.config} "$buildRoot/.config"
-          python3 ${./kernel/validate-config.py} ${./kernel/neo.config} "$buildRoot/.config"
+          python3 ${stableFile ./kernel/validate-config.py} ${stableFile ./kernel/common.config} "$buildRoot/.config"
+          python3 ${stableFile ./kernel/validate-config.py} ${stableFile ./kernel/neo.config} "$buildRoot/.config"
           grep -qx 'CONFIG_RUST=y' "$buildRoot/.config"
           grep -qx 'CONFIG_ARM64_16K_PAGES=y' "$buildRoot/.config"
           make "''${makeFlags[@]}" rustavailable
@@ -114,7 +121,7 @@ in {
           $'Description=Speaker Protection Daemon (feed-forward)\nStartLimitIntervalSec=60\nStartLimitBurst=10' \
         --replace-fail $'StartLimitInterval=60\nStartLimitBurst=10\n' ""
       cp 95-speakerguardd.rules $out/lib/udev/rules.d/
-      cp ${./firmware/use-feedback-guard} $out/libexec/speakerguardd/use-feedback-guard
+      cp ${stableFile ./firmware/use-feedback-guard} $out/libexec/speakerguardd/use-feedback-guard
       chmod +x $out/libexec/speakerguardd/use-feedback-guard
       patchShebangs $out/libexec/speakerguardd/use-feedback-guard
     '';

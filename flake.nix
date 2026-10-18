@@ -17,14 +17,15 @@
           ./modules/image.nix ];
       };
       imageProbe = (makeSystem "minimal").extendModules {
-        modules = [ { aurora.imageLayout = {
+        modules = [ ({ lib, ... }: { aurora.imageLayout = lib.mkForce {
           rootUUID = "eb688499-cc41-4c4c-b00b-dbf33e05427c";
           bootUUID = "3429647d-29a2-411c-8924-2545fda1ec34";
           efiUUID = "1E08-14ED";
-        }; } ];
+        }; }) ];
       };
     in {
       overlays.default = import ./overlay.nix;
+      nixosModules.image = import ./modules/image.nix;
       nixosModules.default = import ./modules/aurora.nix;
       nixosConfigurations = {
         aurora-kde = makeSystem "kde";

@@ -1,0 +1,99 @@
+#!/bin/bash
+# Build a native installer image from a previously built NixOS system closure.
+set -euo pipefail
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+desktop=${1:?kde, gnome or minimal required}
+system=${2:?built NixOS system path required}
+installer=${3:?built nixos-install path required}
+aura=${4:?built Aura path required}
+[[ $desktop =~ ^(kde|gnome|minimal)$ && $system == /nix/store/* && -x $system/bin/switch-to-configuration ]]
+[[ -x $installer/bin/nixos-install && -s $aura/share/aura/stage1/aura-raw.bin ]]
+[[ $(id -u) == 0 && $(uname -m) == aarch64 ]]
+profile=nixos-$desktop
+out=$root/out/$profile-installer
+[[ ! -e $out ]]
+mkdir -p "$out" "$root/out/$profile-build"
+image=$root/out/$profile-build/aurora.raw
+size=8G;[[ $desktop == minimal ]] || size=24G
+truncate -s "$size" "$image"
+printf 'label: gpt\nsector-size: 4096\n\nstart=2048,size=131072,type=U\nsize=262144,type=BC13C2FF-59E6-4262-A352-B275FD6F7172\ntype=B921B045-1DF0-41C3-AF44-4C6F280D3FAE\n' | sfdisk --sector-size 4096 "$image"
+loop='';target=$(mktemp -d /tmp/aurora-nixos-image.XXXXXX);chmod 0755 "$target"
+cleanup() {
+  local status=$? clean=1
+  trap - EXIT
+  if mountpoint -q "$target"; then umount -R "$target" || clean=0; fi
+  if (( clean )); then [[ -z $loop ]] || losetup -d "$loop"; rmdir "$target"; else echo "Image mounts remain at $target" >&2;status=1;fi
+  exit "$status"
+}
+trap cleanup EXIT
+read -r root_uuid boot_uuid efi_uuid < <(python3 - "$root/images/layouts.json" "$desktop" <<'PY'
+import json,sys
+p=json.load(open(sys.argv[1]))[sys.argv[2]]
+print(p['rootUUID'],p['bootUUID'],p['efiUUID'])
+PY
+)
+loop=$(losetup --find --show --partscan --sector-size 4096 "$image");udevadm settle
+mkfs.vfat -F32 -i "${efi_uuid//-/}" -n AURORA_EFI "${loop}p1"
+mkfs.ext4 -F -U "$boot_uuid" -L AURORA_BOOT "${loop}p2"
+mkfs.btrfs -f -U "$root_uuid" -L AURORA_ROOT -s 4096 -n 16384 "${loop}p3"
+mount "${loop}p3" "$target"
+btrfs subvolume create "$target/root";btrfs subvolume create "$target/home";umount "$target"
+mount -o subvol=root,compress=zstd:1 "${loop}p3" "$target"
+mkdir -p "$target/boot/efi"
+mount "${loop}p2" "$target/boot";mkdir -p "$target/boot/efi";mount "${loop}p1" "$target/boot/efi"
+"$installer/bin/nixos-install" --root "$target" --system "$system" --no-root-passwd --no-channel-copy
+install -d -m 0700 "$target/var/lib/aurora/firstboot"
+install -d -m 0755 "$target/usr/lib/aurora" "$target/etc/nixos" "$target/boot/efi/aurora"
+printf 'aurora-btrfs-v1\n' > "$target/usr/lib/aurora/image-format"
+touch "$target/var/lib/aurora/firstboot/pending"
+install -Dm644 "$aura/share/aura/stage1/aura-raw.bin" "$target/boot/efi/aurora/stage1.bin"
+revision=$(git -C "$root" rev-parse HEAD)
+python3 - "$target/etc/nixos" "$revision" "$desktop" "$root/images/layouts.json" <<'PY'
+import json,sys
+from pathlib import Path
+out=Path(sys.argv[1]);revision,desktop=sys.argv[2:4];layout=json.load(open(sys.argv[4]))[desktop]
+(out/'machine.nix').write_text('{ lib, ... }: {\n  aurora.desktop = '+json.dumps(desktop)+';\n  system.stateVersion = lib.mkForce "26.05";\n  aurora.imageLayout = lib.mkForce {\n'+''.join('    '+key+' = '+json.dumps(value)+';\n' for key,value in layout.items())+'  };\n}\n')
+(out/'owner.nix').write_text('{ ... }: {}\n')
+(out/'flake.nix').write_text('''{
+  description = "This Mac's Aurora NixOS configuration";
+  inputs.aurora.url = "github:aurora-silicon/nixos-aurora/'''+revision+'''";
+  outputs = { aurora, ... }: let
+    system = aurora.inputs.nixpkgs.lib.nixosSystem {
+      system = "aarch64-linux";
+      modules = [
+        aurora.inputs.apple-silicon.nixosModules.default
+        aurora.nixosModules.default aurora.nixosModules.image
+        { nixpkgs.overlays = [ aurora.inputs.apple-silicon.overlays.default aurora.overlays.default ]; }
+        ./machine.nix ./owner.nix
+      ];
+    };
+  in { nixosConfigurations.${system.config.networking.hostName} = system; };
+}
+''')
+(out/'README').write_text('Run sudo nixos-rebuild switch --flake /etc/nixos to rebuild this machine. machine.nix preserves its filesystem identities; owner.nix is written by firstboot. The password hash remains outside the Nix store.\n')
+PY
+# Empty identity and host keys are regenerated separately on each Mac.
+rm -f "$target/etc/machine-id" "$target/var/lib/systemd/random-seed" "$target/etc/ssh/"ssh_host_*
+printf 'uninitialized\n' > "$target/etc/machine-id"
+[[ -s $target/boot/efi/m1n1/boot.bin && -s $target/boot/efi/EFI/BOOT/BOOTAA64.EFI ]]
+cp -a "$target/boot/efi" "$out/esp"
+nix path-info --recursive --json "$system" > "$out/closure.json"
+cp "$target/etc/nixos/machine.nix" "$out/machine.nix"
+sync
+umount -R "$target"
+dd if="${loop}p2" of="$out/boot.img" bs=4M conv=sparse status=none
+dd if="${loop}p3" of="$out/root.img" bs=4M conv=sparse status=none
+python3 - "$out" "$profile" "$root_uuid" "$boot_uuid" "$efi_uuid" <<'PY'
+import hashlib,json,sys
+from pathlib import Path
+out=Path(sys.argv[1]);images={}
+for name in ('boot.img','root.img'):
+ p=out/name
+ with p.open('rb') as stream:h=hashlib.file_digest(stream,'sha256').hexdigest()
+ images[name]={'bytes':p.stat().st_size,'sha256':h}
+(out/'image.json').write_text(json.dumps({'schema':1,'installation_profile':sys.argv[2],
+'layout_kind':'nixos-btrfs-v1','root_uuid':sys.argv[3],'boot_uuid':sys.argv[4],'efi_uuid':sys.argv[5],
+'efi_volume_id':sys.argv[5].replace('-',''),'efi_bytes':536870912,'root_subvolume':'root','home_subvolume':'home','images':images},indent=2)+'\n')
+PY
+tar --sparse -C "$out" -cf - . | zstd -T4 -3 -o "$root/out/$profile-filesystems.tar.zst"
+sha256sum "$root/out/$profile-filesystems.tar.zst" > "$root/out/$profile-filesystems.tar.zst.sha256"
