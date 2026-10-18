@@ -7,15 +7,41 @@ from pathlib import Path
 import re
 import shutil
 import tarfile
-import urllib.parse
+
+BASE = r'https://github\.com/aurora-silicon/nixos-aurora/releases/download/cache-[A-Za-z0-9._-]+'
+SIGNED_FIELDS = ('StorePath', 'NarHash', 'NarSize', 'References')
+TRANSPORT_FIELDS = ('Compression', 'FileHash', 'FileSize')
+
+
+def fields(text):
+    result = {}
+    for line in text.splitlines():
+        name, value = line.split(': ', 1)
+        if name != 'Sig' and name in result:
+            raise ValueError('duplicate cache metadata field: ' + name)
+        if name != 'Sig':
+            result[name] = value
+    for name in (*SIGNED_FIELDS, *TRANSPORT_FIELDS, 'URL'):
+        if name not in result:
+            raise ValueError('missing cache metadata field: ' + name)
+    return result
+
+
+def identity(values):
+    return tuple(values[name] for name in SIGNED_FIELDS)
 
 
 def prepare(source, destination, asset_base, previous_metadata=None):
     if destination.exists():
         raise ValueError('output exists; use a new snapshot directory')
-    url = urllib.parse.urlsplit(asset_base)
-    if url.scheme != 'https' or url.hostname != 'github.com' or not re.fullmatch(r'/aurora-silicon/nixos-aurora/releases/download/cache-[A-Za-z0-9._-]+', url.path) or url.query or url.fragment:
+    if not re.fullmatch(BASE, asset_base):
         raise ValueError('expected an immutable Aurora NixOS release asset base')
+    previous_entries = {}
+    if previous_metadata is not None:
+        for previous in sorted(previous_metadata.glob('*.narinfo')):
+            if previous.is_symlink() or not re.fullmatch(r'[a-z0-9]{32}\.narinfo', previous.name):
+                raise ValueError('unsafe previous cache metadata')
+            previous_entries[previous.name] = (previous, fields(previous.read_text()))
     site, assets = destination / 'site/cache', destination / 'assets'
     site.mkdir(parents=True)
     assets.mkdir()
@@ -24,43 +50,50 @@ def prepare(source, destination, asset_base, previous_metadata=None):
         if info.is_symlink() or not re.fullmatch(r'[a-z0-9]{32}\.narinfo', info.name):
             raise ValueError('unsafe cache metadata path')
         text = info.read_text()
-        values = {}
-        for line in text.splitlines():
-            name, value = line.split(': ', 1)
-            values.setdefault(name, []).append(value)
-        nar = values['URL'][0]
+        values = fields(text)
+        nar = values['URL']
         if not re.fullmatch(r'nar/[a-z0-9]+\.nar\.(zst|xz)', nar):
             raise ValueError('unexpected local NAR path')
         path = source / nar
         if not path.is_file() or path.is_symlink():
             raise ValueError('missing NAR archive')
         target = assets / path.name
-        if target.exists() and target.read_bytes() != path.read_bytes():
-            raise ValueError('conflicting NAR asset identity')
-        shutil.copyfile(path, target)
+        transport = asset_base + '/' + path.name
+        reused = None
+        if info.name in previous_entries:
+            previous = previous_entries[info.name][1]
+            if identity(previous) != identity(values):
+                raise ValueError('conflicting signed store identity: ' + info.name)
+            # Reuse a byte-identical immutable transport, retaining the current
+            # NAR signature. The deploy gate still verifies every HTTP NAR.
+            if (re.fullmatch(BASE + '/' + re.escape(path.name), previous['URL'])
+                    and all(previous[name] == values[name] for name in TRANSPORT_FIELDS)):
+                reused = transport = previous['URL']
+        if reused is None:
+            if target.exists() and target.read_bytes() != path.read_bytes():
+                raise ValueError('conflicting NAR asset identity')
+            shutil.copyfile(path, target)
         # A Nix cache signature covers path, NAR digest/size and references.
         # Transport location is independent; clients verify the signed NAR.
-        text = text.replace('URL: ' + nar + '\n', 'URL: ' + asset_base + '/' + path.name + '\n')
+        text = text.replace('URL: ' + nar + '\n', 'URL: ' + transport + '\n')
         (site / info.name).write_text(text)
-        with target.open('rb') as stream:
+        with path.open('rb') as stream:
             digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-        records.append({'store_path': values['StorePath'][0], 'asset': target.name,
-                        'bytes': target.stat().st_size, 'sha256': digest})
+        record = {'store_path': values['StorePath'], 'asset': path.name,
+                  'bytes': path.stat().st_size, 'sha256': digest}
+        if reused is not None:
+            record['reused_from'] = reused
+        records.append(record)
     if not records:
         raise ValueError('no signed cache entries')
     shutil.copyfile(source / 'nix-cache-info', site / 'nix-cache-info')
     (destination / 'site/index.html').write_text('Aurora NixOS development binary cache\n')
     (assets / 'manifest.json').write_text(json.dumps({'schema': 1, 'asset_base': asset_base, 'paths': records}, indent=2) + '\n')
     if previous_metadata is not None:
-        for previous in sorted(previous_metadata.glob('*.narinfo')):
-            if previous.is_symlink() or not re.fullmatch(r'[a-z0-9]{32}\.narinfo', previous.name):
-                raise ValueError('unsafe previous cache metadata')
+        for previous, previous_fields in previous_entries.values():
             target = site / previous.name
             if target.exists():
-                def identity(path):
-                    fields = dict(line.split(': ', 1) for line in path.read_text().splitlines() if not line.startswith('Sig: '))
-                    return tuple(fields.get(name) for name in ('StorePath', 'NarHash', 'NarSize', 'References'))
-                if identity(previous) != identity(target):
+                if identity(previous_fields) != identity(fields(target.read_text())):
                     raise ValueError('conflicting signed store identity: ' + previous.name)
             else:
                 # Keep each older immutable transport URL. Deployment verifies
