@@ -1,0 +1,22 @@
+name: Publish signed installer payload
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        type: choice
+        options: [nixos-minimal, nixos-kde, nixos-gnome]
+        default: nixos-minimal
+      image-run:
+        description: Successful Native image workflow run ID
+        required: true
+permissions:
+  contents: write
+  actions: read
+jobs:
+  delivery:
+    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@e3336103e12b2e609b42ccb855ec8d608cdabbd9
+    with:
+      profile: ${{ inputs.profile }}
+      image-run: ${{ inputs.image-run }}
+    secrets:
+      catalog-signing-key: ${{ secrets.INSTALLER_CATALOG_SIGNING_KEY }}
