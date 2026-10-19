@@ -1,0 +1,78 @@
+name: Publish current native Nix cache snapshot
+on:
+  workflow_dispatch:
+    inputs:
+      build-run:
+        description: Successful native build IDs, newest first
+        required: true
+      base-release:
+        description: Previous immutable cache snapshot
+        required: true
+      release-tag:
+        description: New immutable cache snapshot tag
+        required: true
+permissions:
+  contents: write
+  actions: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: nix-cache-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@v31
+      - name: Authenticate current outputs and collect signed caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN: ${{ inputs.build-run }}
+          BASE_RELEASE: ${{ inputs.base-release }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          set -euo pipefail
+          [[ $BASE_RELEASE =~ ^cache-[A-Za-z0-9._-]+$ ]]
+          [[ $RELEASE_TAG =~ ^cache-[A-Za-z0-9._-]+$ ]]
+          [[ $BASE_RELEASE != "$RELEASE_TAG" ]]
+          gh release download "$BASE_RELEASE" --repo "$GITHUB_REPOSITORY" \
+            --pattern cache-metadata.tar.gz --dir previous
+          python3 - <<'PY'
+          import re, tarfile
+          from pathlib import Path
+          with tarfile.open('previous/cache-metadata.tar.gz') as archive:
+              entries = archive.getmembers()
+              assert len(entries) < 30000 and sum(item.size for item in entries) < 64 * 1024**2
+              for item in entries:
+                  assert item.isfile() and (item.name == 'index.html'
+                      or re.fullmatch(r'cache/(nix-cache-info|[a-z0-9]{32}[.]narinfo)', item.name))
+              archive.extractall('previous/site', filter='data')
+          PY
+          read -r -a runs <<< "$BUILD_RUN"
+          python3 scripts/collect-cache-inputs.py --runs "${runs[@]}" --output candidate-cache \
+            --previous-metadata previous/site/cache
+          python3 scripts/prepare-cache-publication.py --cache candidate-cache --output publication \
+            --previous-metadata previous/site/cache \
+            --asset-base "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
+          cp candidate-cache.json publication/assets/native-input-proof.json
+      - name: Publish immutable signed cache assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          gh release create "$RELEASE_TAG" publication/assets/* --target "$GITHUB_SHA" \
+            --prerelease --title "Aurora NixOS $RELEASE_TAG" \
+            --notes 'Current native hardware outputs and signed cache assets. Public cache activation separately verifies every signature and NAR over HTTP; physical installation qualification is separate.'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cache-publication-evidence
+          path: |
+            candidate-cache.json
+            publication/assets/manifest.json
