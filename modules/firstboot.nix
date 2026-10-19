@@ -56,7 +56,7 @@ in {
     systemd.services.aurora-firstboot = {
       description = "Create the Aurora Linux owner account";
       wantedBy = [ "multi-user.target" ];
-      after = [ "local-fs.target" "systemd-user-sessions.service" "systemd-vconsole-setup.service" ];
+      after = [ "local-fs.target" "systemd-user-sessions.service" "systemd-vconsole-setup.service" "plymouth-start.service" ];
       before = [ "display-manager.service" "getty@tty1.service" ];
       unitConfig.RequiresMountsFor = [ "/boot" "/boot/efi" "/home" ];
       unitConfig.ConditionPathExists = "/var/lib/aurora/firstboot/pending";
@@ -65,7 +65,7 @@ in {
         RemainAfterExit = true;
         TimeoutStartSec = "infinity";
         ExecStart = "${pkgs.aurora-firstboot}/lib/aurora/aurora-firstboot";
-        StandardInput = "tty"; StandardOutput = "tty"; StandardError = "tty";
+        StandardInput = "tty-force"; StandardOutput = "tty"; StandardError = "tty";
         TTYPath = "/dev/tty1"; TTYReset = true; TTYVHangup = true;
       };
     };
