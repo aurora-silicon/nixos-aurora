@@ -37,7 +37,7 @@ jobs:
       - name: Evaluate all profiles and hardware packages
         run: |
           nix flake check --no-build
-          nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image
+          nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition
   hardware:
     needs: evaluate
     if: needs.evaluate.outputs.packages != '[]'

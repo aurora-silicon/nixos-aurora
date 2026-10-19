@@ -4,10 +4,13 @@ The shared kernel builds SEP as a module. The root filesystem supplies the
 identity state, boot-container device link and per-device calibration, so an
 early built-in probe cannot initialize the driver reliably.
 
+An older running kernel with SEP built in is skipped until the module-based
+kernel boots.
+
 The boot timer starts the loader after local filesystems are available, without
 holding up the desktop. fprintd also joins initialization when requested. The
 modprobe alias blacklist only defers automatic probing: the service explicitly
-loads SEP on every supported boot. Dracut omits the module from the initramfs.
+loads SEP on every supported boot. Fedora uses Dracut to omit the module from the initramfs.
 
 Calibration extraction reads the local boot container without modifying it. A
 private cache is bound to its partition identity and SHA-256. The device-tree

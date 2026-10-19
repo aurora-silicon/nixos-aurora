@@ -49,6 +49,15 @@
         aurora-bless = pkgs.aurora-bless;
       };
       checks.${system} = {
+      sep-kernel-transition = pkgs.runCommand "aurora-sep-running-kernel-check" {
+        nativeBuildInputs = [ pkgs.python3 pkgs.gnugrep ];
+        sepCondition = imageProbe.config.systemd.services.aurora-sep.serviceConfig.ExecCondition;
+        probeShell = pkgs.runtimeShell;
+      } ''
+        python3 ${./checks/sep-kernel-transition.py}
+        touch $out
+      '';
+
       firstboot-image = pkgs.runCommand "aurora-firstboot-image-evaluation" {
         units = builtins.toJSON {
           firstboot = imageProbe.config.systemd.services.aurora-firstboot.serviceConfig;

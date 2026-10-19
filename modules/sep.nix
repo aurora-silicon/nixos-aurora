@@ -19,11 +19,11 @@
       RequiresMountsFor = "/var/lib";
       ConditionPathExists = "/dev/disk/by-partlabel/iBootSystemContainer";
     };
-    path = [ pkgs.kmod ];
+    path = [ pkgs.kmod pkgs.gnugrep ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
-      ExecCondition = "${pkgs.runtimeShell} -c 'modinfo apple_sep >/dev/null 2>&1'";
+      ExecCondition = "${pkgs.runtimeShell} -c 'modinfo -F filename apple_sep 2>/dev/null | grep -Eq \"[.]ko([.](gz|xz|zst))?$\"'";
       ExecStartPre = "${pkgs.aurora-sep}/libexec/aurora/prepare-sep-calibration";
       ExecStart = "${pkgs.aurora-sep}/libexec/aurora-sep-load";
       StateDirectory = "aurora-sep";
