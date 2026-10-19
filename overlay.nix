@@ -25,6 +25,8 @@ in {
   libfprint = prev.libfprint.overrideAttrs (old: {
     src = source "libfprint";
     version = pins.libfprint.version;
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.umockdev ];
+    nativeInstallCheckInputs = [ final.umockdev (final.python3.withPackages (p: [ p.pygobject3 p.pycairo ])) ];
     patches = (old.patches or [ ]) ++ map stableFile [
       ./sep/libfprint-1.94.100-apple-sep.patch
       ./sep/0002-aurora-report-unusable-captures-as-retries.patch

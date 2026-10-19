@@ -21,16 +21,8 @@ jobs:
       packages: ${{ steps.plan.outputs.packages }}
     steps:
       - uses: actions/checkout@v5
-      - id: plan
-        run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json,os
-          from pathlib import Path
-          names=['firstboot','aura','uboot','kernel','mesa','speakerguardd','bankstown','neo-platform','aurora-bless','avd-fw','upower','sep','libfprint']
-          requested=json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()).get('inputs',{}).get('packages','').split()
-          if requested and not set(requested)<=set(names): raise SystemExit('Unknown requested package')
-          print('packages='+json.dumps(sorted(set(requested)) if requested else names))
-          PY
+        with:
+          fetch-depth: 0
       - name: Check incremental cache publication
         run: python3 -m unittest discover -s tests
       - uses: cachix/install-nix-action@v31
@@ -39,6 +31,9 @@ jobs:
             experimental-features = nix-command flakes
             extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
             extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
+      - id: plan
+        name: Select changed derivations from committed Git flakes
+        run: python3 scripts/ci-plan.py >> "$GITHUB_OUTPUT"
       - name: Evaluate all profiles and hardware packages
         run: |
           nix flake check --no-build
