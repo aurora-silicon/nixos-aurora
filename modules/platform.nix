@@ -1,6 +1,7 @@
 { pkgs, ... }:
 {
   hardware.bluetooth.enable = true;
+  hardware.enableRedistributableFirmware = true;
   hardware.firmware = [ pkgs.aurora-avd-firmware ];
   services.upower.enable = true;
   hardware.wirelessRegulatoryDatabase = true;
