@@ -12,7 +12,7 @@ nix build .#aura .#uboot .#kernel .#mesa
 
 `nixosConfigurations.aurora-kde`, `.aurora-gnome` and `.aurora-minimal` share the hardware module and kernel pin. Firmware is read from the target Mac's EFI partition at boot rather than embedded in a redistributable Nix store closure. No account password or device calibration is included in this repository.
 
-Development status: all three profiles and hardware derivations evaluate; package builds, image production and physical installation are tracked separately. No installable NixOS image is released yet. CI builds on native AArch64 and records output closures. Do not treat source evaluation as hardware qualification.
+Development status: KDE, GNOME and minimal development installer payloads and a signed binary cache are published. The refreshed kernel, AVD firmware and UPower changes are being qualified separately. Physical installation, encrypted first boot and device update/reboot validation remain pending. CI builds on native AArch64 and records output closures. Source evaluation and published artifacts do not establish hardware qualification.
 
 A future installed configuration imports `nixosModules.default` alongside the pinned Apple Silicon module, uses `overlays.default`, and supplies the target machine's disk and account configuration. The checked image module describes the native installer's ESP + boot + root layout; it is not a configuration to apply to an unrelated existing machine.
 
