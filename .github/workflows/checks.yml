@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v5
       - id: plan
         run: |
-          python3 - <<'PY'
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json,os
           from pathlib import Path
           names=['firstboot','aura','uboot','kernel','mesa','speakerguardd','bankstown','neo-platform','aurora-bless','avd-fw','upower']
