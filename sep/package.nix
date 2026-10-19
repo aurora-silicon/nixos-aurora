@@ -3,7 +3,7 @@ stdenvNoCC.mkDerivation {
   pname = "aurora-sep";
   version = "1.4";
   src = ./.;
-  nativeBuildInputs = [ makeWrapper ];
+  nativeBuildInputs = [ makeWrapper python3 bash ];
   dontBuild = true;
   installPhase = ''
     runHook preInstall
