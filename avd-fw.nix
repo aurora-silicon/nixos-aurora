@@ -28,7 +28,8 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     runHook preInstall
     mkdir -p "$out/lib/firmware/apple" "$debug/lib/debug/firmware/apple"
-    install -m644 build/avd-fw-*.bin "$out/lib/firmware/apple/"
+    find build -type f -name 'avd-fw-*.bin' \
+      -exec install -m644 -t "$out/lib/firmware/apple" {} +
     install -m644 build/avd-fw-*.elf "$debug/lib/debug/firmware/apple/"
     install -Dm644 LICENSE "$out/share/licenses/aurora-avd-fw/LICENSE"
     runHook postInstall
