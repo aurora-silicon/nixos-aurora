@@ -40,6 +40,7 @@ jobs:
           nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image
   hardware:
     needs: evaluate
+    if: needs.evaluate.outputs.packages != '[]'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
     strategy:
