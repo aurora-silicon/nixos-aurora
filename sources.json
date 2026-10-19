@@ -115,5 +115,14 @@
     "archive_root": "upower-00e8cb66b408e2a7e5f1c527accbe0634a12996c",
     "sha256": "4b3b15a50f9f92988b4b570a5147ff2cc9ae119a806d56c464b0b2654509c7d3",
     "nix_hash": "sha256-SzsVpQ+fkpiLS1cKUUf/LMmuEZqAbVbEZLCyZUUJx9M="
+  },
+  "libfprint": {
+    "repository": "https://gitlab.freedesktop.org/libfprint/libfprint",
+    "commit": "80a4b5ec612892c5c056c48dddaa561452cf37ec",
+    "version": "1.94.100",
+    "source_url": "https://gitlab.freedesktop.org/api/v4/projects/libfprint%2Flibfprint/repository/archive.tar.gz?sha=80a4b5ec612892c5c056c48dddaa561452cf37ec",
+    "archive_root": "libfprint-80a4b5ec612892c5c056c48dddaa561452cf37ec-80a4b5ec612892c5c056c48dddaa561452cf37ec",
+    "sha256": "94ff7f3689d14da28389a4d9cad5fb523065bbed3e6c8e3694522fde1316e780",
+    "nix_hash": "sha256-lP9/NonRTaKDiaTZytX7UjBlu+0+bI42lFIv3hMW54A="
   }
 }

@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/aurora-silicon/linux",
+  "commit": "e0fa50d863ee7747de0af16525dfd974cdd826f8",
+  "source_directory": "tools/aurora-sep",
+  "upstream_files_sha256": {
+    "load-driver": "abea60bb264ced349f7cf671d8d26e1609a81a60ea4c34d66ec6f7f73b847dbb",
+    "aurora-sep.service": "447f99cc3c7e683134f31b993aa825fadde24e4854954a3035c96e6631d4d4d0",
+    "fprintd-aurora.conf": "f8d0c4b9385e6716d5ac5dd9941a57459fbc551a8238383bcde36cd929d0523f",
+    "README.md": "d89804109884f22881b29d6e799a5f3ac6f2bbe79db82d1fd2c9ece0858099d3",
+    "XART-SAFETY.md": "3d92b3be06bc1b670666dec3d0032893fe8c7be428a4f1200d7c9803980c769a",
+    "aurora-sep-ready": "2db07d3a0191e8d14581a3056505a8c4225b2fc8e6ea4a1956ae5493abcbb0ae",
+    "aurora-sep-ready.service": "5a5e5c7e93d1462d9d1023446fdb297926aeb93d8988867b515aca7adafe4487",
+    "fprintd-no-timeout.conf.in": "8d8df0ba2a6861b2edb2110e606906d84ca4848617621ad3cb48493a1522971d",
+    "extract-mesa-calibration": "15a878dcf382a22c5d807f0f2c754fe70d39baec88f65aea183b1fe56cf69441"
+  },
+  "adaptations": "Late root-filesystem loading, timer, optional per-device calibration, trusted-key-only success without a reader; no PAM or power-button policy changes."
+}

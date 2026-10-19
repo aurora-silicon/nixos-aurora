@@ -1,6 +1,6 @@
 { config, lib, pkgs, ... }:
 {
-  imports = [ ./firmware.nix ./platform.nix ./firstboot.nix ];
+  imports = [ ./firmware.nix ./platform.nix ./firstboot.nix ./sep.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";

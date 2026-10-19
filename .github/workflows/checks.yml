@@ -26,7 +26,7 @@ jobs:
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json,os
           from pathlib import Path
-          names=['firstboot','aura','uboot','kernel','mesa','speakerguardd','bankstown','neo-platform','aurora-bless','avd-fw','upower']
+          names=['firstboot','aura','uboot','kernel','mesa','speakerguardd','bankstown','neo-platform','aurora-bless','avd-fw','upower','sep','libfprint']
           requested=json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()).get('inputs',{}).get('packages','').split()
           if requested and not set(requested)<=set(names): raise SystemExit('Unknown requested package')
           print('packages='+json.dumps(sorted(set(requested)) if requested else names))

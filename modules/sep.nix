@@ -1,0 +1,52 @@
+{ pkgs, ... }:
+{
+  # Explicit service loading waits for /var and per-machine firmware. This only
+  # suppresses early alias loading; the boot timer enables SEP on the real root.
+  boot.blacklistedKernelModules = [ "apple_sep" ];
+  environment.systemPackages = [ pkgs.aurora-sep pkgs.libfprint ];
+  services.fprintd.enable = true;
+  systemd.timers.aurora-sep = {
+    description = "Initialize Aurora SEP after persistent storage is available";
+    wantedBy = [ "timers.target" ];
+    timerConfig.OnBootSec = "1";
+    timerConfig.Unit = "aurora-sep.service";
+  };
+  systemd.services.aurora-sep = {
+    description = "Aurora SEP trusted keys and biometric services";
+    after = [ "local-fs.target" "aurora-vendor-firmware.service" ];
+    wants = [ "aurora-vendor-firmware.service" "aurora-sep-ready.service" ];
+    unitConfig = {
+      RequiresMountsFor = "/var/lib";
+      ConditionPathExists = "/dev/disk/by-partlabel/iBootSystemContainer";
+    };
+    path = [ pkgs.kmod ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecCondition = "${pkgs.runtimeShell} -c 'modinfo apple_sep >/dev/null 2>&1'";
+      ExecStartPre = "${pkgs.aurora-sep}/libexec/aurora/prepare-sep-calibration";
+      ExecStart = "${pkgs.aurora-sep}/libexec/aurora-sep-load";
+      StateDirectory = "aurora-sep";
+      StateDirectoryMode = "0700";
+      TimeoutStartSec = 180;
+    };
+  };
+  systemd.services.aurora-sep-ready = {
+    description = "Restore fingerprint reader state";
+    requires = [ "aurora-sep.service" ];
+    after = [ "aurora-sep.service" ];
+    before = [ "fprintd.service" ];
+    unitConfig.ConditionPathExists = "/dev/sep-bio";
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${pkgs.aurora-sep}/libexec/aurora-sep-ready";
+      TimeoutStartSec = 60;
+    };
+  };
+  systemd.services.fprintd = {
+    requires = [ "aurora-sep.service" ];
+    after = [ "aurora-sep.service" "aurora-sep-ready.service" ];
+    serviceConfig.DeviceAllow = [ "/dev/sep-bio rw" "char-input r" ];
+  };
+}

@@ -21,6 +21,22 @@ let
     doCheck = true;
   } // extra);
 in {
+  aurora-sep = final.callPackage ./sep/package.nix { };
+  libfprint = prev.libfprint.overrideAttrs (old: {
+    src = source "libfprint";
+    version = pins.libfprint.version;
+    patches = (old.patches or [ ]) ++ map stableFile [
+      ./sep/libfprint-1.94.100-apple-sep.patch
+      ./sep/0002-aurora-report-unusable-captures-as-retries.patch
+      ./sep/0003-hide-lid-covered-readers-while-the-lid-is-closed.patch
+    ];
+    postPatch = (old.postPatch or "") + ''
+      install -Dm644 ${stableFile ./sep/apple-sep.h} aurora-uapi/linux/apple-sep.h
+    '';
+    preConfigure = (old.preConfigure or "") + ''
+      export CFLAGS="''${CFLAGS:-} -I$PWD/aurora-uapi"
+    '';
+  });
   aurora-firstboot = final.callPackage ./firstboot.nix { };
   aurora-avd-firmware = final.callPackage ./avd-fw.nix {
     src = source "avd-fw";
