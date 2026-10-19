@@ -4,6 +4,10 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      packages:
+        description: Space-separated hardware outputs; empty builds all
+        default: ''
 permissions:
   contents: read
 defaults:
@@ -13,8 +17,20 @@ jobs:
   evaluate:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
+    outputs:
+      packages: ${{ steps.plan.outputs.packages }}
     steps:
       - uses: actions/checkout@v5
+      - id: plan
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          names=['firstboot','aura','uboot','kernel','mesa','speakerguardd','bankstown','neo-platform','aurora-bless','avd-fw','upower']
+          requested=json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()).get('inputs',{}).get('packages','').split()
+          if requested and not set(requested)<=set(names): raise SystemExit('Unknown requested package')
+          print('packages='+json.dumps(sorted(set(requested)) if requested else names))
+          PY
       - name: Check incremental cache publication
         run: python3 -m unittest discover -s tests
       - uses: cachix/install-nix-action@v31
@@ -28,13 +44,14 @@ jobs:
           nix flake check --no-build
           nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image
   hardware:
+    needs: evaluate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
-        package: [firstboot, aura, uboot, kernel, mesa, speakerguardd, bankstown, neo-platform, aurora-bless]
+        package: ${{ fromJSON(needs.evaluate.outputs.packages) }}
     steps:
       - uses: actions/checkout@v5
       - uses: cachix/install-nix-action@v31

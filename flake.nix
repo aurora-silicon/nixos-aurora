@@ -34,6 +34,8 @@
       };
       packages.${system} = {
         firstboot = pkgs.aurora-firstboot;
+        avd-fw = pkgs.aurora-avd-firmware;
+        upower = pkgs.upower;
         bindgen = pkgs.aurora-bindgen;
         aura = pkgs.m1n1;
         uboot = pkgs.uboot-asahi;

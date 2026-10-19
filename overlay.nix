@@ -22,6 +22,19 @@ let
   } // extra);
 in {
   aurora-firstboot = final.callPackage ./firstboot.nix { };
+  aurora-avd-firmware = final.callPackage ./avd-fw.nix {
+    src = source "avd-fw";
+    version = pins.avd-fw.version;
+  };
+  upower = prev.upower.overrideAttrs (old: {
+    src = source "upower-aurora";
+    version = pins.upower-aurora.version;
+    postConfigure = (old.postConfigure or "") + ''
+      meson test --list > aurora-registered-tests.txt
+      grep -q test_macsmc_kernel_time_at_zero_rate aurora-registered-tests.txt
+      grep -q test_other_supply_ignores_kernel_time aurora-registered-tests.txt
+    '';
+  });
   aurora-bindgen = final.callPackage ./bindgen { llvmPackages = kernelLLVM; };
   linux-asahi = final.lib.makeOverridable ({ _kernelPatches ? [ ] }:
     final.lib.recurseIntoAttrs (final.linuxPackagesFor (((final.callPackage
@@ -51,7 +64,8 @@ in {
         ];
         extraMeta.branch = "7.2";
         features.rust = true;
-        kernelPatches = _kernelPatches;
+        kernelPatches = [{ name = "apple-m4-wait-state";
+          patch = ./kernel/0001-arm64-apple-m4-wait-state.patch; }] ++ _kernelPatches;
       }).overrideAttrs (old: {
         env = old.env // { RUSTC_BOOTSTRAP = "1"; };
         nativeBuildInputs = old.nativeBuildInputs ++ [ final.binutils kernelLLVM.lld ];

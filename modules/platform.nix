@@ -1,6 +1,8 @@
 { pkgs, ... }:
 {
   hardware.bluetooth.enable = true;
+  hardware.firmware = [ pkgs.aurora-avd-firmware ];
+  services.upower.enable = true;
   hardware.wirelessRegulatoryDatabase = true;
   systemd.packages = [ pkgs.speakerguardd ];
   services.udev.packages = [ pkgs.speakerguardd ];
