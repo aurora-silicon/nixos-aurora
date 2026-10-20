@@ -26,12 +26,13 @@ def gh_json(route):
 
 def validate_build(metadata, ancestor):
     commit = metadata.get('head_sha', '')
-    if (metadata.get('conclusion') != 'success' or metadata.get('head_branch') != 'main'
+    if (metadata.get('conclusion') != 'success'
             or metadata.get('head_repository', {}).get('full_name') != REPOSITORY
             or metadata.get('event') not in ('push', 'workflow_dispatch')
+            or (metadata.get('event') == 'push' and metadata.get('head_branch') != 'main')
             or metadata.get('path') != '.github/workflows/checks.yml'
             or not re.fullmatch('[a-f0-9]{40}', commit) or not ancestor(commit)):
-        raise ValueError('Not a successful merged native main-branch build')
+        raise ValueError('Not a successful merged native main-branch or manual build')
 
 
 def expected_outputs():
