@@ -103,8 +103,10 @@ in {
       environment.SYSTEMD_ETC_HOSTNAME = lib.mkForce "/etc/hostname";
     };
     systemd.services.display-manager = lib.mkIf (config.aurora.desktop != "minimal") {
-      requires = [ "aurora-firstboot.service" ];
       after = [ "aurora-firstboot.service" ];
+      # On the first boot, wait for account setup and its final state write.
+      # A completed setup is skipped on later boots, but the greeter must still start.
+      unitConfig.ConditionPathExists = "!/var/lib/aurora/firstboot/pending";
     };
     systemd.services."getty@" = {
       overrideStrategy = "asDropin";
