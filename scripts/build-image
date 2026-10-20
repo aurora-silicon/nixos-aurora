@@ -6,8 +6,10 @@ desktop=${1:?kde, gnome or minimal required}
 system=${2:?built NixOS system path required}
 installer=${3:?built nixos-install path required}
 aura=${4:?built Aura path required}
+grub=${5:?built GRUB EFI path required}
 [[ $desktop =~ ^(kde|gnome|minimal)$ && $system == /nix/store/* && -x $system/bin/switch-to-configuration ]]
 [[ -x $installer/bin/nixos-install && -s $aura/share/aura/stage1/aura-raw.bin ]]
+[[ -x $grub/bin/grub-mkimage && -d $grub/lib/grub/arm64-efi ]]
 [[ $(id -u) == 0 && $(uname -m) == aarch64 ]]
 profile=nixos-$desktop
 out=$root/out/$profile-installer
@@ -43,6 +45,16 @@ mount -o subvol=root,compress=zstd:1 "${loop}p3" "$target"
 mkdir -p "$target/boot/efi"
 mount "${loop}p2" "$target/boot";mkdir -p "$target/boot/efi";mount "${loop}p1" "$target/boot/efi"
 "$installer/bin/nixos-install" --root "$target" --system "$system" --no-root-passwd --no-channel-copy
+# The source image has /boot on GPT partition 2. The macOS installer places
+# it in a different slot, so GRUB must find the ext4 volume by its UUID.
+[[ $(blkid -s UUID -o value "${loop}p2") == "$boot_uuid" ]]
+embedded_grub="$root/out/$profile-build/embedded-grub.cfg"
+printf 'search.fs_uuid %s root\nset prefix=($root)/grub\n' "$boot_uuid" > "$embedded_grub"
+"$grub/bin/grub-mkimage" -O arm64-efi -C none -d "$grub/lib/grub/arm64-efi" \
+  -c "$embedded_grub" -p /grub -o "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI" \
+  part_gpt ext2 search search_fs_uuid normal configfile linux fat
+grep -aqF "search.fs_uuid $boot_uuid root" "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI"
+! grep -aqE '\(,gpt[0-9]+\)/grub' "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI"
 install -d -m 0700 "$target/var/lib/aurora/firstboot"
 install -d -m 0755 "$target/usr/lib/aurora" "$target/etc/nixos" "$target/boot/efi/aurora"
 printf 'aurora-btrfs-v1\n' > "$target/usr/lib/aurora/image-format"

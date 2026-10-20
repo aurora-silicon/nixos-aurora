@@ -29,14 +29,15 @@ jobs:
           nix build --cores 4 --max-jobs 2 --print-build-logs --out-link system ".#nixosConfigurations.aurora-$DESKTOP.config.system.build.toplevel"
           nix build --out-link installer ".#nixosConfigurations.aurora-$DESKTOP.config.system.build.nixos-install"
           nix build --out-link aura .#aura
-          nix store verify --recursive ./system ./installer ./aura
+          nix build --out-link grub ".#nixosConfigurations.aurora-$DESKTOP.pkgs.grub2_efi"
+          nix store verify --recursive ./system ./installer ./aura ./grub
       - name: Assemble the installer filesystem bundle
         env:
           DESKTOP: ${{ inputs.desktop }}
         run: |
           sudo apt-get update
           sudo apt-get install -y btrfs-progs e2fsprogs dosfstools fdisk zstd
-          sudo env PATH="$PATH" bash scripts/build-image "$DESKTOP" "$(readlink -f system)" "$(readlink -f installer)" "$(readlink -f aura)" 2>&1 | tee image-build.log
+          sudo env PATH="$PATH" bash scripts/build-image "$DESKTOP" "$(readlink -f system)" "$(readlink -f installer)" "$(readlink -f aura)" "$(readlink -f grub)" 2>&1 | tee image-build.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
