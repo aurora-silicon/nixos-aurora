@@ -1,6 +1,8 @@
 {
-  "kernel_commit": "e0fa50d863ee7747de0af16525dfd974cdd826f8",
-  "config_source": "The shared Aurora config and common/Neo fragments, resolved by the native Fedora 44 build; compiler probes are refreshed with olddefconfig in the Nix toolchain.",
+  "kernel_commit": "1b4997bbab620051e01fb807c6561a483c0f06f6",
+  "config_source": "Integration shared asahi.config merged over the retained Fedora-resolved baseline and common/Neo requirements; native Nix olddefconfig resolves current Kconfig and compiler probes.",
   "rpm_sha256": "36ba552ea706c5d35d626f0e08a3702b7f2e0401aeb20e09ed138418f40b5383",
-  "config_sha256": "ad7fd6d9f67038844e6e68da65b69b8f08b478f0c04ef90aad04e3b93f60e399"
+  "config_sha256": "2b4c3bc393ec3bec2199f7090f2701d2d3c5d995b850a6cd5b01fa5bd348cd0c",
+  "baseline_kernel_commit": "e0fa50d863ee7747de0af16525dfd974cdd826f8",
+  "upstream_fragment_sha256": "58ccc7a05e0e76eaad39894093b9a9195fa56df8baf46b7d49288016bea24071"
 }

@@ -40,6 +40,14 @@ class NativeCacheInputsTests(unittest.TestCase):
         self.assertFalse(module.current_build(record, {**expected, 'outputs': ['out']}))
         self.assertFalse(module.current_build(record * 2, expected))
 
+    def test_manual_branch_build_requires_merged_source(self):
+        manual = {**self.metadata, 'head_branch': 'update/kernel', 'event': 'workflow_dispatch'}
+        module.validate_build(manual, lambda _: True)
+        with self.assertRaises(ValueError):
+            module.validate_build(manual, lambda _: False)
+        with self.assertRaises(ValueError):
+            module.validate_build({**manual, 'head_repository': {'full_name': 'other/fork'}}, lambda _: True)
+
     def archive(self, name, mode=0o100600):
         archive = self.root / 'input.zip'
         with zipfile.ZipFile(archive, 'w') as stream:
