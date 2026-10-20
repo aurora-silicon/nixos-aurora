@@ -37,6 +37,10 @@ if grep -aq 'apple,j700' "$compatible"; then
 fi
 
 if "$neo"; then
+  if ! has_firmware apple/tpmtfw-j700.bin; then
+    echo 'Aurora: trackpad firmware missing; keyboard probe continues' >&2
+  fi
+  "$modprobe_command" dockchannel-hid
   if "$radio_ready"; then
     "$modprobe_command" mt7932-fullmac
     if [ "${AURORA_ADMIT_BLUETOOTH:-0}" = 1 ]; then

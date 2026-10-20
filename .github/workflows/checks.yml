@@ -46,6 +46,8 @@ jobs:
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.after
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.requires
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.unitConfig.ConditionPathExists
+          nix eval --json .#nixosConfigurations.aurora-kde.config.boot.blacklistedKernelModules
+          nix eval --json .#nixosConfigurations.aurora-kde.config.boot.initrd.availableKernelModules
   hardware:
     needs: evaluate
     if: needs.evaluate.outputs.packages != '[]'
