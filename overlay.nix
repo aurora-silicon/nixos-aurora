@@ -82,8 +82,7 @@ in {
         ];
         extraMeta.branch = "7.2";
         features.rust = true;
-        kernelPatches = [{ name = "apple-m4-wait-state";
-          patch = ./kernel/0001-arm64-apple-m4-wait-state.patch; }] ++ _kernelPatches;
+        kernelPatches = _kernelPatches;
       }).overrideAttrs (old: {
         env = old.env // { RUSTC_BOOTSTRAP = "1"; };
         nativeBuildInputs = old.nativeBuildInputs ++ [ final.binutils kernelLLVM.lld ];

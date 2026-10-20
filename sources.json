@@ -1,12 +1,12 @@
 {
   "kernel-aurora": {
-    "repository": "https://github.com/aurora-silicon/linux",
-    "commit": "e0fa50d863ee7747de0af16525dfd974cdd826f8",
+    "repository": "https://github.com/omacom/linux-aurora",
+    "commit": "1b4997bbab620051e01fb807c6561a483c0f06f6",
     "version": "7.2.10",
-    "source_url": "https://codeload.github.com/aurora-silicon/linux/tar.gz/e0fa50d863ee7747de0af16525dfd974cdd826f8",
-    "archive_root": "linux-e0fa50d863ee7747de0af16525dfd974cdd826f8",
-    "sha256": "e8e6b3a1f1b2175147c1825035be72d6fb60ed706245973b8c4b724e95b6c913",
-    "nix_hash": "sha256-6OazofGyF1FHwYJQNb5y1vtg7XBiRZc7jEtyTpW2yRM="
+    "source_url": "https://codeload.github.com/omacom/linux-aurora/tar.gz/1b4997bbab620051e01fb807c6561a483c0f06f6",
+    "archive_root": "linux-aurora-1b4997bbab620051e01fb807c6561a483c0f06f6",
+    "sha256": "554aacee942f8a21fd101c0cdb6991d3acb333dc7c6b407e02e6bf87ac6b6d8c",
+    "nix_hash": "sha256-VUqs7pQviiH9EBwM22mR06yzM9x8a0B+Aua/h6xrbYw="
   },
   "aura": {
     "repository": "https://github.com/aurora-silicon/aura",
@@ -28,12 +28,12 @@
   },
   "mesa-aurora": {
     "repository": "https://github.com/aurora-silicon/mesa",
-    "commit": "af3d9c6fc84f6e5bc6ee23f1eb0b47a5ee466826",
+    "commit": "2305fd923cac881985ec67ec3f1f4284e4170fab",
     "version": "26.3.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/af3d9c6fc84f6e5bc6ee23f1eb0b47a5ee466826",
-    "archive_root": "mesa-af3d9c6fc84f6e5bc6ee23f1eb0b47a5ee466826",
-    "sha256": "ec40a280fbb7ad3792a867acc6904ae62fef5093fb29c76eb252badfcd14591a",
-    "nix_hash": "sha256-7ECigPu3rTeSqGesxpBK5i/vUJP7KcduslK6380UWRo="
+    "source_url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/2305fd923cac881985ec67ec3f1f4284e4170fab",
+    "archive_root": "mesa-2305fd923cac881985ec67ec3f1f4284e4170fab",
+    "sha256": "1adf4e26b26051100948f564865542bd31515fd769d0503ca419380019fb457b",
+    "nix_hash": "sha256-Gt9OJrJgURAJSPVkhlVCvTFRX9dp0FA8pBk4ABn7RXs="
   },
   "speakerguardd": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
