@@ -38,6 +38,11 @@ jobs:
         run: |
           nix flake check --no-build
           nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition
+      - name: Inspect KDE graphical login configuration
+        run: |
+          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.defaultUnit
+          nix eval --json .#nixosConfigurations.aurora-kde.config.services.displayManager.sddm.enable
+          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.wantedBy
   hardware:
     needs: evaluate
     if: needs.evaluate.outputs.packages != '[]'
