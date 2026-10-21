@@ -30,7 +30,10 @@
       # The native installer provisions the EFI chainloader. Installed-system
       # rebuilds may update Boot but must leave that EFI file in place.
       nixosModules.installed = {
-        disabledModules = [ (apple-silicon.outPath + "/apple-silicon-support/modules/boot-m1n1/default.nix") ];
+        disabledModules = [
+          (apple-silicon.outPath + "/apple-silicon-support/modules/boot-m1n1")
+          (apple-silicon.outPath + "/apple-silicon-support/modules/boot-m1n1/default.nix")
+        ];
       };
       nixosConfigurations = {
         aurora-kde = makeSystem "kde";
