@@ -75,7 +75,7 @@ out=Path(sys.argv[1]);revision,desktop=sys.argv[2:4];layout=json.load(open(sys.a
       system = "aarch64-linux";
       modules = [
         aurora.inputs.apple-silicon.nixosModules.default
-        aurora.nixosModules.default aurora.nixosModules.image
+        aurora.nixosModules.default aurora.nixosModules.image aurora.nixosModules.installed
         { nixpkgs.overlays = [ aurora.inputs.apple-silicon.overlays.default aurora.overlays.default ]; }
         ./machine.nix ./owner.nix
       ];

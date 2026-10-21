@@ -17,7 +17,7 @@
           ./modules/image.nix ];
       };
       imageProbe = (makeSystem "minimal").extendModules {
-        modules = [ ({ lib, ... }: { aurora.imageLayout = lib.mkForce {
+        modules = [ self.nixosModules.installed ({ lib, ... }: { aurora.imageLayout = lib.mkForce {
           rootUUID = "eb688499-cc41-4c4c-b00b-dbf33e05427c";
           bootUUID = "3429647d-29a2-411c-8924-2545fda1ec34";
           efiUUID = "1E08-14ED";
@@ -27,6 +27,11 @@
       overlays.default = import ./overlay.nix;
       nixosModules.image = import ./modules/image.nix;
       nixosModules.default = import ./modules/aurora.nix;
+      # The native installer provisions the EFI chainloader. Installed-system
+      # rebuilds may update Boot but must leave that EFI file in place.
+      nixosModules.installed = {
+        disabledModules = [ (apple-silicon.outPath + "/apple-silicon-support/modules/boot-m1n1/default.nix") ];
+      };
       nixosConfigurations = {
         aurora-kde = makeSystem "kde";
         aurora-gnome = makeSystem "gnome";
