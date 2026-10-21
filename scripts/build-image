@@ -92,11 +92,10 @@ rm -f "$target/etc/machine-id" "$target/var/lib/systemd/random-seed" "$target/et
 printf 'uninitialized\n' > "$target/etc/machine-id"
 [[ -s $target/boot/efi/m1n1/boot.bin && -s $target/boot/efi/EFI/BOOT/BOOTAA64.EFI ]]
 cp -a "$target/boot/efi" "$out/esp"
-printf '%s  %s\n' \
-  '0481c2d5d75c93300be6f7c2187746cd06b769f48c6538b134044aabe930b8d2' \
-  "$root/vendor/boot-j700.bin" | sha256sum --status -c -
-install -Dm644 "$root/vendor/boot-j700.bin" "$out/esp/m1n1/boot-j700.bin"
-cmp "$root/vendor/boot-j700.bin" "$out/esp/m1n1/boot-j700.bin"
+python3 "$root/scripts/prepare-stage2.py" \
+  --combined "$out/esp/m1n1/boot.bin" \
+  --aura "$aura/lib/m1n1/m1n1.bin" \
+  --output "$out/esp/m1n1" --manifest "$out/stage2.json"
 nix path-info --recursive --json "$system" > "$out/closure.json"
 cp "$target/etc/nixos/machine.nix" "$out/machine.nix"
 sync
