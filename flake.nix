@@ -66,7 +66,13 @@
           mounts = map (mount: { inherit (mount) what where; }) imageProbe.config.boot.initrd.systemd.mounts;
           layout = imageProbe.config.aurora.imageLayout;
         };
-      } ''printf '%s\n' "$units" > $out'';
+      } ''
+        case "$units" in
+          *'What=/dev/mapper/root'*) ;;
+          *) echo 'initrd sysroot must use the encrypted root mapper from boot start' >&2; exit 1 ;;
+        esac
+        printf '%s\n' "$units" > $out
+      '';
       profiles = pkgs.runCommand "aurora-profile-evaluation" {
         profiles = builtins.toJSON (nixpkgs.lib.mapAttrs (_: value: {
           kernel = value.config.boot.kernelPackages.kernel.version;
