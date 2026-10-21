@@ -47,10 +47,16 @@ in {
     };
     boot.initrd.systemd.units."sysroot.mount" = {
       overrideStrategy = "asDropin";
+      # The first conversion replaces the plaintext device while the initrd
+      # is running. Queue sysroot against the mapper from the outset so its
+      # original device job cannot expire during the conversion.
       text = ''
         [Unit]
         Requires=aurora-initrd-root.service
         After=aurora-initrd-root.service
+
+        [Mount]
+        What=/dev/mapper/root
       '';
     };
     systemd.services.aurora-firstboot = {
