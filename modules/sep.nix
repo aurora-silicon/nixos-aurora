@@ -47,6 +47,7 @@
   systemd.services.fprintd = {
     requires = [ "aurora-sep.service" ];
     after = [ "aurora-sep.service" "aurora-sep-ready.service" ];
+    unitConfig.ConditionPathExists = "/dev/sep-bio";
     serviceConfig.DeviceAllow = [ "/dev/sep-bio rw" "char-input r" ];
   };
 }
