@@ -59,6 +59,9 @@
       '';
 
       firstboot-image = pkgs.runCommand "aurora-firstboot-image-evaluation" {
+        stage2Preserved = if builtins.hasAttr "m1n1/boot.bin" imageProbe.config.boot.loader.grub.extraFiles
+          || !(builtins.hasAttr "m1n1/boot.bin" (makeSystem "minimal").config.boot.loader.grub.extraFiles)
+          then "0" else "1";
         units = builtins.toJSON {
           firstboot = imageProbe.config.systemd.services.aurora-firstboot.serviceConfig;
           initrd = imageProbe.config.boot.initrd.systemd.services.aurora-initrd-root.serviceConfig;
@@ -68,6 +71,7 @@
           layout = imageProbe.config.aurora.imageLayout;
         };
       } ''
+        [[ "$stage2Preserved" == 1 ]] || { echo 'installed rebuild must preserve installer EFI payload' >&2; exit 1; }
         case "$units" in
           *'What=/dev/mapper/root'*) ;;
           *) echo 'initrd sysroot must use the encrypted root mapper from boot start' >&2; exit 1 ;;

@@ -27,6 +27,9 @@ in {
     fileSystems."/home".device = lib.mkForce "/dev/disk/by-uuid/${layout.rootUUID}";
     fileSystems."/boot".device = lib.mkForce "/dev/disk/by-uuid/${layout.bootUUID}";
     fileSystems."/boot/efi".device = lib.mkForce "/dev/disk/by-uuid/${layout.efiUUID}";
+    # The installer has already provisioned the qualified EFI chainloader.
+    # Rebuilding NixOS must update Boot without replacing that EFI payload.
+    boot.loader.grub.extraFiles = lib.mkForce { };
     boot.initrd.systemd.storePaths = [ pkgs.aurora-firstboot ] ++ pkgs.aurora-firstboot.initrdInputs;
     boot.initrd.systemd.contents."/etc/aurora/image-layout".source = layoutFile;
     # Take over any watchdog still running at handoff before a long in-place
