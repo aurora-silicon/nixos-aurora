@@ -62,6 +62,16 @@ in {
         What=/dev/mapper/root
       '';
     };
+    boot.initrd.systemd.units."dev-mapper-root.device" = {
+      overrideStrategy = "asDropin";
+      # The first-boot LUKS conversion can take longer than systemd's default
+      # device-job timeout. Keep waiting for the mapper while the conversion
+      # service runs; its own failures are reported by that service.
+      text = ''
+        [Unit]
+        JobRunningTimeoutSec=infinity
+      '';
+    };
     systemd.services.aurora-firstboot = {
       description = "Create the Aurora Linux owner account";
       wantedBy = [ "multi-user.target" ];

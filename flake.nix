@@ -75,6 +75,7 @@
           initrd = imageProbe.config.boot.initrd.systemd.services.aurora-initrd-root.serviceConfig;
           kernelModules = imageProbe.config.boot.initrd.kernelModules;
           sysroot = imageProbe.config.boot.initrd.systemd.units."sysroot.mount".text;
+          rootDevice = imageProbe.config.boot.initrd.systemd.units."dev-mapper-root.device".text;
           mounts = map (mount: { inherit (mount) what where; }) imageProbe.config.boot.initrd.systemd.mounts;
           layout = imageProbe.config.aurora.imageLayout;
         };
@@ -83,6 +84,10 @@
         case "$units" in
           *'What=/dev/mapper/root'*) ;;
           *) echo 'initrd sysroot must use the encrypted root mapper from boot start' >&2; exit 1 ;;
+        esac
+        case "$units" in
+          *'JobRunningTimeoutSec=infinity'*) ;;
+          *) echo 'initrd root mapper must not time out during first-boot conversion' >&2; exit 1 ;;
         esac
         case "$units" in
           *'modprobe apple_wdt'*) ;;
