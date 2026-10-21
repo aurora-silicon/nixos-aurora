@@ -13,7 +13,7 @@ permissions:
   actions: read
 jobs:
   delivery:
-    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@4af23e7d3865eacf2fb5be59c0575069a7499153
+    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@6bf0e3b327d39109f813653012f82b33d44039cd
     with:
       profile: nixos-kde
       image-run: ${{ inputs.image-run }}
