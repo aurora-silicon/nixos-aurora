@@ -29,7 +29,9 @@ in {
     fileSystems."/boot/efi".device = lib.mkForce "/dev/disk/by-uuid/${layout.efiUUID}";
     boot.initrd.systemd.storePaths = [ pkgs.aurora-firstboot ] ++ pkgs.aurora-firstboot.initrdInputs;
     boot.initrd.systemd.contents."/etc/aurora/image-layout".source = layoutFile;
-    boot.initrd.kernelModules = [ "dm-crypt" "btrfs" "ext4" "vfat" ];
+    # Take over any watchdog still running at handoff before a long in-place
+    # encryption pass can outlast its timeout.
+    boot.initrd.kernelModules = [ "apple_wdt" "dm-crypt" "btrfs" "ext4" "vfat" ];
     boot.initrd.systemd.services.aurora-initrd-root = {
       description = "Prepare and unlock the Aurora root filesystem";
       wantedBy = [ "initrd.target" ];
@@ -41,16 +43,33 @@ in {
         Type = "oneshot";
         RemainAfterExit = true;
         TimeoutStartSec = "infinity";
+        ExecStartPre = "${pkgs.kmod}/bin/modprobe apple_wdt";
         ExecStart = "${pkgs.aurora-firstboot}/lib/aurora/aurora-initrd-root";
         Environment = "AURORA_IMAGE_LAYOUT=${layoutFile}";
       };
     };
     boot.initrd.systemd.units."sysroot.mount" = {
       overrideStrategy = "asDropin";
+      # The first conversion replaces the plaintext device while the initrd
+      # is running. Queue sysroot against the mapper from the outset so its
+      # original device job cannot expire during the conversion.
       text = ''
         [Unit]
         Requires=aurora-initrd-root.service
         After=aurora-initrd-root.service
+
+        [Mount]
+        What=/dev/mapper/root
+      '';
+    };
+    boot.initrd.systemd.units."dev-mapper-root.device" = {
+      overrideStrategy = "asDropin";
+      # The first-boot LUKS conversion can take longer than systemd's default
+      # device-job timeout. Keep waiting for the mapper while the conversion
+      # service runs; its own failures are reported by that service.
+      text = ''
+        [Unit]
+        JobRunningTimeoutSec=infinity
       '';
     };
     systemd.services.aurora-firstboot = {
@@ -103,8 +122,10 @@ in {
       environment.SYSTEMD_ETC_HOSTNAME = lib.mkForce "/etc/hostname";
     };
     systemd.services.display-manager = lib.mkIf (config.aurora.desktop != "minimal") {
-      requires = [ "aurora-firstboot.service" ];
       after = [ "aurora-firstboot.service" ];
+      # On the first boot, wait for account setup and its final state write.
+      # A completed setup is skipped on later boots, but the greeter must still start.
+      unitConfig.ConditionPathExists = "!/var/lib/aurora/firstboot/pending";
     };
     systemd.services."getty@" = {
       overrideStrategy = "asDropin";

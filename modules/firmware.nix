@@ -28,6 +28,14 @@ let
       export AURORA_FIRMWARE_ROOT="$destination/vendorfw"
       export AURORA_ADMIT_BLUETOOTH=0
       if [[ "''${1:-initrd}" == runtime ]]; then
+        # Activation replaces the initrd's firmware_class.path with the Nix
+        # store firmware tree. Restore the per-device path while retaining the
+        # store tree through the kernel's standard /lib/firmware fallback.
+        if [[ ! -e /lib/firmware && ! -L /lib/firmware ]]; then
+          ln -s /run/current-system/firmware /lib/firmware
+        fi
+        [[ -d /lib/firmware ]] || { echo 'System firmware fallback is unavailable' >&2; exit 1; }
+        printf '%s' "$destination/vendorfw" > /sys/module/firmware_class/parameters/path
         export AURORA_ADMIT_BLUETOOTH=1
       fi
       ${admission}/bin/aurora-peripheral-admission
@@ -38,7 +46,8 @@ in {
   # Replace build-time extraction with an initrd/runtime ESP handoff.
   hardware.asahi.extractPeripheralFirmware = lib.mkDefault false;
   boot.kernelParams = [ "firmware_class.path=/run/aurora-firmware/vendorfw" ];
-  boot.blacklistedKernelModules = [ "aop" "mt7932-fullmac" "mt7932_bt_pcie" ];
+  # Neo input must probe after the ESP firmware reaches the initrd runtime.
+  boot.blacklistedKernelModules = [ "aop" "mt7932-fullmac" "mt7932_bt_pcie" "dockchannel-hid" ];
   boot.initrd.availableKernelModules = [ "vfat" "nvme_apple" "apple-mailbox" "aop" "mt7932-fullmac" "mt7932_bt_pcie" ];
   boot.initrd.systemd.services.aurora-vendor-firmware = lib.mkIf config.boot.initrd.systemd.enable {
     description = "Extract this Mac's vendor firmware before peripheral admission";
