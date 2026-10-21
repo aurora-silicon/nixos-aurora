@@ -21,6 +21,18 @@ let
     doCheck = true;
   } // extra);
 in {
+  kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
+    kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ map stableFile [
+        ./patches/kinfocenter-unknown-memory.patch
+      ];
+    });
+    powerdevil = kdePrev.powerdevil.overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ map stableFile [
+        ./patches/powerdevil-no-empty-keyboard-backlight.patch
+      ];
+    });
+  });
   aurora-sep = final.callPackage ./sep/package.nix { };
   libfprint = prev.libfprint.overrideAttrs (old: {
     src = source "libfprint";

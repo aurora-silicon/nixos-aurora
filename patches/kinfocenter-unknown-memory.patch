@@ -1,0 +1,47 @@
+diff --git a/kcms/about-distro/src/MemoryEntry.cpp b/kcms/about-distro/src/MemoryEntry.cpp
+index 617c0ee..0ee9906 100644
+--- a/kcms/about-distro/src/MemoryEntry.cpp
++++ b/kcms/about-distro/src/MemoryEntry.cpp
+@@ -6,6 +6,7 @@
+ #include "MemoryEntry.h"
+ 
+ #include <KFormat>
++#include <limits>
+ 
+ #ifdef Q_OS_LINUX
+ #include <sys/sysinfo.h>
+@@ -45,20 +46,29 @@ std::optional<qlonglong> MemoryEntry::calculateTotalRam()
+ 
+     bool ok;
+     int numMemoryDevices = QByteArray(numMemoryDevicesCStr).toInt(&ok);
+-    if (!ok) {
++    if (!ok || numMemoryDevices <= 0) {
+         return {};
+     }
+ 
+     qlonglong totalBytes = 0;
+     for (int i = 0; i < numMemoryDevices; ++i) {
+         const char *memoryBytesCStr = udev_device_get_property_value(dmi.get(), QStringLiteral("MEMORY_DEVICE_%1_SIZE").arg(i).toLatin1());
+-        qlonglong memoryBytes = QByteArray(memoryBytesCStr).toLongLong(&ok);
+-        if (ok) {
+-            totalBytes += memoryBytes;
++        if (!memoryBytesCStr) {
++            const auto presentKey = QStringLiteral("MEMORY_DEVICE_%1_PRESENT").arg(i).toLatin1();
++            const auto present = udev_device_get_property_value(dmi.get(), presentKey);
++            if (present && QByteArray(present) == "0") {
++                continue;
++            }
++            return {};
+         }
++        qlonglong memoryBytes = QByteArray(memoryBytesCStr).toLongLong(&ok);
++        if (!ok || memoryBytes < 0 || memoryBytes > std::numeric_limits<qlonglong>::max() - totalBytes) {
++            return {};
++        }
++        totalBytes += memoryBytes;
+     }
+ 
+-    return totalBytes;
++    return totalBytes > 0 ? std::optional<qlonglong>(totalBytes) : std::nullopt;
+ #elif defined(Q_OS_OPENBSD)
+     int64_t memSize = 0;
+     int mib[] = {CTL_HW, HW_PHYSMEM64};
