@@ -8,11 +8,28 @@ on:
       image-source-revision:
         description: Immutable source commit of that image run
         required: true
+      catalog-source-tag:
+        description: Existing signed QA release to repair without republishing image assets
+        required: false
+        default: ''
+      catalog-target-tag:
+        description: New immutable catalog-only QA release tag
+        required: false
+        default: ''
+      installer-version:
+        description: Version of the signed app paired with the repaired catalog
+        required: false
+        default: ''
+      installer-download-url:
+        description: QA app build page for an installer update
+        required: false
+        default: ''
 permissions:
   contents: write
   actions: read
 jobs:
   delivery:
+    if: inputs.catalog-source-tag == ''
     uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@6bf0e3b327d39109f813653012f82b33d44039cd
     with:
       profile: nixos-kde
@@ -21,3 +38,90 @@ jobs:
       neo-reset-qa: true
     secrets:
       catalog-signing-key: ${{ secrets.INSTALLER_CATALOG_SIGNING_KEY }}
+  repair-catalog:
+    if: inputs.catalog-source-tag != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Authenticate the signed source catalog and revise its app version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_RUN: ${{ inputs.image-run }}
+          SOURCE_TAG: ${{ inputs.catalog-source-tag }}
+          TARGET_TAG: ${{ inputs.catalog-target-tag }}
+          APP_VERSION: ${{ inputs.installer-version }}
+          DOWNLOAD_URL: ${{ inputs.installer-download-url }}
+        run: |
+          set -euo pipefail
+          [[ $IMAGE_RUN =~ ^[0-9]+$ ]]
+          [[ $SOURCE_TAG == "payload-nixos-kde-$IMAGE_RUN-neo-reset-qa" ]]
+          [[ $TARGET_TAG =~ ^payload-nixos-kde-[0-9]+-neo-reset-qa[0-9]+$ ]]
+          [[ $TARGET_TAG == "${SOURCE_TAG}"[0-9]* ]]
+          [[ $APP_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ $DOWNLOAD_URL == https://github.com/aurora-silicon/aurora-installer/* ]]
+          mkdir source revised
+          gh release download "$SOURCE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern catalog.json --pattern catalog.json.sig \
+            --pattern trust-root.ed25519.pub --dir source
+          python3 - <<'PY'
+          from pathlib import Path
+          key=Path('source/trust-root.ed25519.pub').read_bytes()
+          assert len(key)==32
+          Path('source/public.der').write_bytes(bytes.fromhex('302a300506032b6570032100')+key)
+          PY
+          openssl pkeyutl -verify -pubin -keyform DER -inkey source/public.der \
+            -rawin -in source/catalog.json -sigfile source/catalog.json.sig
+          python3 - <<'PY'
+          import datetime,hashlib,json,os,re
+          from pathlib import Path
+          original=Path('source/catalog.json').read_bytes()
+          catalog=json.loads(original)
+          run=os.environ['IMAGE_RUN'];tag=os.environ['SOURCE_TAG']
+          assert catalog['schemaVersion']==4 and len(catalog['models'])==1
+          model=catalog['models'][0]
+          assert model['deviceIdentifier']=='apple,j700' and model['status']=='enabled'
+          assert model['installationProfile']=='nixos-kde'
+          for field in ('metadataArtifact','payloadArtifact'):
+              assert '/releases/download/'+tag+'/' in model[field]['sourceURL']
+          now=datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+          catalog['sequence']=max(catalog['sequence']+1,int(now.timestamp()))
+          catalog['issuedAt']=now.strftime('%Y-%m-%dT%H:%M:%SZ')
+          catalog['installer']['minimumVersion']=os.environ['APP_VERSION']
+          catalog['installer']['latestVersion']=os.environ['APP_VERSION']
+          catalog['installer']['downloadURL']=os.environ['DOWNLOAD_URL']
+          output=Path('revised/catalog.json')
+          output.write_text(json.dumps(catalog,indent=2)+'\n')
+          Path('revised/trust-root.ed25519.pub').write_bytes(Path('source/trust-root.ed25519.pub').read_bytes())
+          Path('revised/repair.json').write_text(json.dumps({
+              'schema':1,'sourceTag':tag,'targetTag':os.environ['TARGET_TAG'],
+              'imageRun':run,'installerVersion':os.environ['APP_VERSION'],
+              'sourceCatalogSha256':hashlib.sha256(original).hexdigest(),
+              'catalogSha256':hashlib.sha256(output.read_bytes()).hexdigest()
+          },indent=2)+'\n')
+          PY
+      - name: Sign the revised catalog with the existing release trust root
+        env:
+          CATALOG_KEY: ${{ secrets.INSTALLER_CATALOG_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/aurora-catalog-key.pem"
+          trap 'rm -f "$key"' EXIT
+          umask 077
+          printf '%s' "$CATALOG_KEY" > "$key"
+          openssl pkey -in "$key" -pubout -outform DER -out revised/public.der
+          cmp revised/public.der source/public.der
+          openssl pkeyutl -sign -inkey "$key" -rawin \
+            -in revised/catalog.json -out revised/catalog.json.sig
+          openssl pkeyutl -verify -pubin -keyform DER -inkey source/public.der \
+            -rawin -in revised/catalog.json -sigfile revised/catalog.json.sig
+      - name: Publish the immutable catalog-only QA release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_TAG: ${{ inputs.catalog-target-tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$TARGET_TAG" \
+            revised/catalog.json revised/catalog.json.sig \
+            revised/trust-root.ed25519.pub revised/repair.json \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "Aurora NixOS KDE Reset QA catalog" \
+            --notes 'Signed catalog revision for the existing immutable Neo Reset image assets. No image bytes or factory inputs were republished; physical qualification is pending.'
