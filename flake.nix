@@ -62,6 +62,7 @@
         units = builtins.toJSON {
           firstboot = imageProbe.config.systemd.services.aurora-firstboot.serviceConfig;
           initrd = imageProbe.config.boot.initrd.systemd.services.aurora-initrd-root.serviceConfig;
+          kernelModules = imageProbe.config.boot.initrd.kernelModules;
           sysroot = imageProbe.config.boot.initrd.systemd.units."sysroot.mount".text;
           mounts = map (mount: { inherit (mount) what where; }) imageProbe.config.boot.initrd.systemd.mounts;
           layout = imageProbe.config.aurora.imageLayout;
@@ -70,6 +71,10 @@
         case "$units" in
           *'What=/dev/mapper/root'*) ;;
           *) echo 'initrd sysroot must use the encrypted root mapper from boot start' >&2; exit 1 ;;
+        esac
+        case "$units" in
+          *'modprobe apple_wdt'*) ;;
+          *) echo 'initrd must take over the watchdog before conversion' >&2; exit 1 ;;
         esac
         printf '%s\n' "$units" > $out
       '';
