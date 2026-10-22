@@ -9,23 +9,14 @@ on:
       image-run:
         description: Successful Native image workflow run ID
         required: true
-      neo-reset-qa:
-        description: Publish a non-adopted single-Neo Reset test catalog
-        type: boolean
-        default: false
-      image-source-revision:
-        description: Exact image source commit required for Neo QA
-        default: ''
 permissions:
   contents: write
   actions: read
 jobs:
   delivery:
-    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@9bf45645d5e58c460a7e66729d34fecaa14a7319
+    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@9e7403fec6fd4d2d69a4646b769fcae20acea46b
     with:
       profile: ${{ inputs.profile }}
       image-run: ${{ inputs.image-run }}
-      neo-reset-qa: ${{ inputs.neo-reset-qa }}
-      image-source-revision: ${{ inputs.image-source-revision }}
     secrets:
       catalog-signing-key: ${{ secrets.INSTALLER_CATALOG_SIGNING_KEY }}
