@@ -36,11 +36,15 @@ if grep -aq 'apple,j700' "$compatible"; then
   done
 fi
 
+if "$neo" && ! has_firmware apple/tpmtfw-j700.bin; then
+  echo 'Aurora: trackpad firmware missing; keyboard probe continues' >&2
+fi
+# The built-in keyboard and trackpad of every M2-and-later MacBook, the Neo
+# included. It is held back from autoloading only so that it probes here,
+# after this Mac's firmware is in place.
+"$modprobe_command" dockchannel-hid
+
 if "$neo"; then
-  if ! has_firmware apple/tpmtfw-j700.bin; then
-    echo 'Aurora: trackpad firmware missing; keyboard probe continues' >&2
-  fi
-  "$modprobe_command" dockchannel-hid
   if "$radio_ready"; then
     "$modprobe_command" mt7932-fullmac
     if [ "${AURORA_ADMIT_BLUETOOTH:-0}" = 1 ]; then
