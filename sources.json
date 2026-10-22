@@ -1,12 +1,12 @@
 {
   "kernel-aurora": {
     "repository": "https://github.com/omacom/linux-aurora",
-    "commit": "1b4997bbab620051e01fb807c6561a483c0f06f6",
+    "commit": "70d5dcedfa7fb7a3e7bd0cdb33d8315d99250142",
     "version": "7.2.10",
-    "source_url": "https://codeload.github.com/omacom/linux-aurora/tar.gz/1b4997bbab620051e01fb807c6561a483c0f06f6",
-    "archive_root": "linux-aurora-1b4997bbab620051e01fb807c6561a483c0f06f6",
-    "sha256": "554aacee942f8a21fd101c0cdb6991d3acb333dc7c6b407e02e6bf87ac6b6d8c",
-    "nix_hash": "sha256-VUqs7pQviiH9EBwM22mR06yzM9x8a0B+Aua/h6xrbYw="
+    "source_url": "https://codeload.github.com/omacom/linux-aurora/tar.gz/70d5dcedfa7fb7a3e7bd0cdb33d8315d99250142",
+    "archive_root": "linux-aurora-70d5dcedfa7fb7a3e7bd0cdb33d8315d99250142",
+    "sha256": "f2bb90e55f1ab2ce985c19af1180693b6db298bc8471c05b9cd33d3816045de6",
+    "nix_hash": "sha256-8ruQ5V8ass6YXBmvEYBpO22ymLyEccBbnNM9OBYEXeY="
   },
   "aura": {
     "repository": "https://github.com/aurora-silicon/aura",
