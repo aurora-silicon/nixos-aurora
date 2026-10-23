@@ -30,3 +30,5 @@ For an incremental snapshot, supply the last deployed cache directory with `--pr
 The hardware stack includes the pinned Aurora AVD firmware and UPower forks. All decoder variants are built with their linked symbols in a separate `debug` output. UPower retains the upstream NixOS service and client contracts and runs the fork's macsmc regression tests. The shared 7.2.10 kernel also carries the accepted M4+ wait-state fix.
 
 Source tracking, automatic publication, the `channel-testing` and `channel-stable` refs and the signing environments are described in [docs/updates.md](docs/updates.md).
+
+Installed systems follow `channel-testing` (their `flake.lock` pins the installed commit). `sudo aurora-update` takes the newest signed update; every rebuild refreshes the ESP Stage 2 the way `update-m1n1` does on ALARM and Fedora, keeping `m1n1/boot.bin.old`, and never writes Stage 1. Nothing updates unattended. Installs from images before Alpha 9 need a one-time `flake.nix` edit, described in [docs/updates.md](docs/updates.md#moving-an-existing-install-to-the-channel-one-time).
