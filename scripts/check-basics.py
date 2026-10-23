@@ -173,8 +173,12 @@ def check_network(root, profile):
         return 'NetworkManager.service is not enabled'
     if profile == 'gnome' and not root.path(f'{root.usr}/bin/gnome-control-center').exists():
         return 'GNOME Settings (network and Wi-Fi) is missing'
-    if profile == 'kde' and not root.path(f'{root.usr}/share/plasma/plasmoids/org.kde.plasma.networkmanagement').is_dir():
-        return "Plasma's network applet (plasma-nm) is missing"
+    # plasma-nm: its System Settings module, and the panel applet (a plugin
+    # since Plasma 6.8, a package directory before).
+    if profile == 'kde' and not (
+            root.path(f'{root.usr}/share/applications/kcm_networkmanagement.desktop').is_file()
+            or root.path(f'{root.usr}/share/plasma/plasmoids/org.kde.plasma.networkmanagement').is_dir()):
+        return "Plasma's network settings (plasma-nm) are missing"
     return None
 
 

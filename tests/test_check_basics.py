@@ -55,7 +55,7 @@ class CheckBasicsTests(unittest.TestCase):
         if profile == 'kde':
             write(u / 'bin/konsole', mode=0o755)
             write(u / 'share/applications/org.kde.konsole.desktop')
-            (u / 'share/plasma/plasmoids/org.kde.plasma.networkmanagement').mkdir(parents=True)
+            write(u / 'share/applications/kcm_networkmanagement.desktop')
             for name in ('Next', 'Air', 'Horos', 'Altai', 'Kokkini', 'Canopee', 'Cluster', 'Flow', 'Mountain'):
                 write(u / f'share/wallpapers/{name}/contents/images/1920x1080.png')
         return root
