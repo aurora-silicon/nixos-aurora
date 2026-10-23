@@ -1,0 +1,175 @@
+name: Track upstream sources
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Plan only; no push, PR, CI dispatch, mirror upload or merge
+        type: boolean
+        default: true
+      force:
+        description: Refresh the open proposal even while its CI is still running
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - .github/workflows/track-sources.yml
+      - scripts/track-sources.py
+      - scripts/trackerlib.py
+      - scripts/updatelib.py
+      - tracking.json
+permissions: {}
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: track-sources
+  cancel-in-progress: false
+jobs:
+  mode:
+    runs-on: ubuntu-24.04
+    permissions: {}
+    outputs:
+      live: ${{ steps.mode.outputs.live }}
+    steps:
+      - id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          ENABLED: ${{ vars.TRACK_SOURCES }}
+        run: |
+          live=false
+          if [[ $GITHUB_REF == refs/heads/main ]]; then
+            case $EVENT in
+              schedule) [[ $ENABLED != true ]] || live=true ;;
+              workflow_dispatch) [[ $DRY_RUN != false ]] || live=true ;;
+            esac
+          fi
+          echo "live=$live" >> "$GITHUB_OUTPUT"
+          echo "Mode: $([[ $live == true ]] && echo live || echo 'dry run')" >> "$GITHUB_STEP_SUMMARY"
+
+  merge:
+    # Runs first so a passed proposal lands before new tips are planned.
+    needs: mode
+    if: needs.mode.outputs.live == 'true'
+    runs-on: ubuntu-24.04
+    environment: source-tracking
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      # Optional GitHub App (TRACKER_APP_CLIENT_ID + TRACKER_APP_PRIVATE_KEY in
+      # the source-tracking environment). Without it the workflow token acts,
+      # which needs "Allow GitHub Actions to create and approve pull requests".
+      - id: app
+        if: vars.TRACKER_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.TRACKER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRACKER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-actions: write
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          AUTO_MERGE_SOURCES: ${{ vars.AUTO_MERGE_SOURCES }}
+        run: python3 scripts/track-sources.py merge 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+  plan:
+    # Read-only: resolves tips, downloads and verifies archives, edits a
+    # checkout and runs the repository checks. Its token cannot write.
+    needs: [mode, merge]
+    if: always() && needs.mode.result == 'success' && needs.merge.result != 'failure'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      changes: ${{ steps.plan.outputs.changes }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/track-sources.py plan --output "$RUNNER_TEMP/plan" > "$RUNNER_TEMP/summary.md"
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: source-plan
+          path: ${{ runner.temp }}/plan
+          compression-level: 0
+          retention-days: 3
+
+  open-pr:
+    needs: [mode, plan]
+    if: needs.mode.outputs.live == 'true' && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    environment: source-tracking
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      # Optional GitHub App (TRACKER_APP_CLIENT_ID + TRACKER_APP_PRIVATE_KEY in
+      # the source-tracking environment). Without it the workflow token acts,
+      # which needs "Allow GitHub Actions to create and approve pull requests".
+      - id: app
+        if: vars.TRACKER_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.TRACKER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRACKER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-actions: write
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token || github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: source-plan
+          path: ${{ runner.temp }}/plan
+      - env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          FORCE: ${{ inputs.force && '--force' || '' }}
+        run: python3 scripts/track-sources.py open-pr --input "$RUNNER_TEMP/plan" $FORCE 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+  mirror:
+    # Keeps every pinned archive in the verified source cache so builds do
+    # not depend on codeload's rate limits.
+    needs: mode
+    if: needs.mode.outputs.live == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/track-sources.py mirror 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+  mirror-dry-run:
+    needs: mode
+    if: needs.mode.outputs.live != 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/track-sources.py mirror --dry-run 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"

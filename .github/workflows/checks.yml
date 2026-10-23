@@ -20,12 +20,13 @@ jobs:
     outputs:
       packages: ${{ steps.plan.outputs.packages }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Check incremental cache publication
         run: python3 -m unittest discover -s tests
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
@@ -37,7 +38,8 @@ jobs:
       - name: Evaluate all profiles and hardware packages
         run: |
           nix flake check --no-build
-          nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition
+          nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
+            .#checks.aarch64-linux.stage2-tools
       - name: Inspect KDE graphical login configuration
         run: |
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.defaultUnit
@@ -53,19 +55,29 @@ jobs:
     if: needs.evaluate.outputs.packages != '[]'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
         package: ${{ fromJSON(needs.evaluate.outputs.packages) }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: cachix/install-nix-action@v31
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
             extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
             extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
+      - name: Fetch pinned sources with verification and rate-limit backoff
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: python3 scripts/prefetch-sources.py "$PACKAGE"
       - name: Build the pinned Aurora hardware package
         run: nix build --max-jobs 1 --cores 4 --print-build-logs --json '.#${{ matrix.package }}^*' > build.json
       - name: Record output identity and closure
@@ -73,20 +85,37 @@ jobs:
           mapfile -t outputs < <(jq -r '.[].outputs[]' build.json)
           nix path-info --json --recursive "${outputs[@]}" > closure.json
           nix store verify --recursive "${outputs[@]}"
-      - name: Export a signed candidate cache
+      # Build jobs never see the cache key: the export is unsigned, and the
+      # publisher signs only metadata it has verified (publish-cache.yml).
+      - name: Export an unsigned candidate cache
         if: github.event_name != 'pull_request'
-        env:
-          NIX_CACHE_SIGNING_KEY: ${{ secrets.NIX_CACHE_SIGNING_KEY }}
         run: |
           mapfile -t outputs < <(jq -r '.[].outputs[]' build.json)
-          printf '%s' "$NIX_CACHE_SIGNING_KEY" | bash scripts/export-cache /dev/stdin "$PWD/cache" "${outputs[@]}"
-          nix store verify --store "file://$PWD/cache" --all --sigs-needed 1 \
-            --trusted-public-keys "$(cat keys/cache.pub)"
-      - uses: actions/upload-artifact@v4
-        if: always()
+          bash scripts/export-cache "$PWD/cache" "${outputs[@]}"
+          nix store verify --store "file://$PWD/cache" --all --no-trust
+      - id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: success()
         with:
           name: nix-${{ matrix.package }}-closure
           path: |
             build.json
             closure.json
             cache/
+      # Provenance for the exact artifact bytes; publication verifies it.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: success() && github.event_name != 'pull_request'
+        with:
+          subject-name: nix-${{ matrix.package }}-closure.zip
+          subject-digest: sha256:${{ steps.upload.outputs.artifact-digest }}
+      # A failed attempt keeps its log under a name publication never reads, so
+      # a re-run cannot leave an empty artifact beside the real one.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: failed-nix-${{ matrix.package }}-attempt-${{ github.run_attempt }}
+          path: |
+            build.json
+            closure.json
+          if-no-files-found: ignore
+          retention-days: 14
