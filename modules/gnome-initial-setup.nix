@@ -11,6 +11,8 @@
 # - Without systemd userdb, GDM runs the setup session as a preallocated
 #   gnome-initial-setup user, whose group GNOME Initial Setup's polkit rules
 #   trust; gdm-launch-environment admits that group as upstream does.
+# - nixpkgs' module would shadow the session's systemd template with a whole
+#   unit; it is kept a drop-in.
 # - nixpkgs' vendor file skipped the account and password pages (overlay.nix).
 #
 # The setup creates the owner through AccountsService as an administrator
@@ -41,14 +43,27 @@ in {
     services.displayManager.generic.execCmd = lib.mkForce "exec ${pkgs.aurora-gdm}/bin/gdm";
     # The setup session's gnome-session file and gnome-shell mode.
     services.displayManager.gdm.extraPackages = [ pkgs.gnome-initial-setup ];
-    users.users.gnome-initial-setup = {
+    # GDM names each setup session's user gnome-initial-setup, then
+    # gnome-initial-setup-2 and so on while an earlier one is still allocated
+    # (a retried session). Preallocate five, as nixpkgs does for gdm-greeter,
+    # in GDM's greeter UID range just after those.
+    users.users = lib.listToAttrs (lib.genList (i: let
+      name = "gnome-initial-setup" + lib.optionalString (i > 0) "-${toString (i + 1)}";
+    in lib.nameValuePair name {
       isSystemUser = true;
+      uid = 60583 + i;
       group = "gnome-initial-setup";
       description = "GNOME Initial Setup";
       # GDM creates this home for the session, as for its greeter users.
-      home = "/run/gdm/home/gnome-initial-setup";
-    };
+      home = "/run/gdm/home/${name}";
+    }) 5);
     users.groups.gnome-initial-setup = { };
+    # nixpkgs' GNOME Initial Setup module adds a Wants= to this template
+    # instance. As a whole unit file it would replace gnome-session@.target
+    # for the instance, dropping the session manager and the initialized
+    # target, so the setup session would fail as soon as it started. Keep it
+    # a drop-in, like the package's own gnome-initial-setup.conf.
+    systemd.user.targets."gnome-session@gnome-initial-setup".overrideStrategy = "asDropin";
     security.pam.services.gdm-launch-environment.rules = lib.genAttrs [ "auth" "account" "session" ] (_: {
       gdm-user.args = lib.mkForce [ "audit" "quiet_success" "user" "ingroup" "gdm:gnome-initial-setup" ];
     });

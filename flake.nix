@@ -128,11 +128,14 @@
             && lib.any (package: package.pname or "" == "gnome-initial-setup") gnome.services.displayManager.gdm.extraPackages;
           "GNOME Initial Setup keeps its account and password pages" =
             lib.any (lib.hasInfix "aurora-gnome-initial-setup-vendor.conf") gnomePkgs.gnome-initial-setup.mesonFlags;
-          "GDM runs the setup session as its gnome-initial-setup user" =
-            gnome.users.users.gnome-initial-setup.isSystemUser
-            && gnome.users.users.gnome-initial-setup.group == "gnome-initial-setup"
-            && gnome.users.users.gnome-initial-setup.home == "/run/gdm/home/gnome-initial-setup"
+          "GDM runs the setup session as its gnome-initial-setup users" =
+            lib.all (name: let user = gnome.users.users.${name} or { }; in
+              user.isSystemUser or false && user.group or "" == "gnome-initial-setup"
+              && user.home or "" == "/run/gdm/home/${name}")
+              [ "gnome-initial-setup" "gnome-initial-setup-2" "gnome-initial-setup-5" ]
             && lib.length (lib.filter (lib.hasInfix "user ingroup gdm:gnome-initial-setup") launchAuth) == 3;
+          "the setup session keeps gnome-session's template" =
+            gnome.systemd.user.targets."gnome-session@gnome-initial-setup".overrideStrategy == "asDropin";
           "GDM's setup-done marker is cleared only before the display manager starts" =
             lib.elem "display-manager.service" gnome.systemd.services.aurora-gnome-initial-setup.wantedBy
             && lib.elem "display-manager.service" gnome.systemd.services.aurora-gnome-initial-setup.before
