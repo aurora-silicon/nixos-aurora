@@ -7,10 +7,10 @@ on:
         options: [minimal, kde, gnome]
         default: minimal
       channel:
-        description: What /etc/nixos/flake.nix follows (pinned keeps today's exact-commit input)
+        description: Update channel /etc/nixos follows (its flake.lock pins this build's commit either way)
         type: choice
-        options: [pinned, testing, stable]
-        default: pinned
+        options: [testing, stable, pinned]
+        default: testing
 permissions:
   contents: read
 defaults:
@@ -41,11 +41,14 @@ jobs:
           nix build --out-link installer ".#nixosConfigurations.aurora-$DESKTOP.config.system.build.nixos-install"
           nix build --out-link aura .#aura
           nix build --out-link grub ".#nixosConfigurations.aurora-$DESKTOP.pkgs.grub2_efi"
-          nix store verify --recursive ./system ./installer ./aura ./grub
+          # The Stage 2 installed systems refresh on rebuild, checked for the
+          # same aura, the MacBook Neo's device tree and one U-Boot member.
+          nix build --print-build-logs --out-link stage2 .#checks.aarch64-linux.stage2
+          nix store verify --recursive ./system ./installer ./aura ./grub ./stage2
       - name: Assemble the installer filesystem bundle
         env:
           DESKTOP: ${{ inputs.desktop }}
-          AURORA_UPDATE_CHANNEL: ${{ inputs.channel || 'pinned' }}
+          AURORA_UPDATE_CHANNEL: ${{ inputs.channel || 'testing' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y btrfs-progs e2fsprogs dosfstools fdisk zstd

@@ -38,7 +38,8 @@ jobs:
       - name: Evaluate all profiles and hardware packages
         run: |
           nix flake check --no-build
-          nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition
+          nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
+            .#checks.aarch64-linux.stage2-tools
       - name: Inspect KDE graphical login configuration
         run: |
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.defaultUnit

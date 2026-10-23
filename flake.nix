@@ -27,14 +27,10 @@
       overlays.default = import ./overlay.nix;
       nixosModules.image = import ./modules/image.nix;
       nixosModules.default = import ./modules/aurora.nix;
-      # The native installer provisions the EFI chainloader. Installed-system
-      # rebuilds may update Boot but must leave that EFI file in place.
-      nixosModules.installed = {
-        disabledModules = [
-          (apple-silicon.outPath + "/apple-silicon-support/modules/boot-m1n1")
-          (apple-silicon.outPath + "/apple-silicon-support/modules/boot-m1n1/default.nix")
-        ];
-      };
+      # An installed system: the native installer provisioned Stage 1, which
+      # rebuilds never touch; every bootloader install refreshes the ESP
+      # Stage 2 as update-m1n1 does on ALARM and Fedora (modules/installed.nix).
+      nixosModules.installed = import ./modules/installed.nix;
       nixosConfigurations = {
         aurora-kde = makeSystem "kde";
         aurora-gnome = makeSystem "gnome";
@@ -66,9 +62,16 @@
         touch $out
       '';
 
+      # The installed system's checked Stage 2, built from the same inputs as
+      # the image's m1n1/boot.bin (the MacBook Neo's device tree included).
+      # It needs the kernel, so the image workflow builds it next to the system.
+      stage2 = imageProbe.config.system.build.auroraStage2;
+      stage2-tools = imageProbe.config.system.build.auroraStage2Tools;
       firstboot-image = pkgs.runCommand "aurora-firstboot-image-evaluation" {
         stage2Preserved = if builtins.hasAttr "m1n1/boot.bin" imageProbe.config.boot.loader.grub.extraFiles
           || !(builtins.hasAttr "m1n1/boot.bin" (makeSystem "minimal").config.boot.loader.grub.extraFiles)
+          || !(nixpkgs.lib.hasInfix "aurora-install-stage2" imageProbe.config.boot.loader.grub.extraInstallCommands)
+          || imageProbe.config.system.autoUpgrade.enable
           then "0" else "1";
         units = builtins.toJSON {
           firstboot = imageProbe.config.systemd.services.aurora-firstboot.serviceConfig;
@@ -80,7 +83,7 @@
           layout = imageProbe.config.aurora.imageLayout;
         };
       } ''
-        [[ "$stage2Preserved" == 1 ]] || { echo 'installed rebuild must preserve installer EFI payload' >&2; exit 1; }
+        [[ "$stage2Preserved" == 1 ]] || { echo 'installed rebuilds must install Stage 2 through aurora-install-stage2 only, and never upgrade unattended' >&2; exit 1; }
         case "$units" in
           *'What=/dev/mapper/root'*) ;;
           *) echo 'initrd sysroot must use the encrypted root mapper from boot start' >&2; exit 1 ;;

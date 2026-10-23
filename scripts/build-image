@@ -61,13 +61,13 @@ printf 'aurora-btrfs-v1\n' > "$target/usr/lib/aurora/image-format"
 touch "$target/var/lib/aurora/firstboot/pending"
 install -Dm644 "$aura/share/aura/stage1/aura-raw.bin" "$target/boot/efi/aurora/stage1.bin"
 revision=$(git -C "$root" rev-parse HEAD)
-# pinned: the exact image commit (no updates until the owner edits the input).
-# testing/stable: the channel ref the deploy and promotion workflows move.
-channel=${AURORA_UPDATE_CHANNEL:-pinned}
+# What /etc/nixos follows: the testing or stable channel ref (moved only once
+# the signed cache holds that commit's outputs), or "pinned" to this commit.
+# Either way flake.lock pins the commit this image was built from, so the
+# first rebuild reproduces the installed system exactly.
+channel=${AURORA_UPDATE_CHANNEL:-testing}
 [[ $channel =~ ^(pinned|testing|stable)$ ]]
-source_ref=$revision
-[[ $channel == pinned ]] || source_ref=channel-$channel
-python3 - "$target/etc/nixos" "$source_ref" "$desktop" "$root/images/layouts.json" <<'PY'
+python3 - "$target/etc/nixos" "$revision" "$desktop" "$root/images/layouts.json" <<'PY'
 import json,sys
 from pathlib import Path
 out=Path(sys.argv[1]);revision,desktop=sys.argv[2:4];layout=json.load(open(sys.argv[4]))[desktop]
@@ -91,9 +91,12 @@ out=Path(sys.argv[1]);revision,desktop=sys.argv[2:4];layout=json.load(open(sys.a
   }; };
 }
 ''')
-updates=(' This system follows the Aurora '+revision.removeprefix('channel-')+' channel: run sudo nix flake update --flake /etc/nixos, then rebuild, to take its newest signed update.') if revision.startswith('channel-') else ''
-(out/'README').write_text('Run sudo nixos-rebuild switch --flake /etc/nixos#aurora to rebuild this machine. The aurora output stays available when the hostname changes. machine.nix preserves its filesystem identities; owner.nix is written by firstboot. The password hash remains outside the Nix store.'+updates+'\n')
 PY
+# Lock the exact commit (and its pinned nixpkgs and Apple Silicon inputs),
+# then point the input at the channel without changing what is locked.
+(cd "$target/etc/nixos" && nix --extra-experimental-features 'nix-command flakes' flake lock)
+python3 "$root/scripts/follow-channel.py" "$target/etc/nixos" "$revision" "$channel"
+(cd "$target/etc/nixos" && nix --extra-experimental-features 'nix-command flakes' flake lock --no-update-lock-file)
 # Empty identity and host keys are regenerated separately on each Mac.
 rm -f "$target/etc/machine-id" "$target/var/lib/systemd/random-seed" "$target/etc/ssh/"ssh_host_*
 printf 'uninitialized\n' > "$target/etc/machine-id"
