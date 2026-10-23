@@ -1,12 +1,11 @@
 #!/bin/bash
 set -euo pipefail
-key=${1:?signing-key file required; /dev/stdin is supported}
-output=${2:?new cache directory required}
-shift 2
+output=${1:?new cache directory required}
+shift
 (( $# > 0 )) || { echo 'At least one built Nix output is required' >&2; exit 2; }
 [[ ! -e $output ]] || { echo 'Output exists; use a new cache snapshot' >&2; exit 2; }
-# Sign the already verified store paths before copying. The private key is
-# never written into the exported cache or an artifact directory.
-nix store sign --recursive --key-file "$key" "$@"
+# Export the verified store paths and their closure without signing them. The
+# publisher signs only after it has authenticated this artifact and checked
+# every NAR against its metadata; no signing key reaches a build job.
 nix copy --to "file://$output?compression=zstd" "$@"
 nix path-info --recursive --json "$@" > "$output/closure.json"

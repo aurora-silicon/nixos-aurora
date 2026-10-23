@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 
@@ -111,6 +112,36 @@ def store_paths(directory):
     return result
 
 
+class MissingOutputs(ValueError):
+    def __init__(self, packages):
+        super().__init__('Current output proofs missing for: ' + ', '.join(packages))
+        self.packages = packages
+
+
+def newest_per_name(artifacts):
+    """A re-run job uploads under the same name; only the newest upload
+    belongs to the attempt that made the run succeed."""
+    newest = {}
+    for artifact in artifacts:
+        current = newest.get(artifact['name'])
+        if current is None or (artifact.get('created_at', ''), artifact['id']) > (current.get('created_at', ''), current['id']):
+            newest[artifact['name']] = artifact
+    return sorted(newest.values(), key=lambda artifact: artifact['name'])
+
+
+def attests(commit):
+    workflow = subprocess.run(['git', 'show', f'{commit}:.github/workflows/checks.yml'], cwd=ROOT,
+                              capture_output=True, text=True)
+    return 'actions/attest-build-provenance' in workflow.stdout
+
+
+def verify_attestation(archive, commit):
+    subprocess.run(['gh', 'attestation', 'verify', str(archive), '--repo', REPOSITORY,
+                    '--signer-workflow', f'{REPOSITORY}/.github/workflows/checks.yml',
+                    '--source-digest', commit, '--deny-self-hosted-runners'],
+                   check=True, stdout=subprocess.DEVNULL)
+
+
 def collect(runs, output, previous):
     if output.exists():
         raise ValueError('Use a new candidate cache directory')
@@ -126,7 +157,7 @@ def collect(runs, output, previous):
         listing = gh_json(f'repos/{REPOSITORY}/actions/runs/{run}/artifacts?per_page=100')
         if listing['total_count'] > 100:
             raise ValueError('Unexpected native artifact matrix size')
-        for artifact in listing['artifacts']:
+        for artifact in newest_per_name(listing['artifacts']):
             match = re.fullmatch(r'nix-([a-z0-9-]+)-closure', artifact['name'])
             if match is None or match[1] not in needed:
                 continue
@@ -142,16 +173,23 @@ def collect(runs, output, previous):
                                    stdout=stream, check=True)
                 if 'sha256:' + digest(archive) != artifact['digest']:
                     raise ValueError('Native artifact digest mismatch')
+                if attests(metadata['head_sha']):
+                    verify_attestation(archive, metadata['head_sha'])
                 unpack(archive, staging / 'unpacked')
                 source = staging / 'unpacked'
+                if not (source / 'build.json').is_file() or not (source / 'cache').is_dir():
+                    # Not an output of a successful build (an older layout's
+                    # failed attempt); a newer upload carries the real one.
+                    print(f'Skipping artifact {artifact["id"]}: no build record', file=sys.stderr)
+                    continue
                 build = json.loads((source / 'build.json').read_text())
                 if not current_build(build, expected[match[1]]):
                     continue
                 cache = source / 'cache'
-                subprocess.run([
-                    'nix', 'store', 'verify', '--store', cache.as_uri(), '--all', '--sigs-needed', '1',
-                    '--trusted-public-keys', (ROOT / 'keys/cache.pub').read_text().strip(),
-                ], check=True)
+                # Builds export unsigned caches; check every NAR against its
+                # metadata here. publish-cache.yml signs after this check.
+                subprocess.run(['nix', 'store', 'verify', '--store', cache.as_uri(), '--all', '--no-trust'],
+                               check=True)
                 paths = store_paths(cache)
                 if not set(expected[match[1]]['outputs']) <= paths:
                     raise ValueError('The signed cache omits a declared output')
@@ -172,7 +210,7 @@ def collect(runs, output, previous):
                                 'artifact_digest': artifact['digest'], 'package': match[1], 'build': build})
                 needed = {name for name in needed if not set(expected[name]['outputs']) <= covered}
     if needed:
-        raise ValueError('Current output proofs missing for: ' + ', '.join(sorted(needed)))
+        raise MissingOutputs(sorted(needed))
     if not records:
         raise ValueError('The previous snapshot already covers every current output')
     return {'schema': 1, 'expected': expected, 'native_inputs': records,
@@ -184,10 +222,19 @@ def main():
     parser.add_argument('--runs', nargs='+', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--previous-metadata', type=Path)
+    parser.add_argument('--missing-output', type=Path,
+                        help='when outputs lack a current build, write the flake packages to rebuild and exit 3')
     args = parser.parse_args()
     if any(not re.fullmatch('[0-9]+', run) for run in args.runs):
         parser.error('Expected numeric native build IDs')
-    proof = collect(args.runs, args.output.resolve(), args.previous_metadata)
+    try:
+        proof = collect(args.runs, args.output.resolve(), args.previous_metadata)
+    except MissingOutputs as error:
+        if args.missing_output:
+            args.missing_output.write_text(' '.join(error.packages) + '\n')
+            print(error, file=sys.stderr)
+            raise SystemExit(3)
+        raise
     args.output.with_suffix('.json').write_text(json.dumps(proof, indent=2) + '\n')
     print(f'Authenticated {len(proof["native_inputs"])} native cache inputs')
 
