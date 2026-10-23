@@ -611,8 +611,11 @@ def _record_layouts(directory, header, structs, cc):
         probes = ''.join(f'char aurora_probe_{index}[sizeof(struct {name})];\n'
                          for index, name in enumerate(sorted(structs)))
         source.write_text(f'#include "{header}"\n{probes}')
-        output = subprocess.run([cc, '-fsyntax-only', '-w', '-D__user=', '-Xclang', '-fdump-record-layouts',
-                                 '-I', str(directory), str(source)], capture_output=True, text=True, check=True).stdout
+        result = subprocess.run([cc, '-fsyntax-only', '-w', '-D__user=', '-Xclang', '-fdump-record-layouts',
+                                 '-I', str(directory), str(source)], capture_output=True, text=True)
+        if result.returncode:
+            raise RuntimeError(f'{cc} could not lay out the UAPI records: {result.stderr.strip()[-2000:]}')
+        output = result.stdout
     layouts = {}
     for block in output.split('*** Dumping AST Record Layout')[1:]:
         lines = [line.rstrip() for line in block.strip().splitlines() if line.strip()]

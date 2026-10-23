@@ -701,7 +701,13 @@ def run_plan(args, adapter):
         adapter.run_checks(root)
     uapi = None
     if {'kernel-aurora', 'mesa-aurora'} & {item['key'] for item in updated}:
-        uapi = uapi_check(pins)
+        try:
+            uapi = uapi_check(pins)
+        except Exception as error:  # a comparison that cannot run is not a pass
+            lib.log(f'GPU UAPI comparison failed: {error}')
+            uapi = {'compatible': False, 'conflicts': [f'comparison failed: {str(error)[-500:]}'], 'notes': [],
+                    'compared': {'constants': 0, 'structs': 0}, 'kernel_only': [], 'mesa_only': [],
+                    'kernel': pins['kernel-aurora']['commit'], 'mesa': pins['mesa-aurora']['commit']}
     auto, reasons = merge_decision(items, uapi)
     packages = sorted(adapter.RECIPES[item['key']] for item in updated)
     diff = lib.git(root, 'diff', '--binary', '--src-prefix=a/', '--dst-prefix=b/')
