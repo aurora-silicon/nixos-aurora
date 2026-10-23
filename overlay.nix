@@ -72,8 +72,8 @@ in {
         rust-bindgen-unwrapped = final.aurora-bindgen;
       }) {
         pname = "linux-aurora";
-        version = "7.2.10";
-        modDirVersion = "7.2.10";
+        version = "7.3.0";
+        modDirVersion = "7.3.0";
         src = source "kernel-aurora";
         configfile = stableFile ./kernel/config;
         config = kernelConfig;
@@ -92,7 +92,7 @@ in {
           "CFLAGS_MODULE=-I${final.lib.getLib kernelLLVM.clang-unwrapped}/lib/clang/${final.lib.versions.major kernelLLVM.clang-unwrapped.version}/include"
           "CFLAGS_KERNEL=-I${final.lib.getLib kernelLLVM.clang-unwrapped}/lib/clang/${final.lib.versions.major kernelLLVM.clang-unwrapped.version}/include"
         ];
-        extraMeta.branch = "7.2";
+        extraMeta.branch = "7.3";
         features.rust = true;
         kernelPatches = _kernelPatches;
       }).overrideAttrs (old: {
