@@ -67,7 +67,57 @@
       # It needs the kernel, so the image workflow builds it next to the system.
       stage2 = imageProbe.config.system.build.auroraStage2;
       stage2-tools = imageProbe.config.system.build.auroraStage2Tools;
-      firstboot-image = pkgs.runCommand "aurora-firstboot-image-evaluation" {
+      firstboot-image = let
+        inherit (nixpkgs) lib;
+        kde = self.nixosConfigurations.aurora-kde.config;
+        gnome = self.nixosConfigurations.aurora-gnome.config;
+        minimal = self.nixosConfigurations.aurora-minimal.config;
+        firstboot = imageProbe.config.systemd.services.aurora-firstboot;
+        plasmaSetup = kde.systemd.services.plasma-setup;
+        plasmaSetupPackage = self.nixosConfigurations.aurora-kde.pkgs.kdePackages.plasma-setup;
+        installs = packages: lib.any (package: package.pname or "" == "plasma-setup") packages;
+        autologinAuth = lib.splitString "\n" kde.security.pam.services.sddm-autologin.text;
+        lineOf = match: lib.lists.findFirstIndex match null autologinAuth;
+        setupAutologin = lineOf (line: lib.hasPrefix "auth sufficient " line && lib.hasInfix "pam_succeed_if.so" line
+          && lib.hasInfix "user = plasma-setup" line);
+        uidAutologin = lineOf (line: lib.hasInfix "pam_succeed_if.so" line && lib.hasInfix "uid >= 1000" line);
+        # Graphical first boot: each failed expectation is reported by name.
+        desktopExpectations = {
+          "desktop images boot with the spinner splash" = kde.boot.plymouth.enable && gnome.boot.plymouth.enable
+            && kde.boot.plymouth.theme == "spinner" && gnome.boot.plymouth.theme == "spinner";
+          "minimal images boot without a splash" = !minimal.boot.plymouth.enable;
+          "desktop images start graphical.target" = kde.systemd.defaultUnit == "graphical.target"
+            && gnome.systemd.defaultUnit == "graphical.target";
+          "first boot runs while pending, or for aurora.firstboot=text" =
+            firstboot.unitConfig.ConditionPathExists == "|/var/lib/aurora/firstboot/pending"
+            && firstboot.unitConfig.ConditionKernelCommandLine == "|aurora.firstboot=text";
+          "first boot never takes tty1 from Plymouth" = firstboot.serviceConfig.StandardInput == "null"
+            && !(firstboot.serviceConfig ? TTYPath) && !(firstboot.serviceConfig ? TTYVHangup);
+          "images create the owner imperatively" = kde.users.mutableUsers && gnome.users.mutableUsers && minimal.users.mutableUsers;
+          "Plasma Setup runs on KDE images only" = kde.aurora.plasmaSetup.enable
+            && !gnome.aurora.plasmaSetup.enable && !minimal.aurora.plasmaSetup.enable;
+          "Plasma Setup is enabled after the disk step" = lib.elem "multi-user.target" plasmaSetup.wantedBy
+            && lib.elem "aurora-firstboot.service" plasmaSetup.after
+            && plasmaSetup.unitConfig.ConditionPathExists == [ "!/var/lib/aurora/firstboot/pending" "!/var/lib/aurora/firstboot/complete" ];
+          "Plasma Setup's unit, D-Bus helper, tmpfiles and polkit files are installed" = installs kde.systemd.packages
+            && installs kde.services.dbus.packages && installs kde.systemd.tmpfiles.packages && installs kde.environment.systemPackages;
+          "Plasma Setup is patched for NixOS paths" = lib.any (patch: lib.hasSuffix "-plasma-setup-nixos-paths.patch" (toString patch))
+            (plasmaSetupPackage.patches or [ ]);
+          "the setup user is a system user with its sysusers home" = kde.users.users.plasma-setup.isSystemUser
+            && kde.users.users.plasma-setup.home == "/run/plasma-setup" && kde.users.groups ? plasma-setup;
+          "SDDM may log the setup user in automatically, and only it below UID 1000" = setupAutologin != null
+            && uidAutologin != null && setupAutologin < uidAutologin;
+          "SDDM reads Plasma Setup's autologin from /etc/sddm.conf.d" = kde.environment.etc ? "sddm.conf.d/00-nixos.conf";
+          "Plasma Setup's autologin session exists" = lib.elem "plasma" kde.services.displayManager.sessionData.sessionNames;
+          "the Nix build users are not counted as accounts" = kde.security.loginDefs.settings.UID_MAX < kde.ids.uids.nixbld;
+          "SDDM keeps the splash for the disk password, as GDM does" =
+            lib.elem "plymouth-quit.service" kde.systemd.services.display-manager.conflicts
+            && kde.systemd.services.plymouth-quit.wantedBy == [ ]
+            && lib.elem "plymouth-quit.service" gnome.systemd.services.display-manager.conflicts;
+          "GNOME Initial Setup welcomes the owner" = gnome.services.gnome.gnome-initial-setup.enable;
+        };
+      in pkgs.runCommand "aurora-firstboot-image-evaluation" {
+        desktopFailures = lib.concatStringsSep "\n" (lib.attrNames (lib.filterAttrs (_: met: !met) desktopExpectations));
         stage2Preserved = if builtins.hasAttr "m1n1/boot.bin" imageProbe.config.boot.loader.grub.extraFiles
           || !(builtins.hasAttr "m1n1/boot.bin" (makeSystem "minimal").config.boot.loader.grub.extraFiles)
           || !(nixpkgs.lib.hasInfix "aurora-install-stage2" imageProbe.config.boot.loader.grub.extraInstallCommands)
@@ -84,6 +134,10 @@
         };
       } ''
         [[ "$stage2Preserved" == 1 ]] || { echo 'installed rebuilds must install Stage 2 through aurora-install-stage2 only, and never upgrade unattended' >&2; exit 1; }
+        if [[ -n "$desktopFailures" ]]; then
+          printf 'graphical first boot: %s\n' "$desktopFailures" >&2
+          exit 1
+        fi
         case "$units" in
           *'What=/dev/mapper/root'*) ;;
           *) echo 'initrd sysroot must use the encrypted root mapper from boot start' >&2; exit 1 ;;

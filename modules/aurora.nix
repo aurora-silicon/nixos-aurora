@@ -1,6 +1,6 @@
 { config, lib, pkgs, ... }:
 {
-  imports = [ ./firmware.nix ./platform.nix ./firstboot.nix ./sep.nix ];
+  imports = [ ./firmware.nix ./platform.nix ./firstboot.nix ./plasma-setup.nix ./sep.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";
@@ -38,11 +38,39 @@
     boot.consoleLogLevel = lib.mkDefault 3;
     boot.initrd.verbose = lib.mkDefault false;
     boot.kernelParams = [ "quiet" "rd.udev.log_level=3" "udev.log_level=3" "systemd.show_status=auto" ];
+    # Desktop images boot to a splash; first boot asks for the disk password
+    # on it, as every later boot does. The spinner theme needs no ACPI BGRT
+    # firmware logo. Plymouth runs in the systemd initrd.
+    boot.plymouth.enable = lib.mkDefault (config.aurora.desktop != "minimal");
+    boot.plymouth.theme = lib.mkDefault "spinner";
     hardware.graphics.enable = true;
     services.desktopManager.plasma6.enable = config.aurora.desktop == "kde";
     services.displayManager.sddm.enable = config.aurora.desktop == "kde";
     services.desktopManager.gnome.enable = config.aurora.desktop == "gnome";
     services.displayManager.gdm.enable = config.aurora.desktop == "gnome";
+    # GNOME Initial Setup welcomes the owner at the first login (language,
+    # keyboard, online accounts). nixpkgs' GDM never runs its account-creating
+    # mode: GDM looks for the session in its own store path, and NixOS marks it
+    # as already run at every boot. NixOS's display-manager.service is also not
+    # gdm.service, so aurora-firstboot keeps the text wizard on GNOME.
+    services.gnome.gnome-initial-setup.enable = lib.mkIf (config.aurora.desktop == "gnome") true;
+    # GDM keeps the splash until its greeter starts and replaces
+    # plymouth-quit.service; give SDDM the same role, so the splash is still up
+    # when first boot asks for the disk password. If SDDM fails,
+    # plymouth-quit.service still removes the splash.
+    systemd.services.display-manager = lib.mkIf (config.services.displayManager.sddm.enable && config.boot.plymouth.enable) {
+      conflicts = [ "plymouth-quit.service" ];
+      after = [ "plymouth-start.service" ];
+      onFailure = [ "plymouth-quit.service" ];
+      serviceConfig.ExecStartPre = [
+        "-${pkgs.coreutils}/bin/timeout --kill-after=2 20 ${lib.getExe' config.boot.plymouth.package "plymouth"} quit"
+      ];
+    };
+    # As with GDM: if multi-user.target wanted plymouth-quit.service, a
+    # nixos-rebuild switch would stop the display manager to start it.
+    systemd.services.plymouth-quit = lib.mkIf (config.services.displayManager.sddm.enable && config.boot.plymouth.enable) {
+      wantedBy = lib.mkForce [ ];
+    };
     environment.systemPackages = [ pkgs.aurora-bless pkgs.git pkgs.cryptsetup pkgs.btrfs-progs ];
     system.stateVersion = "26.05";
   };

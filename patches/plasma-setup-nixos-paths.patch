@@ -1,0 +1,30 @@
+--- a/config-plasma-setup.h.cmake
++++ b/config-plasma-setup.h.cmake
+@@ -1,4 +1,4 @@
+ #define PLASMA_SETUP_LIBEXECDIR "${KDE_INSTALL_FULL_LIBEXECDIR}"
+-#define PLASMA_SETUP_DONE_FLAG_PATH "${KDE_INSTALL_FULL_SYSCONFDIR}/plasma-setup-done"
++#define PLASMA_SETUP_DONE_FLAG_PATH "/etc/plasma-setup-done"
+ #define PLASMA_SETUP_CONFIG_PATH "${KDE_INSTALL_FULL_CONFDIR}/plasmasetuprc" // The path to the plasma setup configuration file
+ #define LOGIN_DEFS_PATH "${LOGIN_DEFS_PATH}" // Build-time configurable location of login.defs
+--- a/files/plasma-setup.service.in
++++ b/files/plasma-setup.service.in
+@@ -23,7 +23,7 @@ After=systemd-user-sessions.service plymouth-quit.service systemd-logind.service
+ Before=display-manager.service
+ 
+ # Only run if the `plasma-setup-done` flag file does not exist.
+-ConditionPathExists=!${KDE_INSTALL_FULL_SYSCONFDIR}/plasma-setup-done
++ConditionPathExists=!/etc/plasma-setup-done
+ 
+ # Do not run in live environments (known condition for dracut)
+ ConditionKernelCommandLine=!rd.live.image
+--- a/src/auth/authhelper.cpp
++++ b/src/auth/authhelper.cpp
+@@ -108,6 +108,8 @@ private:
+ static QString findExecutable(const QString &executableName)
+ {
+     const QStringList searchPaths = {
++        // NixOS keeps system tools here, outside the PATH of a D-Bus-activated helper.
++        QStringLiteral("/run/current-system/sw/bin"),
+         QStringLiteral("/usr/sbin"),
+         QStringLiteral("/usr/bin"),
+         QStringLiteral("/sbin"),
