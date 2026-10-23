@@ -56,7 +56,7 @@ class CheckBasicsTests(unittest.TestCase):
             write(u / 'bin/konsole', mode=0o755)
             write(u / 'share/applications/org.kde.konsole.desktop')
             (u / 'share/plasma/plasmoids/org.kde.plasma.networkmanagement').mkdir(parents=True)
-            for name in ('Next', 'Altai', 'Kokkini'):
+            for name in ('Next', 'Air', 'Horos', 'Altai', 'Kokkini', 'Canopee', 'Cluster', 'Flow', 'Mountain'):
                 write(u / f'share/wallpapers/{name}/contents/images/1920x1080.png')
         return root
 
@@ -108,7 +108,8 @@ class CheckBasicsTests(unittest.TestCase):
 
     def test_missing_plasma_wallpapers_fails(self):
         def mutate(root):
-            for name in ('Altai', 'Kokkini'):
+            # What plasma-workspace alone ships: Next, Air and Horos.
+            for name in ('Altai', 'Kokkini', 'Canopee', 'Cluster', 'Flow', 'Mountain'):
                 (root / f'usr/share/wallpapers/{name}/contents/images/1920x1080.png').unlink()
         self.assert_fails('kde', mutate, 'plasma-workspace-wallpapers')
 

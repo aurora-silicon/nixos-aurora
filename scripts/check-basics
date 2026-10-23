@@ -160,8 +160,9 @@ def check_wallpaper(root, profile):
         wallpapers = root.path(f'{root.usr}/share/wallpapers')
         packages = [entry for entry in wallpapers.iterdir() if images(entry / 'contents/images')] \
             if wallpapers.is_dir() else []
-        # Plasma's default alone is one package; plasma-workspace-wallpapers adds the rest.
-        if len(packages) < 3:
+        # plasma-workspace ships only its default (Next) and a couple more;
+        # plasma-workspace-wallpapers adds two dozen.
+        if len(packages) < 8:
             return "Plasma's wallpapers (plasma-workspace-wallpapers) are missing"
     return None
 
