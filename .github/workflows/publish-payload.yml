@@ -12,11 +12,15 @@ on:
 permissions:
   contents: write
   actions: read
+  id-token: write
+  attestations: write
 jobs:
   delivery:
-    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@9e7403fec6fd4d2d69a4646b769fcae20acea46b
+    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@2225014a2b2bb2c1e4f4d26c245232c1d8491fed
     with:
       profile: ${{ inputs.profile }}
       image-run: ${{ inputs.image-run }}
+    # The catalog key comes from this repository's catalog-signing
+    # environment, which the reusable workflow's signing job runs in.
     secrets:
-      catalog-signing-key: ${{ secrets.INSTALLER_CATALOG_SIGNING_KEY }}
+      INSTALLER_CATALOG_SIGNING_KEY: ${{ secrets.INSTALLER_CATALOG_SIGNING_KEY }}
