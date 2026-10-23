@@ -46,14 +46,15 @@ mkdir -p "$target/boot/efi"
 mount "${loop}p2" "$target/boot";mkdir -p "$target/boot/efi";mount "${loop}p1" "$target/boot/efi"
 "$installer/bin/nixos-install" --root "$target" --system "$system" --no-root-passwd --no-channel-copy
 # The source image has /boot on GPT partition 2. The macOS installer places
-# it in a different slot, so GRUB must find the ext4 volume by its UUID.
+# it in a different slot. The bootloader install (aurora-harden-grub, from
+# boot.loader.grub.extraInstallCommands) built a core image whose EFI stub
+# finds the ext4 volume by its UUID on the startup disk only.
 [[ $(blkid -s UUID -o value "${loop}p2") == "$boot_uuid" ]]
-embedded_grub="$root/out/$profile-build/embedded-grub.cfg"
-printf 'search.fs_uuid %s root\nset prefix=($root)/grub\n' "$boot_uuid" > "$embedded_grub"
-"$grub/bin/grub-mkimage" -O arm64-efi -C none -d "$grub/lib/grub/arm64-efi" \
-  -c "$embedded_grub" -p /grub -o "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI" \
-  part_gpt ext2 search search_fs_uuid normal configfile linux fat
-grep -aqF "search.fs_uuid $boot_uuid root" "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI"
+[[ -x $grub/bin/grub-mkimage ]]
+grep -qF 'Aurora: look for this installation only on the disk GRUB started from.' "$target/boot/efi/EFI/BOOT/grub.cfg"
+grep -qF "probe --set=aurora_uuid" "$target/boot/efi/EFI/BOOT/grub.cfg"
+grep -qF "\"$boot_uuid\"" "$target/boot/efi/EFI/BOOT/grub.cfg"
+grep -aqF '/EFI/BOOT' "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI"
 ! grep -aqE '\(,gpt[0-9]+\)/grub' "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI"
 install -d -m 0700 "$target/var/lib/aurora/firstboot"
 install -d -m 0755 "$target/usr/lib/aurora" "$target/etc/nixos" "$target/boot/efi/aurora"
