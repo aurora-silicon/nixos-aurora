@@ -56,7 +56,7 @@ untouched, and the channel lock rewrite. `checks.stage2-tools` (CI) shellchecks 
 
 ### Moving an existing install to the channel (one-time)
 
-Images before Alpha 9 pin `/etc/nixos/flake.nix` to one commit. To follow testing:
+Images before Alpha 10 pin `/etc/nixos/flake.nix` to one commit. To follow testing:
 
 ```sh
 sudo sed -i 's|github:aurora-silicon/nixos-aurora/[0-9a-f]\{40\}|github:aurora-silicon/nixos-aurora/channel-testing|' /etc/nixos/flake.nix
