@@ -75,7 +75,10 @@
         firstboot = imageProbe.config.systemd.services.aurora-firstboot;
         plasmaSetup = kde.systemd.services.plasma-setup;
         plasmaSetupPackage = self.nixosConfigurations.aurora-kde.pkgs.kdePackages.plasma-setup;
+        gnomePkgs = self.nixosConfigurations.aurora-gnome.pkgs;
         installs = packages: lib.any (package: package.pname or "" == "plasma-setup") packages;
+        patchedWith = name: package: lib.any (patch: lib.hasSuffix "-${name}" (toString patch)) (package.patches or [ ]);
+        launchAuth = lib.splitString "\n" gnome.security.pam.services.gdm-launch-environment.text;
         autologinAuth = lib.splitString "\n" kde.security.pam.services.sddm-autologin.text;
         lineOf = match: lib.lists.findFirstIndex match null autologinAuth;
         setupAutologin = lineOf (line: lib.hasPrefix "auth sufficient " line && lib.hasInfix "pam_succeed_if.so" line
@@ -88,6 +91,9 @@
           "minimal images boot without a splash" = !minimal.boot.plymouth.enable;
           "desktop images start graphical.target" = kde.systemd.defaultUnit == "graphical.target"
             && gnome.systemd.defaultUnit == "graphical.target";
+          "the splash quits only after first-boot setup" = !(lib.elem "plymouth-quit.service" firstboot.after)
+            && lib.elem "aurora-firstboot.service" kde.systemd.services.plymouth-quit.after
+            && lib.elem "aurora-firstboot.service" gnome.systemd.services.plymouth-quit.after;
           "first boot runs while pending, or for aurora.firstboot=text" =
             firstboot.unitConfig.ConditionPathExists == "|/var/lib/aurora/firstboot/pending"
             && firstboot.unitConfig.ConditionKernelCommandLine == "|aurora.firstboot=text";
@@ -101,8 +107,7 @@
             && plasmaSetup.unitConfig.ConditionPathExists == [ "!/var/lib/aurora/firstboot/pending" "!/var/lib/aurora/firstboot/complete" ];
           "Plasma Setup's unit, D-Bus helper, tmpfiles and polkit files are installed" = installs kde.systemd.packages
             && installs kde.services.dbus.packages && installs kde.systemd.tmpfiles.packages && installs kde.environment.systemPackages;
-          "Plasma Setup is patched for NixOS paths" = lib.any (patch: lib.hasSuffix "-plasma-setup-nixos-paths.patch" (toString patch))
-            (plasmaSetupPackage.patches or [ ]);
+          "Plasma Setup is patched for NixOS paths" = patchedWith "plasma-setup-nixos-paths.patch" plasmaSetupPackage;
           "the setup user is a system user with its sysusers home" = kde.users.users.plasma-setup.isSystemUser
             && kde.users.users.plasma-setup.home == "/run/plasma-setup" && kde.users.groups ? plasma-setup;
           "SDDM may log the setup user in automatically, and only it below UID 1000" = setupAutologin != null
@@ -114,7 +119,28 @@
             lib.elem "plymouth-quit.service" kde.systemd.services.display-manager.conflicts
             && kde.systemd.services.plymouth-quit.wantedBy == [ ]
             && lib.elem "plymouth-quit.service" gnome.systemd.services.display-manager.conflicts;
-          "GNOME Initial Setup welcomes the owner" = gnome.services.gnome.gnome-initial-setup.enable;
+          "GNOME Initial Setup runs on GNOME images only" = gnome.aurora.gnomeInitialSetup.enable
+            && gnome.services.gnome.gnome-initial-setup.enable
+            && !kde.aurora.gnomeInitialSetup.enable && !minimal.aurora.gnomeInitialSetup.enable;
+          "GDM finds GNOME Initial Setup's session in the system profile" =
+            gnome.services.displayManager.generic.execCmd == "exec ${gnomePkgs.aurora-gdm}/bin/gdm"
+            && patchedWith "gdm-initial-setup-session-path.patch" gnomePkgs.aurora-gdm
+            && lib.any (package: package.pname or "" == "gnome-initial-setup") gnome.services.displayManager.gdm.extraPackages;
+          "GNOME Initial Setup keeps its account and password pages" =
+            lib.any (lib.hasInfix "aurora-gnome-initial-setup-vendor.conf") gnomePkgs.gnome-initial-setup.mesonFlags;
+          "GDM runs the setup session as its gnome-initial-setup user" =
+            gnome.users.users.gnome-initial-setup.isSystemUser
+            && gnome.users.users.gnome-initial-setup.group == "gnome-initial-setup"
+            && gnome.users.users.gnome-initial-setup.home == "/run/gdm/home/gnome-initial-setup"
+            && lib.length (lib.filter (lib.hasInfix "user ingroup gdm:gnome-initial-setup") launchAuth) == 3;
+          "GDM's setup-done marker is cleared only before the display manager starts" =
+            lib.elem "display-manager.service" gnome.systemd.services.aurora-gnome-initial-setup.wantedBy
+            && lib.elem "display-manager.service" gnome.systemd.services.aurora-gnome-initial-setup.before
+            && gnome.systemd.services.aurora-gnome-initial-setup.unitConfig.ConditionPathExists == "/run/gdm/gdm.ran-initial-setup";
+          "GNOME declares its account setup to aurora-firstboot" =
+            gnome.environment.etc."aurora/desktop-account-setup".text == "gnome-initial-setup\n"
+            && !(kde.environment.etc ? "aurora/desktop-account-setup")
+            && !(minimal.environment.etc ? "aurora/desktop-account-setup");
         };
       in pkgs.runCommand "aurora-firstboot-image-evaluation" {
         desktopFailures = lib.concatStringsSep "\n" (lib.attrNames (lib.filterAttrs (_: met: !met) desktopExpectations));

@@ -1,0 +1,13 @@
+--- a/daemon/gdm-display.c
++++ b/daemon/gdm-display.c
+@@ -46,7 +46,9 @@
+ #include "gdm-launch-environment.h"
+ #include "gdm-dbus-util.h"
+ 
+-#define GNOME_SESSION_SESSIONS_PATH DATADIR "/gnome-session/sessions"
++/* NixOS: GNOME Initial Setup installs its session in its own package; the
++ * system profile links it next to every other installed session. */
++#define GNOME_SESSION_SESSIONS_PATH "/run/current-system/sw/share/gnome-session/sessions"
+ 
+ typedef struct _GdmDisplayPrivate
+ {

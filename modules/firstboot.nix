@@ -87,17 +87,15 @@ in {
     # The shared aurora-firstboot.service, declared here because the package
     # carries no unit files. Desktop images protect the disk with a password
     # asked on the boot splash, then the desktop's own setup creates the owner
-    # (Plasma Setup on KDE). Minimal images, GNOME (see modules/aurora.nix) and
+    # (Plasma Setup on KDE, GNOME Initial Setup on GNOME). Minimal images and
     # any boot with aurora.firstboot=text use the text wizard on tty1, which
     # creates the owner itself; that option also starts it for recovery while
     # setup is no longer pending but no owner exists.
     systemd.services.aurora-firstboot = {
       description = "Aurora first-boot setup";
       wantedBy = [ "multi-user.target" ];
-      # Plymouth must have started before setup releases it. On console-only
-      # boots plymouth-quit.service is ordered first; a display manager
-      # replaces that unit, and setup then releases the splash itself.
-      after = [ "local-fs.target" "systemd-user-sessions.service" "systemd-vconsole-setup.service" "plymouth-start.service" "plymouth-quit.service" ];
+      # Plymouth must have started before setup uses or releases it.
+      after = [ "local-fs.target" "systemd-user-sessions.service" "systemd-vconsole-setup.service" "plymouth-start.service" ];
       before = [ "display-manager.service" "getty@tty1.service" ];
       unitConfig.RequiresMountsFor = [ "/boot" "/boot/efi" "/home" ];
       unitConfig.ConditionPathExists = "|/var/lib/aurora/firstboot/pending";
@@ -112,6 +110,11 @@ in {
         # the splash is gone.
         StandardInput = "null"; StandardOutput = "journal"; StandardError = "journal";
       };
+    };
+    # The shared plymouth-quit.service drop-in: the splash stays up for the
+    # disk password prompt with any display manager.
+    systemd.services.plymouth-quit = lib.mkIf config.boot.plymouth.enable {
+      after = [ "aurora-firstboot.service" ];
     };
     # The shared plasma-setup.service drop-in: Plasma Setup waits until the
     # disk is protected, and is skipped, never failed, while setup is pending

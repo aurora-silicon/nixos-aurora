@@ -1,6 +1,6 @@
 { config, lib, pkgs, ... }:
 {
-  imports = [ ./firmware.nix ./platform.nix ./firstboot.nix ./plasma-setup.nix ./sep.nix ];
+  imports = [ ./firmware.nix ./platform.nix ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";
@@ -48,12 +48,6 @@
     services.displayManager.sddm.enable = config.aurora.desktop == "kde";
     services.desktopManager.gnome.enable = config.aurora.desktop == "gnome";
     services.displayManager.gdm.enable = config.aurora.desktop == "gnome";
-    # GNOME Initial Setup welcomes the owner at the first login (language,
-    # keyboard, online accounts). nixpkgs' GDM never runs its account-creating
-    # mode: GDM looks for the session in its own store path, and NixOS marks it
-    # as already run at every boot. NixOS's display-manager.service is also not
-    # gdm.service, so aurora-firstboot keeps the text wizard on GNOME.
-    services.gnome.gnome-initial-setup.enable = lib.mkIf (config.aurora.desktop == "gnome") true;
     # GDM keeps the splash until its greeter starts and replaces
     # plymouth-quit.service; give SDDM the same role, so the splash is still up
     # when first boot asks for the disk password. If SDDM fails,
