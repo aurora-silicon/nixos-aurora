@@ -33,6 +33,12 @@ jobs:
           extra_nix_config: |
             extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
             extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
+      # Kernel-derived tools (cpupower and others) are not in the Aurora cache
+      # and need the kernel archive; take every pinned archive from the source
+      # cache (or codeload with Retry-After backoff), verified against
+      # sources.json, instead of fetchurl's three quick retries.
+      - name: Fetch pinned sources with verification and rate-limit backoff
+        run: python3 scripts/prefetch-sources.py
       - name: Build the pinned system and installer closures
         env:
           DESKTOP: ${{ inputs.desktop }}
