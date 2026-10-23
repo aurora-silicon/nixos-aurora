@@ -5,8 +5,8 @@ let
     patchShebangs $out/bin/aurora-peripheral-admission
   '';
   firmwareTools = [ pkgs.coreutils pkgs.util-linux pkgs.cpio pkgs.kmod pkgs.gnugrep pkgs.bash pkgs.systemd ];
-  loadFirmware = pkgs.writeShellApplication {
-    name = "aurora-load-vendor-firmware";
+  extractFirmware = pkgs.writeShellApplication {
+    name = "aurora-extract-vendor-firmware";
     runtimeInputs = firmwareTools;
     text = ''
       property=/sys/firmware/devicetree/base/chosen/asahi,efi-system-partition
@@ -25,6 +25,17 @@ let
         test -s /run/aurora-esp/vendorfw/firmware.cpio
         (cd "$destination"; cpio --quiet --extract --no-absolute-filenames < /run/aurora-esp/vendorfw/firmware.cpio)
       fi
+    '';
+  };
+  loadFirmware = pkgs.writeShellApplication {
+    name = "aurora-load-vendor-firmware";
+    runtimeInputs = firmwareTools;
+    text = ''
+      destination=/run/aurora-firmware
+      # Extraction runs as its own process so that its errors stop it, while
+      # the keyboard and the other peripherals are still admitted below.
+      status=0
+      ${extractFirmware}/bin/aurora-extract-vendor-firmware || status=$?
       export AURORA_FIRMWARE_ROOT="$destination/vendorfw"
       export AURORA_ADMIT_BLUETOOTH=0
       if [[ "''${1:-initrd}" == runtime ]]; then
@@ -39,6 +50,7 @@ let
         export AURORA_ADMIT_BLUETOOTH=1
       fi
       ${admission}/bin/aurora-peripheral-admission
+      exit "$status"
     '';
   };
 in {
@@ -46,9 +58,10 @@ in {
   # Replace build-time extraction with an initrd/runtime ESP handoff.
   hardware.asahi.extractPeripheralFirmware = lib.mkDefault false;
   boot.kernelParams = [ "firmware_class.path=/run/aurora-firmware/vendorfw" ];
-  # Neo input must probe after the ESP firmware reaches the initrd runtime.
+  # The keyboard driver probes from the admission script, after the ESP
+  # firmware reaches the initrd, so it is in the initrd but not autoloaded.
   boot.blacklistedKernelModules = [ "aop" "mt7932-fullmac" "mt7932_bt_pcie" "dockchannel-hid" ];
-  boot.initrd.availableKernelModules = [ "vfat" "nvme_apple" "apple-mailbox" "aop" "mt7932-fullmac" "mt7932_bt_pcie" ];
+  boot.initrd.availableKernelModules = [ "vfat" "nvme_apple" "apple-mailbox" "aop" "mt7932-fullmac" "mt7932_bt_pcie" "dockchannel-hid" ];
   boot.initrd.systemd.services.aurora-vendor-firmware = lib.mkIf config.boot.initrd.systemd.enable {
     description = "Extract this Mac's vendor firmware before peripheral admission";
     wantedBy = [ "initrd.target" ];
@@ -58,7 +71,7 @@ in {
     serviceConfig.Type = "oneshot";
     serviceConfig.ExecStart = "${loadFirmware}/bin/aurora-load-vendor-firmware";
   };
-  boot.initrd.systemd.storePaths = lib.mkIf config.boot.initrd.systemd.enable ([ loadFirmware admission ] ++ map lib.getBin firmwareTools);
+  boot.initrd.systemd.storePaths = lib.mkIf config.boot.initrd.systemd.enable ([ loadFirmware extractFirmware admission ] ++ map lib.getBin firmwareTools);
   systemd.services.aurora-vendor-firmware = {
     description = "Maintain Aurora per-device firmware handoff";
     wantedBy = [ "multi-user.target" ];
