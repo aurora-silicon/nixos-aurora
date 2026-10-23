@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / 'scripts/check-basics'
+SCRIPT = ROOT / 'scripts/check-basics.py'
 BOOT = '2025cecd-807c-5835-9ad4-e547cfdeb279'
 PREAMBLE = '# Aurora: look for this installation only on the disk GRUB started from.\n'
 
