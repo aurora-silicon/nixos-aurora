@@ -345,6 +345,7 @@ jobs:
       pages: write
       id-token: write
       attestations: read
+      actions: write
     uses: ./.github/workflows/deploy-cache.yml
     with:
       release-tag: ${{ needs.release.outputs.tag }}
