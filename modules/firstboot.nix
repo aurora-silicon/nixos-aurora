@@ -32,8 +32,9 @@ in {
     # wedge U-Boot), and a core image grub-install builds on this layout names
     # a fixed partition slot. After every bootloader install, rebuild the core
     # so its EFI stub finds /boot by UUID on the startup disk only.
+    # pkgs.grub2_efi is what the bootloader module installs (no ZFS support here).
     boot.loader.grub.extraInstallCommands = let
-      grubEfi = config.boot.loader.grub.package.override { efiSupport = true; };
+      grubEfi = pkgs.grub2_efi;
     in ''
       ${pkgs.python3.interpreter} ${pkgs.aurora-firstboot}/lib/aurora/aurora-harden-grub / --flavor arch \
         --boot-uuid ${layout.bootUUID} --efi-uuid ${layout.efiUUID} \
