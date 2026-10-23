@@ -3,17 +3,30 @@ on:
   workflow_dispatch:
     inputs:
       build-run:
-        description: Successful native build IDs, newest first
-        required: true
+        description: Optional native build IDs, newest first. Empty lists every eligible checks.yml run
+        default: ''
       base-release:
-        description: Previous immutable cache snapshot
-        required: true
+        description: Optional previous cache snapshot. Empty uses the newest cache-* release
+        default: ''
       release-tag:
-        description: New immutable cache snapshot tag
-        required: true
-permissions:
-  contents: write
-  actions: read
+        description: Optional new tag. Empty creates cache-testing-YYYYMMDD.N
+        default: ''
+      deploy:
+        description: Activate the cache and advance channel-testing (auto follows AUTO_DEPLOY_TESTING)
+        type: choice
+        options: [auto, 'yes', 'no']
+        default: auto
+      dry-run:
+        description: Collect, sign with a throwaway key and verify with Nix; publish nothing
+        type: boolean
+        default: false
+  workflow_run:
+    workflows: [Aurora NixOS checks and builds]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '53 */6 * * *'
+permissions: {}
 defaults:
   run:
     shell: bash
@@ -21,58 +34,318 @@ concurrency:
   group: nix-cache-release
   cancel-in-progress: false
 jobs:
-  publish:
-    if: github.ref == 'refs/heads/main'
+  plan:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (vars.AUTO_PUBLISH_TESTING == 'true' &&
+       (github.event_name == 'schedule' || github.event.workflow_run.conclusion == 'success'))
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 120
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      action: ${{ steps.resolve.outputs.action }}
+      runs: ${{ steps.resolve.outputs.runs }}
+      rebuild: ${{ steps.resolve.outputs.rebuild }}
+      base-release: ${{ steps.base.outputs.tag }}
+      release-tag: ${{ steps.tag.outputs.tag }}
+      dry-run: ${{ steps.mode.outputs.dry-run }}
+      deploy: ${{ steps.mode.outputs.deploy }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
-      - uses: cachix/install-nix-action@v31
-      - name: Authenticate current outputs and collect signed caches
+          persist-credentials: false
+      - id: mode
+        env:
+          DRY_RUN: ${{ inputs.dry-run || false }}
+          DEPLOY: ${{ inputs.deploy || 'auto' }}
+          AUTO_DEPLOY: ${{ vars.AUTO_DEPLOY_TESTING }}
+        run: |
+          if [[ $DRY_RUN != true && $GITHUB_REF != refs/heads/main ]]; then
+            echo 'Only main publishes; use dry-run on other branches.' >&2
+            exit 1
+          fi
+          deploy=false
+          if [[ $DEPLOY == yes || ( $DEPLOY == auto && $AUTO_DEPLOY == true ) ]]; then deploy=true; fi
+          [[ $DRY_RUN != true ]] || deploy=false
+          printf 'dry-run=%s\ndeploy=%s\n' "$DRY_RUN" "$deploy" >> "$GITHUB_OUTPUT"
+      - id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_RELEASE: ${{ inputs.base-release }}
+        run: |
+          set -euo pipefail
+          if [[ -z $BASE_RELEASE ]]; then
+            BASE_RELEASE=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '[.[] | select(.tag_name | startswith("cache-"))] | sort_by(.created_at) | last | .tag_name')
+          fi
+          [[ $BASE_RELEASE =~ ^cache-[A-Za-z0-9._-]+$ ]]
+          echo "tag=$BASE_RELEASE" >> "$GITHUB_OUTPUT"
+          gh release download "$BASE_RELEASE" --repo "$GITHUB_REPOSITORY" --pattern cache-metadata.tar.gz --dir previous
+          python3 scripts/extract-cache-metadata.py previous/cache-metadata.tar.gz previous/site
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+      - id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_RUN: ${{ inputs.build-run }}
-          BASE_RELEASE: ${{ inputs.base-release }}
+        run: |
+          set -euo pipefail
+          python3 scripts/resolve-cache-inputs.py --repository "$GITHUB_REPOSITORY" \
+            --previous-metadata previous/site/cache --output cache-plan.json | tee -a "$GITHUB_STEP_SUMMARY"
+          if [[ -n $BUILD_RUN ]]; then
+            for run in $BUILD_RUN; do [[ $run =~ ^[0-9]+$ ]]; done
+            echo "runs=$BUILD_RUN" >> "$GITHUB_OUTPUT"
+          fi
+      - id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release-tag }}
         run: |
           set -euo pipefail
-          [[ $BASE_RELEASE =~ ^cache-[A-Za-z0-9._-]+$ ]]
+          if [[ -z $RELEASE_TAG ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name' > existing-tags
+            RELEASE_TAG=$(python3 scripts/next-tag.py cache-testing- < existing-tags)
+          fi
           [[ $RELEASE_TAG =~ ^cache-[A-Za-z0-9._-]+$ ]]
-          [[ $BASE_RELEASE != "$RELEASE_TAG" ]]
-          gh release download "$BASE_RELEASE" --repo "$GITHUB_REPOSITORY" \
-            --pattern cache-metadata.tar.gz --dir previous
-          python3 - <<'PY'
-          import re, tarfile
-          from pathlib import Path
-          with tarfile.open('previous/cache-metadata.tar.gz') as archive:
-              entries = archive.getmembers()
-              assert len(entries) < 30000 and sum(item.size for item in entries) < 64 * 1024**2
-              for item in entries:
-                  assert item.isfile() and (item.name == 'index.html'
-                      or re.fullmatch(r'cache/(nix-cache-info|[a-z0-9]{32}[.]narinfo)', item.name))
-              archive.extractall('previous/site', filter='data')
-          PY
-          read -r -a runs <<< "$BUILD_RUN"
+          ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+  collect:
+    needs: plan
+    if: needs.plan.outputs.action == 'publish'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+    outputs:
+      status: ${{ steps.collect.outputs.status }}
+      rebuild: ${{ steps.collect.outputs.rebuild }}
+      metadata-digest: ${{ steps.bundle.outputs.digest }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+      - id: collect
+        name: Authenticate current outputs from native builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_RELEASE: ${{ needs.plan.outputs.base-release }}
+          RUNS: ${{ needs.plan.outputs.runs }}
+        run: |
+          set -euo pipefail
+          gh release download "$BASE_RELEASE" --repo "$GITHUB_REPOSITORY" --pattern cache-metadata.tar.gz --dir previous
+          python3 scripts/extract-cache-metadata.py previous/cache-metadata.tar.gz previous/site
+          read -r -a runs <<< "$RUNS"
+          status=0
           python3 scripts/collect-cache-inputs.py --runs "${runs[@]}" --output candidate-cache \
-            --previous-metadata previous/site/cache
+            --previous-metadata previous/site/cache --missing-output missing-packages.txt || status=$?
+          if (( status == 3 )); then
+            printf 'status=missing\nrebuild=%s\n' "$(cat missing-packages.txt)" >> "$GITHUB_OUTPUT"
+            echo "Outputs without a current build: $(cat missing-packages.txt)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          (( status == 0 ))
+          echo 'status=complete' >> "$GITHUB_OUTPUT"
+      - id: bundle
+        if: steps.collect.outputs.status == 'complete'
+        name: Separate the metadata to sign from the NARs
+        run: |
+          set -euo pipefail
+          mkdir -p metadata
+          cp candidate-cache/*.narinfo candidate-cache/nix-cache-info metadata/
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -cf metadata.tar -C metadata .
+          echo "digest=$(sha256sum metadata.tar | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "$(ls metadata/*.narinfo | wc -l) narinfo files to sign" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.collect.outputs.status == 'complete'
+        with:
+          name: unsigned-cache-metadata
+          path: metadata.tar
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.collect.outputs.status == 'complete'
+        with:
+          name: candidate-cache
+          path: |
+            candidate-cache/nar
+            candidate-cache.json
+          compression-level: 0
+          retention-days: 3
+
+  request-builds:
+    needs: [plan, collect]
+    if: >-
+      always() && needs.plan.outputs.dry-run != 'true' &&
+      (needs.plan.outputs.action == 'missing' || needs.collect.outputs.status == 'missing')
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REBUILD: ${{ needs.collect.outputs.rebuild || needs.plan.outputs.rebuild }}
+        run: |
+          set -euo pipefail
+          active=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/checks.yml/runs?branch=main&per_page=20" \
+            --jq '[.workflow_runs[] | select(.status != "completed")] | length')
+          if (( active )); then
+            echo "A main build is already running; publication waits for it." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh workflow run checks.yml --repo "$GITHUB_REPOSITORY" --ref main -f packages="$REBUILD"
+          echo "Requested native builds on main: $REBUILD" >> "$GITHUB_STEP_SUMMARY"
+
+  sign:
+    # Signs only narinfo metadata (path, NAR hash, size, references) that the
+    # collect job verified; the key comes from the testing-signing environment.
+    needs: [plan, collect]
+    if: needs.plan.outputs.dry-run != 'true' && needs.collect.outputs.status == 'complete'
+    runs-on: ubuntu-24.04
+    environment: testing-signing
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-cache-metadata
+      - env:
+          DIGEST: ${{ needs.collect.outputs.metadata-digest }}
+          NIX_CACHE_SIGNING_KEY: ${{ secrets.NIX_CACHE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          echo "$DIGEST  metadata.tar" | sha256sum -c -
+          mkdir metadata && tar -xf metadata.tar -C metadata
+          printf '%s' "$NIX_CACHE_SIGNING_KEY" |
+            python3 scripts/sign-cache-metadata.py sign --metadata metadata --public-key keys/cache.pub
+          python3 scripts/sign-cache-metadata.py verify --metadata metadata --public-key keys/cache.pub
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signed-cache-metadata
+          path: metadata
+          retention-days: 7
+
+  sign-dry-run:
+    needs: [plan, collect]
+    if: needs.plan.outputs.dry-run == 'true' && needs.collect.outputs.status == 'complete'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-cache-metadata
+      - name: Sign with a throwaway key
+        env:
+          DIGEST: ${{ needs.collect.outputs.metadata-digest }}
+        run: |
+          set -euo pipefail
+          echo "$DIGEST  metadata.tar" | sha256sum -c -
+          mkdir metadata && tar -xf metadata.tar -C metadata
+          mkdir dry-run-key
+          python3 scripts/sign-cache-metadata.py generate-dry-run-key --secret "$RUNNER_TEMP/dry-run.key" \
+            --public dry-run-key/dry-run.pub
+          python3 scripts/sign-cache-metadata.py sign --metadata metadata --public-key dry-run-key/dry-run.pub \
+            < "$RUNNER_TEMP/dry-run.key"
+          rm -f "$RUNNER_TEMP/dry-run.key"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signed-cache-metadata
+          path: metadata
+          retention-days: 3
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dry-run-cache-key
+          path: dry-run-key
+          retention-days: 3
+
+  release:
+    needs: [plan, sign, sign-dry-run]
+    if: always() && (needs.sign.result == 'success' || needs.sign-dry-run.result == 'success')
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    outputs:
+      tag: ${{ needs.plan.outputs.release-tag }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: candidate-cache
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: signed-cache-metadata
+          path: signed
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.plan.outputs.dry-run == 'true'
+        with:
+          name: dry-run-cache-key
+          path: dry-run-key
+      - name: Verify every signature and NAR with Nix, then prepare the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_RELEASE: ${{ needs.plan.outputs.base-release }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release-tag }}
+          DRY_RUN: ${{ needs.plan.outputs.dry-run }}
+        run: |
+          set -euo pipefail
+          cp signed/*.narinfo signed/nix-cache-info candidate-cache/
+          key=keys/cache.pub
+          [[ $DRY_RUN != true ]] || key=dry-run-key/dry-run.pub
+          nix store verify --store "file://$PWD/candidate-cache" --all --sigs-needed 1 \
+            --trusted-public-keys "$(cat "$key")"
+          gh release download "$BASE_RELEASE" --repo "$GITHUB_REPOSITORY" --pattern cache-metadata.tar.gz --dir previous
+          python3 scripts/extract-cache-metadata.py previous/cache-metadata.tar.gz previous/site
           python3 scripts/prepare-cache-publication.py --cache candidate-cache --output publication \
             --previous-metadata previous/site/cache \
             --asset-base "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
           cp candidate-cache.json publication/assets/native-input-proof.json
+          (cd publication/assets && sha256sum -- * > ../SHA256SUMS) && mv publication/SHA256SUMS publication/assets/
+          {
+            echo "### Cache ${RELEASE_TAG}$([[ $DRY_RUN == true ]] && echo ' (dry run, throwaway key)')"
+            echo
+            echo "Nix verified every NAR and signature; $(jq '.paths | length' publication/assets/manifest.json) paths, $(find publication/assets -name '*.nar.*' | wc -l) new NARs."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: needs.plan.outputs.dry-run != 'true'
+        with:
+          subject-checksums: publication/assets/SHA256SUMS
       - name: Publish immutable signed cache assets
+        if: needs.plan.outputs.dry-run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release-tag }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release-tag }}
         run: |
-          gh release create "$RELEASE_TAG" publication/assets/* --target "$GITHUB_SHA" \
+          gh release create "$RELEASE_TAG" publication/assets/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --prerelease --title "Aurora NixOS $RELEASE_TAG" \
-            --notes 'Current native hardware outputs and signed cache assets. Public cache activation separately verifies every signature and NAR over HTTP; physical installation qualification is separate.'
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: cache-publication-evidence
-          path: |
-            candidate-cache.json
-            publication/assets/manifest.json
+            --notes 'Current native hardware outputs and signed cache assets, with a GitHub build provenance attestation (SHA256SUMS). Public cache activation separately verifies every signature and NAR over HTTP; physical installation qualification is separate.'
+
+  deploy:
+    needs: [plan, release]
+    if: needs.plan.outputs.deploy == 'true' && needs.release.result == 'success'
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+      attestations: read
+      actions: write
+    uses: ./.github/workflows/deploy-cache.yml
+    with:
+      release-tag: ${{ needs.release.outputs.tag }}

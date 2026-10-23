@@ -1,0 +1,45 @@
+name: Publish a payload after an image build
+# Optional: with AUTO_PAYLOADS=true, every successful main image build gets a
+# signed installer payload release. Adopting it into the installer catalogs
+# stays a separate, deliberate step in aurora-distributions.
+on:
+  workflow_run:
+    workflows: [Native Aurora NixOS images]
+    types: [completed]
+    branches: [main]
+permissions: {}
+jobs:
+  profile:
+    if: vars.AUTO_PAYLOADS == 'true' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+    outputs:
+      profile: ${{ steps.profile.outputs.profile }}
+    steps:
+      - id: profile
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          profile=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN/artifacts" \
+            --jq '[.artifacts[].name | select(endswith("-candidate"))] | first | rtrimstr("-candidate")')
+          [[ $profile =~ ^nixos-(kde|gnome|minimal)$ ]]
+          echo "profile=$profile" >> "$GITHUB_OUTPUT"
+
+  payload:
+    needs: profile
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
+    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@2225014a2b2bb2c1e4f4d26c245232c1d8491fed
+    with:
+      profile: ${{ needs.profile.outputs.profile }}
+      image-run: ${{ github.event.workflow_run.id }}
+    # The catalog key comes from this repository's catalog-signing
+    # environment, which the reusable workflow's signing job runs in.
+    secrets:
+      INSTALLER_CATALOG_SIGNING_KEY: ${{ secrets.INSTALLER_CATALOG_SIGNING_KEY }}
