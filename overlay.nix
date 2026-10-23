@@ -7,6 +7,13 @@ let
       name = builtins.elemAt matched 0; value = builtins.elemAt matched 1;
     }) (final.lib.splitString "\n" (builtins.readFile ./kernel/config)));
   kernelLLVM = final.llvmPackages_22;
+  # GNOME Initial Setup creates the owner account on GNOME images (its
+  # new-user mode). nixpkgs' vendor file skips the account and password pages,
+  # which only that mode shows; keep its other choices.
+  gnomeInitialSetupVendor = final.writeText "aurora-gnome-initial-setup-vendor.conf" ''
+    [pages]
+    skip=software;timezone;
+  '';
   pins = builtins.fromJSON (builtins.readFile ./sources.json);
   source = name: final.fetchurl {
     name = "${name}-${pins.${name}.commit}.tar.gz";
@@ -32,6 +39,25 @@ in {
         ./patches/powerdevil-no-empty-keyboard-backlight.patch
       ];
     });
+    # NixOS paths: the completion flag in /etc (not the package's etc), and the
+    # system profile for the account helper's useradd, usermod and chpasswd.
+    plasma-setup = kdePrev.plasma-setup.overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ map stableFile [
+        ./patches/plasma-setup-nixos-paths.patch
+      ];
+    });
+  });
+  gnome-initial-setup = prev.gnome-initial-setup.overrideAttrs (old: {
+    mesonFlags = map (flag: if final.lib.hasPrefix "-Dvendor-conf-file=" flag
+      then "-Dvendor-conf-file=${gnomeInitialSetupVendor}" else flag) old.mesonFlags;
+  });
+  # GDM looks for GNOME Initial Setup's session in its own store path. Only the
+  # display manager's daemon uses this build (modules/gnome-initial-setup.nix),
+  # so gnome-shell, which links GDM's library, is not rebuilt.
+  aurora-gdm = prev.gdm.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ map stableFile [
+      ./patches/gdm-initial-setup-session-path.patch
+    ];
   });
   aurora-sep = final.callPackage ./sep/package.nix { };
   libfprint = prev.libfprint.overrideAttrs (old: {

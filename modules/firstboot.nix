@@ -84,21 +84,44 @@ in {
         JobRunningTimeoutSec=infinity
       '';
     };
+    # The shared aurora-firstboot.service, declared here because the package
+    # carries no unit files. Desktop images protect the disk with a password
+    # asked on the boot splash, then the desktop's own setup creates the owner
+    # (Plasma Setup on KDE, GNOME Initial Setup on GNOME). Minimal images and
+    # any boot with aurora.firstboot=text use the text wizard on tty1, which
+    # creates the owner itself; that option also starts it for recovery while
+    # setup is no longer pending but no owner exists.
     systemd.services.aurora-firstboot = {
-      description = "Create the Aurora Linux owner account";
+      description = "Aurora first-boot setup";
       wantedBy = [ "multi-user.target" ];
-      after = [ "local-fs.target" "systemd-user-sessions.service" "systemd-vconsole-setup.service" "plymouth-start.service" "plymouth-quit.service" ];
+      # Plymouth must have started before setup uses or releases it.
+      after = [ "local-fs.target" "systemd-user-sessions.service" "systemd-vconsole-setup.service" "plymouth-start.service" ];
       before = [ "display-manager.service" "getty@tty1.service" ];
       unitConfig.RequiresMountsFor = [ "/boot" "/boot/efi" "/home" ];
-      unitConfig.ConditionPathExists = "/var/lib/aurora/firstboot/pending";
+      unitConfig.ConditionPathExists = "|/var/lib/aurora/firstboot/pending";
+      unitConfig.ConditionKernelCommandLine = "|aurora.firstboot=text";
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
         TimeoutStartSec = "infinity";
         ExecStart = "${pkgs.aurora-firstboot}/lib/aurora/aurora-firstboot";
-        StandardInput = "tty-force"; StandardOutput = "tty"; StandardError = "tty";
-        TTYPath = "/dev/tty1"; TTYReset = true; TTYVHangup = true;
+        # The unit never takes tty1: Plymouth reads the splash password
+        # prompt's keystrokes from it. The text wizard opens tty1 itself once
+        # the splash is gone.
+        StandardInput = "null"; StandardOutput = "journal"; StandardError = "journal";
       };
+    };
+    # The shared plymouth-quit.service drop-in: the splash stays up for the
+    # disk password prompt with any display manager.
+    systemd.services.plymouth-quit = lib.mkIf config.boot.plymouth.enable {
+      after = [ "aurora-firstboot.service" ];
+    };
+    # The shared plasma-setup.service drop-in: Plasma Setup waits until the
+    # disk is protected, and is skipped, never failed, while setup is pending
+    # and when the text wizard created the owner.
+    systemd.services.plasma-setup = lib.mkIf config.aurora.plasmaSetup.enable {
+      after = [ "aurora-firstboot.service" ];
+      unitConfig.ConditionPathExists = [ "!/var/lib/aurora/firstboot/pending" "!/var/lib/aurora/firstboot/complete" ];
     };
     # Until the owner performs the first rebuild, the factory generation still
     # contains its generic hostname. Restore the chosen name after activation.

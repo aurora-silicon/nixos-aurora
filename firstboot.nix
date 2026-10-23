@@ -1,5 +1,5 @@
 { stdenvNoCC, lib, fetchurl, makeWrapper, bash, cryptsetup, btrfs-progs, util-linux,
-  coreutils, systemd, gawk, gnugrep, gnused, python3, shadow, sudo, kbd, glibc }:
+  coreutils, systemd, gawk, gnugrep, gnused, python3, shadow, sudo, kbd, glibc, procps }:
 let
   pin = (builtins.fromJSON (builtins.readFile ./sources.json)).aurora-firstboot;
   rootTools = [ bash cryptsetup btrfs-progs util-linux coreutils systemd gawk gnugrep gnused ];
@@ -16,7 +16,10 @@ in stdenvNoCC.mkDerivation {
       --replace-fail /usr/lib/aurora/vendor/omarchy-mac-encrypt $out/lib/aurora/vendor/omarchy-mac-encrypt
     patchShebangs $out/lib/aurora
     wrapProgram $out/lib/aurora/aurora-initrd-root --prefix PATH : ${lib.makeBinPath rootTools}
-    wrapProgram $out/lib/aurora/aurora-firstboot --prefix PATH : ${lib.makeBinPath (rootTools ++ [ python3 shadow sudo kbd glibc.getent ])}
+    # The Plymouth client is the one the system runs (installed with
+    # boot.plymouth.enable), so it is found in the system profile last.
+    wrapProgram $out/lib/aurora/aurora-firstboot --prefix PATH : ${lib.makeBinPath (rootTools ++ [ python3 shadow sudo kbd glibc.getent procps ])} \
+      --suffix PATH : /run/current-system/sw/bin
     # NixOS declares units through its modules rather than importing /usr paths.
     rm -r $out/lib/systemd
     runHook postInstall
