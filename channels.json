@@ -1,0 +1,36 @@
+{
+  "cache": {
+    "actor": "DjDeveloperr",
+    "commit": "26484095dd1ce738f0218fcc2e7c967824829b9d",
+    "deployed_at": "2026-10-23T18:52:06Z",
+    "provenance": "verified",
+    "released_at": "2026-10-23T16:56:40Z",
+    "run_id": "40006648633",
+    "tag": "cache-testing-20261023.8"
+  },
+  "channels": {
+    "testing": {
+      "actor": "DjDeveloperr",
+      "commit": "26484095dd1ce738f0218fcc2e7c967824829b9d",
+      "deployed_at": "2026-10-23T18:52:06Z",
+      "provenance": "verified",
+      "released_at": "2026-10-23T16:56:40Z",
+      "run_id": "40006648633",
+      "tag": "cache-testing-20261023.8"
+    }
+  },
+  "history": [
+    {
+      "actor": "DjDeveloperr",
+      "channel": "testing",
+      "commit": "26484095dd1ce738f0218fcc2e7c967824829b9d",
+      "deployed_at": "2026-10-23T18:52:06Z",
+      "provenance": "verified",
+      "released_at": "2026-10-23T16:56:40Z",
+      "run_id": "40006648633",
+      "tag": "cache-testing-20261023.8"
+    }
+  ],
+  "repository": "aurora-silicon/nixos-aurora",
+  "schema": 1
+}
