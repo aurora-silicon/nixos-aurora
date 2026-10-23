@@ -54,16 +54,29 @@ jobs:
     needs: mode
     if: needs.mode.outputs.live == 'true'
     runs-on: ubuntu-24.04
+    environment: source-tracking
     permissions:
       contents: write
       pull-requests: write
       actions: write
     steps:
+      # Optional GitHub App (TRACKER_APP_CLIENT_ID + TRACKER_APP_PRIVATE_KEY in
+      # the source-tracking environment). Without it the workflow token acts,
+      # which needs "Allow GitHub Actions to create and approve pull requests".
+      - id: app
+        if: vars.TRACKER_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.TRACKER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRACKER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-actions: write
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
       - env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
           AUTO_MERGE_SOURCES: ${{ vars.AUTO_MERGE_SOURCES }}
         run: python3 scripts/track-sources.py merge 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -100,20 +113,34 @@ jobs:
     needs: [mode, plan]
     if: needs.mode.outputs.live == 'true' && needs.plan.result == 'success'
     runs-on: ubuntu-24.04
+    environment: source-tracking
     permissions:
       contents: write
       pull-requests: write
       actions: write
     steps:
+      # Optional GitHub App (TRACKER_APP_CLIENT_ID + TRACKER_APP_PRIVATE_KEY in
+      # the source-tracking environment). Without it the workflow token acts,
+      # which needs "Allow GitHub Actions to create and approve pull requests".
+      - id: app
+        if: vars.TRACKER_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.TRACKER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRACKER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-actions: write
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          token: ${{ steps.app.outputs.token || github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: source-plan
           path: ${{ runner.temp }}/plan
       - env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
           FORCE: ${{ inputs.force && '--force' || '' }}
         run: python3 scripts/track-sources.py open-pr --input "$RUNNER_TEMP/plan" $FORCE 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
 

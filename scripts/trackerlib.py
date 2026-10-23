@@ -292,7 +292,18 @@ def uapi_check(pins, kernel_key='kernel-aurora', mesa_key='mesa-aurora', workdir
                        Path(temporary) / 'kernel')
         m = fetch_uapi(lib.repository_slug(mesa['repository']), mesa['commit'], 'include/drm-uapi',
                        Path(temporary) / 'mesa')
-        report = lib.uapi_report(k, m)
+        # Newer kernel UAPI headers include linux/bits.h and linux/const.h,
+        # which an older system linux-libc-dev lacks; the kernel's own copies
+        # are used only where the system has none.
+        compat = Path(temporary) / 'compat'
+        slug = lib.repository_slug(kernel['repository'])
+        for name in ('bits.h', 'const.h'):
+            result = lib.gh('api', '-H', 'Accept: application/vnd.github.raw',
+                            f'repos/{slug}/contents/include/uapi/linux/{name}?ref={kernel["commit"]}', check=False)
+            if result.returncode == 0:
+                (compat / 'linux').mkdir(parents=True, exist_ok=True)
+                (compat / 'linux' / name).write_text(result.stdout)
+        report = lib.uapi_report(k, m, extra_includes=[compat])
     report['kernel'] = kernel['commit']
     report['mesa'] = mesa['commit']
     return report

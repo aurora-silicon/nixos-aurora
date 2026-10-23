@@ -580,7 +580,24 @@ def _uapi_symbols(text):
     return macros, enumerators, structs
 
 
-def _compile_values(directory, header, names, cc):
+def _include_flags(directory, extra):
+    flags = ['-I', str(directory)]
+    for path in extra or ():
+        flags += ['-idirafter', str(path)]  # only where the system lacks a header
+    return flags
+
+
+def _check_header(directory, header, cc, extra=None):
+    with tempfile.TemporaryDirectory(prefix='aurora-uapi-') as temporary:
+        source = Path(temporary) / 'header.c'
+        source.write_text(f'#include "{header}"\n')
+        result = subprocess.run([cc, '-fsyntax-only', '-w', '-D__user=', *_include_flags(directory, extra),
+                                 str(source)], capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(f'{cc} cannot compile {directory / header}: {result.stderr.strip()[-2000:]}')
+
+
+def _compile_values(directory, header, names, cc, extra=None):
     """Evaluate integer constant expressions with the host compiler."""
     if not names:
         return {}
@@ -589,21 +606,21 @@ def _compile_values(directory, header, names, cc):
         binary = Path(temporary) / 'probe'
         body = ''.join(f'  printf("%s %lld\\n", "{name}", (long long)({name}));\n' for name in sorted(names))
         source.write_text(f'#include <stdio.h>\n#include "{header}"\nint main(void) {{\n{body}  return 0;\n}}\n')
-        result = subprocess.run([cc, '-w', '-D__user=', '-I', str(directory), '-o', str(binary), str(source)],
-                                capture_output=True, text=True)
+        result = subprocess.run([cc, '-w', '-D__user=', *_include_flags(directory, extra), '-o', str(binary),
+                                 str(source)], capture_output=True, text=True)
         if result.returncode:
             if len(names) == 1:
                 return {next(iter(names)): None}
             # Some macros are not integer constants; probe them one by one.
             values = {}
             for name in names:
-                values.update(_compile_values(directory, header, {name}, cc))
+                values.update(_compile_values(directory, header, {name}, cc, extra))
             return values
         output = subprocess.check_output([str(binary)], text=True)
     return {name: int(value) for name, value in (line.split(' ', 1) for line in output.splitlines())}
 
 
-def _record_layouts(directory, header, structs, cc):
+def _record_layouts(directory, header, structs, cc, extra=None):
     if not structs:
         return {}
     with tempfile.TemporaryDirectory(prefix='aurora-uapi-') as temporary:
@@ -612,7 +629,7 @@ def _record_layouts(directory, header, structs, cc):
                          for index, name in enumerate(sorted(structs)))
         source.write_text(f'#include "{header}"\n{probes}')
         result = subprocess.run([cc, '-fsyntax-only', '-w', '-D__user=', '-Xclang', '-fdump-record-layouts',
-                                 '-I', str(directory), str(source)], capture_output=True, text=True)
+                                 *_include_flags(directory, extra), str(source)], capture_output=True, text=True)
         if result.returncode:
             raise RuntimeError(f'{cc} could not lay out the UAPI records: {result.stderr.strip()[-2000:]}')
         output = result.stdout
@@ -641,7 +658,7 @@ def _record_layouts(directory, header, structs, cc):
     return layouts
 
 
-def uapi_report(kernel_dir, mesa_dir, header='asahi_drm.h', cc=None):
+def uapi_report(kernel_dir, mesa_dir, header='asahi_drm.h', cc=None, extra_includes=None):
     """Compare the GPU UAPI as the kernel defines it and as Mesa uses it.
 
     Only definitions present on both sides can conflict: a different value,
@@ -657,14 +674,17 @@ def uapi_report(kernel_dir, mesa_dir, header='asahi_drm.h', cc=None):
     m_macros, m_enums, m_structs = _uapi_symbols((mesa_dir / header).read_text())
     constants = (k_macros | k_enums) & (m_macros | m_enums)
     structs = k_structs & m_structs
-    k_values = _compile_values(kernel_dir, header, constants, cc)
-    m_values = _compile_values(mesa_dir, header, constants, cc)
+    extra = extra_includes or ()
+    _check_header(kernel_dir, header, cc, extra)
+    _check_header(mesa_dir, header, cc, extra)
+    k_values = _compile_values(kernel_dir, header, constants, cc, extra)
+    m_values = _compile_values(mesa_dir, header, constants, cc, extra)
     conflicts, notes = [], []
     for name in sorted(constants):
         if k_values.get(name) != m_values.get(name):
             conflicts.append(f'{name}: kernel {k_values.get(name)} != Mesa {m_values.get(name)}')
-    k_layout = _record_layouts(kernel_dir, header, structs, cc)
-    m_layout = _record_layouts(mesa_dir, header, structs, cc)
+    k_layout = _record_layouts(kernel_dir, header, structs, cc, extra)
+    m_layout = _record_layouts(mesa_dir, header, structs, cc, extra)
     for name in sorted(structs):
         left, right = k_layout.get(name), m_layout.get(name)
         if not left or not right:
