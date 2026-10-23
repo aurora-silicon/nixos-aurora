@@ -33,6 +33,11 @@
       "vfat" "dm-crypt" "btrfs" "ext4" "aop" "mt7932-fullmac" "mt7932_bt_pcie"
     ];
     boot.supportedFilesystems = [ "ext4" "btrfs" ];
+    # Quiet by default: failures still reach the console, and systemd shows
+    # status only when a unit fails or stalls.
+    boot.consoleLogLevel = lib.mkDefault 3;
+    boot.initrd.verbose = lib.mkDefault false;
+    boot.kernelParams = [ "quiet" "rd.udev.log_level=3" "udev.log_level=3" "systemd.show_status=auto" ];
     hardware.graphics.enable = true;
     services.desktopManager.plasma6.enable = config.aurora.desktop == "kde";
     services.displayManager.sddm.enable = config.aurora.desktop == "kde";

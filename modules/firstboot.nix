@@ -28,6 +28,18 @@ in {
     fileSystems."/boot".device = lib.mkForce "/dev/disk/by-uuid/${layout.bootUUID}";
     fileSystems."/boot/efi".device = lib.mkForce "/dev/disk/by-uuid/${layout.efiUUID}";
     boot.initrd.systemd.storePaths = [ pkgs.aurora-firstboot ] ++ pkgs.aurora-firstboot.initrdInputs;
+    # GRUB must never probe other disks or NVMe namespaces (probing them can
+    # wedge U-Boot), and a core image grub-install builds on this layout names
+    # a fixed partition slot. After every bootloader install, rebuild the core
+    # so its EFI stub finds /boot by UUID on the startup disk only.
+    # pkgs.grub2_efi is what the bootloader module installs (no ZFS support here).
+    boot.loader.grub.extraInstallCommands = let
+      grubEfi = pkgs.grub2_efi;
+    in ''
+      ${pkgs.python3.interpreter} ${pkgs.aurora-firstboot}/lib/aurora/aurora-harden-grub / --flavor arch \
+        --boot-uuid ${layout.bootUUID} --efi-uuid ${layout.efiUUID} \
+        --grub-mkimage ${grubEfi}/bin/grub-mkimage --grub-modules ${grubEfi}/lib/grub/arm64-efi
+    '';
     boot.initrd.systemd.contents."/etc/aurora/image-layout".source = layoutFile;
     # Take over any watchdog still running at handoff before a long in-place
     # encryption pass can outlast its timeout.
@@ -75,7 +87,7 @@ in {
     systemd.services.aurora-firstboot = {
       description = "Create the Aurora Linux owner account";
       wantedBy = [ "multi-user.target" ];
-      after = [ "local-fs.target" "systemd-user-sessions.service" "systemd-vconsole-setup.service" "plymouth-start.service" ];
+      after = [ "local-fs.target" "systemd-user-sessions.service" "systemd-vconsole-setup.service" "plymouth-start.service" "plymouth-quit.service" ];
       before = [ "display-manager.service" "getty@tty1.service" ];
       unitConfig.RequiresMountsFor = [ "/boot" "/boot/efi" "/home" ];
       unitConfig.ConditionPathExists = "/var/lib/aurora/firstboot/pending";
