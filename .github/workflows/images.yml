@@ -6,6 +6,11 @@ on:
         type: choice
         options: [minimal, kde, gnome]
         default: minimal
+      channel:
+        description: What /etc/nixos/flake.nix follows (pinned keeps today's exact-commit input)
+        type: choice
+        options: [pinned, testing, stable]
+        default: pinned
 permissions:
   contents: read
 defaults:
@@ -15,9 +20,15 @@ jobs:
   image:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: cachix/install-nix-action@v31
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
         with:
           extra_nix_config: |
             extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
@@ -34,11 +45,16 @@ jobs:
       - name: Assemble the installer filesystem bundle
         env:
           DESKTOP: ${{ inputs.desktop }}
+          AURORA_UPDATE_CHANNEL: ${{ inputs.channel || 'pinned' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y btrfs-progs e2fsprogs dosfstools fdisk zstd
-          sudo env PATH="$PATH" bash scripts/build-image "$DESKTOP" "$(readlink -f system)" "$(readlink -f installer)" "$(readlink -f aura)" "$(readlink -f grub)" 2>&1 | tee image-build.log
-      - uses: actions/upload-artifact@v4
+          sudo env PATH="$PATH" AURORA_UPDATE_CHANNEL="$AURORA_UPDATE_CHANNEL" bash scripts/build-image "$DESKTOP" "$(readlink -f system)" "$(readlink -f installer)" "$(readlink -f aura)" "$(readlink -f grub)" 2>&1 | tee image-build.log
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: success()
+        with:
+          subject-path: out/*-filesystems.tar.zst
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: nixos-${{ inputs.desktop }}-candidate

@@ -5,10 +5,33 @@ on:
       release-tag:
         description: Immutable release with signed NARs and cache-metadata.tar.gz
         required: true
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+      advance-testing:
+        description: Point channel-testing at the release's commit
+        type: boolean
+        default: true
+      allow-downgrade:
+        description: Allow a source pin to move backwards (rollback); requires stable-promotion approval
+        type: boolean
+        default: false
+      dry-run:
+        description: Authenticate and assemble only; deploy and record nothing
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      release-tag:
+        type: string
+        required: true
+      advance-testing:
+        type: boolean
+        default: true
+      allow-downgrade:
+        type: boolean
+        default: false
+      dry-run:
+        type: boolean
+        default: false
+permissions: {}
 defaults:
   run:
     shell: bash
@@ -16,31 +39,108 @@ concurrency:
   group: nix-cache-publication
   cancel-in-progress: false
 jobs:
-  deploy:
-    runs-on: ubuntu-24.04-arm
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+  approve:
+    if: inputs.allow-downgrade
+    runs-on: ubuntu-24.04
+    environment: stable-promotion
+    permissions: {}
     steps:
-      - uses: actions/checkout@v5
-      - uses: cachix/install-nix-action@v31
-      - name: Authenticate every cache entry and NAR
+      - run: echo 'Rollback approved.' >> "$GITHUB_STEP_SUMMARY"
+
+  assemble:
+    needs: approve
+    if: always() && (needs.approve.result == 'success' || needs.approve.result == 'skipped')
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+      - name: Authenticate every cache entry and NAR, and the pin history
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release-tag }}
+          ADVANCE: ${{ inputs.advance-testing }}
+          ALLOW_DOWNGRADE: ${{ inputs.allow-downgrade }}
         run: |
-          [[ $RELEASE_TAG =~ ^cache-[A-Za-z0-9._-]+$ ]]
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern cache-metadata.tar.gz --dir snapshot
-          python3 - <<'PY'
-          import tarfile
-          with tarfile.open('snapshot/cache-metadata.tar.gz') as archive:
-              archive.extractall('site', filter='data')
-          PY
-          python3 scripts/verify-published-cache.py --cache-dir site/cache --public-key keys/cache.pub
-          cp keys/cache.pub site/cache.pub
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+          set -euo pipefail
+          flags=()
+          [[ $ADVANCE != true ]] || flags+=(--advance-testing)
+          [[ $ALLOW_DOWNGRADE != true ]] || flags+=(--allow-downgrade)
+          python3 scripts/cache-channels.py assemble --tag "$RELEASE_TAG" "${flags[@]}" --site site \
+            --work "$RUNNER_TEMP/assemble" --state-out channel-state.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: channel-state
+          path: channel-state.json
+          retention-days: 30
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        if: ${{ !inputs.dry-run }}
         with:
           path: site
+
+  deploy:
+    needs: assemble
+    if: always() && needs.assemble.result == 'success' && !inputs.dry-run
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+  record:
+    needs: deploy
+    if: always() && needs.deploy.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: channel-state
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          ADVANCE: ${{ inputs.advance-testing }}
+        run: |
+          channels=()
+          [[ $ADVANCE != true ]] || channels=(testing)
+          python3 scripts/cache-channels.py record --state channel-state.json --channels "${channels[@]}"
+
+  images:
+    # Optional (AUTO_IMAGES=true): rebuild the three images when main is the
+    # commit testing now serves, so every hardware output is in the cache.
+    needs: record
+    if: always() && needs.record.result == 'success' && inputs.advance-testing && vars.AUTO_IMAGES == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release-tag }}
+        run: |
+          set -euo pipefail
+          commit=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .target_commitish)
+          main=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [[ $commit != "$main" ]]; then
+            echo "main moved past $commit; images wait for the next cache." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          for desktop in minimal kde gnome; do
+            gh workflow run images.yml --repo "$GITHUB_REPOSITORY" --ref main -f desktop="$desktop"
+          done

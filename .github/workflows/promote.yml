@@ -1,0 +1,73 @@
+name: Promote the testing channel to stable
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: nixos-aurora commit to promote; empty promotes what channel-testing serves now
+        default: ''
+      allow-downgrade:
+        description: Allow a source pin to move backwards relative to stable
+        type: boolean
+        default: false
+permissions: {}
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: nix-cache-publication
+  cancel-in-progress: false
+jobs:
+  approve:
+    runs-on: ubuntu-24.04
+    environment: stable-promotion
+    permissions: {}
+    steps:
+      - env:
+          COMMIT: ${{ inputs.commit }}
+        run: echo "Approved promotion of ${COMMIT:-the current testing commit}." >> "$GITHUB_STEP_SUMMARY"
+
+  verify:
+    needs: approve
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+      - name: Check soak time, pin history and signed cache coverage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ inputs.commit }}
+          ALLOW_DOWNGRADE: ${{ inputs.allow-downgrade }}
+          MIN_SOAK_HOURS: ${{ vars.STABLE_MIN_SOAK_HOURS || '0' }}
+        run: |
+          set -euo pipefail
+          flags=()
+          [[ $ALLOW_DOWNGRADE != true ]] || flags=(--allow-downgrade)
+          python3 scripts/cache-channels.py promote --commit "$COMMIT" "${flags[@]}" \
+            --min-soak-hours "$MIN_SOAK_HOURS" --state-out channel-state.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: channel-state
+          path: channel-state.json
+          retention-days: 30
+
+  record:
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: channel-state
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/cache-channels.py record --state channel-state.json --channels stable
