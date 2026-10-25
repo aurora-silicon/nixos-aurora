@@ -257,13 +257,13 @@ class TrackerTests(unittest.TestCase):
                 'mesa-aurora': {'repository': 'https://github.com/aurora-silicon/mesa', 'commit': A}}
         tips = {'aurora-silicon/aura': A, 'aurora-silicon/mesa': B}
         resolve = lambda slug, branch: {'sha': tips[slug], 'date': '2026-10-23T00:00:00Z', 'subject': 's'}
-        compare = lambda slug, base, head: {'status': 'diverged', 'commits': []}
+        compare = lambda slug, base, head, branch: {'status': 'diverged', 'commits': []}
         items = {item['key']: item for item in tl.plan(Path('.'), self.tracking(), pins, resolve, compare)}
         self.assertEqual(items['aura']['status'], 'current')
         self.assertEqual(items['kernel-aurora']['status'], 'repository-switch-required')
         self.assertEqual(items['mesa-aurora']['status'], 'update')
         self.assertTrue(items['mesa-aurora']['rewritten'])
-        compare_behind = lambda slug, base, head: {'status': 'behind', 'commits': []}
+        compare_behind = lambda slug, base, head, branch: {'status': 'behind', 'commits': []}
         items = {item['key']: item for item in tl.plan(Path('.'), self.tracking(), pins, resolve, compare_behind)}
         self.assertEqual(items['mesa-aurora']['status'], 'pin-ahead-of-branch')
 
@@ -325,6 +325,86 @@ class TrackerTests(unittest.TestCase):
         self.assertEqual(len(lib.served_on(state, 'testing', 'tag', 'testing-1')), 1)
         with self.assertRaises(ValueError):
             lib.record_channel(state, 'beta', {})
+
+
+
+class CompareTests(unittest.TestCase):
+    DIFF_ERROR = ('gh api repos/o/r/compare failed: gh: Server Error: Sorry, this diff is '
+                  'temporarily unavailable due to heavy server load. (HTTP 500)')
+
+    def runner(self, rest=None, graphql=None):
+        calls = []
+
+        def run(*args):
+            calls.append(args)
+            if args[1] == 'graphql':
+                return subprocess.CompletedProcess(args, 0, json.dumps(graphql), '')
+            if isinstance(rest, Exception):
+                raise rest
+            return subprocess.CompletedProcess(args, 0, json.dumps(rest), '')
+        return run, calls
+
+    @staticmethod
+    def branch(target, status, ahead_by, behind_by, history=()):
+        nodes = [{'oid': oid, 'messageHeadline': f'commit {oid[0]}'} for oid in history]
+        return {'data': {'repository': {'ref': {
+            'target': {'oid': target, 'history': {'nodes': nodes}},
+            'compare': {'status': status, 'aheadBy': ahead_by, 'behindBy': behind_by}}}}}
+
+    def test_rest_comparison_is_used_when_it_answers(self):
+        rest = {'status': 'ahead', 'ahead_by': 1, 'behind_by': 0,
+                'commits': [{'sha': B, 'commit': {'message': 'subject\nbody'}}]}
+        run, calls = self.runner(rest)
+        self.assertEqual(lib.compare('o/r', A, B, branch='main', run=run),
+                         {'status': 'ahead', 'ahead_by': 1, 'behind_by': 0,
+                          'commits': [{'sha': B, 'subject': 'subject'}]})
+        self.assertEqual([c[1] for c in calls], ['repos/o/r/compare/' + A + '...' + B])
+
+    def test_an_unavailable_diff_is_compared_on_the_branch_in_reverse(self):
+        C = 'c' * 40
+        # The branch at B is two commits ahead of the pin A: GraphQL reports A behind.
+        run, calls = self.runner(RuntimeError(self.DIFF_ERROR),
+                                 self.branch(B, 'BEHIND', 0, 2, history=[B, C, A]))
+        self.assertEqual(lib.compare('o/r', A, B, branch='main', run=run),
+                         {'status': 'ahead', 'ahead_by': 2, 'behind_by': 0,
+                          'commits': [{'sha': C, 'subject': 'commit c'},
+                                      {'sha': B, 'subject': 'commit b'}]})
+        self.assertIn('-f', calls[1])
+        self.assertIn('ref=refs/heads/main', calls[1])
+        self.assertIn('base=' + A, calls[1])
+        for graphql, rest in [('AHEAD', 'behind'), ('DIVERGED', 'diverged'), ('IDENTICAL', 'identical')]:
+            run, _ = self.runner(RuntimeError(self.DIFF_ERROR), self.branch(B, graphql, 3, 1))
+            relation = lib.compare('o/r', A, B, branch='main', run=run)
+            self.assertEqual((relation['status'], relation['ahead_by'], relation['behind_by']), (rest, 1, 3))
+
+    def test_a_branch_that_moved_or_vanished_is_not_compared(self):
+        run, _ = self.runner(RuntimeError(self.DIFF_ERROR), self.branch('c' * 40, 'BEHIND', 0, 2))
+        with self.assertRaisesRegex(RuntimeError, 'moved'):
+            lib.compare('o/r', A, B, branch='main', run=run)
+        run, _ = self.runner(RuntimeError(self.DIFF_ERROR), {'data': {'repository': {'ref': None}}})
+        with self.assertRaisesRegex(RuntimeError, 'not found'):
+            lib.compare('o/r', A, B, branch='main', run=run)
+
+    def test_other_failures_and_branchless_comparisons_still_fail(self):
+        run, calls = self.runner(RuntimeError('gh api failed: Not Found (HTTP 404)'))
+        with self.assertRaisesRegex(RuntimeError, '404'):
+            lib.compare('o/r', A, B, branch='main', run=run)
+        run, calls = self.runner(RuntimeError(self.DIFF_ERROR))
+        with self.assertRaisesRegex(RuntimeError, 'diff'):
+            lib.compare('o/r', A, B, run=run)
+        self.assertEqual(len(calls), 1)
+
+    def test_an_unavailable_diff_is_not_retried(self):
+        sleeps = []
+        failure = subprocess.CompletedProcess([], 1, '', self.DIFF_ERROR)
+        original = subprocess.run
+        subprocess.run = lambda *args, **kwargs: failure
+        try:
+            with self.assertRaisesRegex(RuntimeError, 'diff'):
+                lib.gh('api', 'repos/o/r/compare/x...y', sleep=sleeps.append)
+        finally:
+            subprocess.run = original
+        self.assertEqual(sleeps, [])
 
 
 if __name__ == '__main__':
