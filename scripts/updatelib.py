@@ -153,6 +153,9 @@ def download(urls, destination, *, sha256=None, attempts=8, timeout=300, token=N
 
 # --------------------------------------------------------------------------- GitHub
 
+DIFF_UNAVAILABLE = re.compile(r'diff is temporarily unavailable', re.I)
+
+
 def gh(*args, attempts=5, sleep=time.sleep, check=True, input_text=None):
     """Run `gh` with retries for rate limits and transient server errors."""
     for attempt in range(attempts):
@@ -161,6 +164,9 @@ def gh(*args, attempts=5, sleep=time.sleep, check=True, input_text=None):
             return result
         error = result.stderr
         transient = re.search(r'HTTP (429|5\d\d)|rate limit|timeout|connection reset|EOF', error, re.I)
+        # GitHub refuses the diff of a large comparison on every attempt.
+        if DIFF_UNAVAILABLE.search(error):
+            transient = None
         if not transient or attempt + 1 == attempts:
             raise RuntimeError(f'gh {" ".join(args)} failed: {error.strip()}')
         delay = retry_delay(attempt)
@@ -203,14 +209,59 @@ def branch_tip(slug, branch):
             'subject': data['commit']['message'].splitlines()[0]}
 
 
-def compare(slug, base, head):
-    """GitHub comparison status: identical, ahead, behind or diverged."""
+def compare(slug, base, head, branch=None, run=gh):
+    """GitHub comparison status: identical, ahead, behind or diverged.
+
+    The REST comparison also builds the diff, which GitHub refuses for a large
+    range. When `head` is the tip of `branch`, the branch's GraphQL comparison
+    gives the same relation without one.
+    """
     if base == head:
         return {'status': 'identical', 'ahead_by': 0, 'behind_by': 0, 'commits': []}
-    data = gh_api(f'repos/{slug}/compare/{base}...{head}')
+    try:
+        data = json.loads(run('api', f'repos/{slug}/compare/{base}...{head}').stdout)
+    except RuntimeError as error:
+        if branch is None or not DIFF_UNAVAILABLE.search(str(error)):
+            raise
+        return compare_on_branch(slug, base, head, branch, run)
     return {'status': data['status'], 'ahead_by': data['ahead_by'], 'behind_by': data['behind_by'],
             'commits': [{'sha': c['sha'], 'subject': c['commit']['message'].splitlines()[0]}
                         for c in data.get('commits', [])][-50:]}
+
+
+COMPARE_ON_BRANCH = """query($owner: String!, $name: String!, $ref: String!, $base: String!) {
+  repository(owner: $owner, name: $name) {
+    ref(qualifiedName: $ref) {
+      target { oid ... on Commit { history(first: 50) { nodes { oid messageHeadline } } } }
+      compare(headRef: $base) { status aheadBy behindBy }
+    }
+  }
+}"""
+
+
+def compare_on_branch(slug, base, head, branch, run=gh):
+    """`compare(slug, base, head)` from the branch's side, without a diff.
+
+    GraphQL compares the branch (whose tip must still be `head`) against
+    `base`, so its directions are the reverse of the REST comparison. The
+    commit list is the newest of the branch's history, as many as `head` is
+    ahead, which is close to the REST list without being exact.
+    """
+    owner, name = slug.split('/')
+    output = run('api', 'graphql', '-f', f'query={COMPARE_ON_BRANCH}', '-f', f'owner={owner}',
+                 '-f', f'name={name}', '-f', f'ref=refs/heads/{branch}', '-f', f'base={base}').stdout
+    ref = (json.loads(output).get('data') or {}).get('repository', {}).get('ref')
+    if not ref:
+        raise RuntimeError(f'{slug}: branch {branch} not found')
+    if ref['target']['oid'] != head:
+        raise RuntimeError(f'{slug}@{branch} moved while it was compared; run again')
+    relation = ref['compare']
+    status = {'IDENTICAL': 'identical', 'BEHIND': 'ahead', 'AHEAD': 'behind',
+              'DIVERGED': 'diverged'}[relation['status']]
+    ahead, behind = relation['behindBy'], relation['aheadBy']
+    nodes = ref['target'].get('history', {}).get('nodes', [])[:min(ahead, 50)]
+    return {'status': status, 'ahead_by': ahead, 'behind_by': behind,
+            'commits': [{'sha': n['oid'], 'subject': n['messageHeadline']} for n in reversed(nodes)]}
 
 
 # -------------------------------------------------------------------------- archives

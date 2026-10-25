@@ -121,7 +121,7 @@ def plan(root, tracking, pins, resolve=lib.branch_tip, compare=lib.compare):
         if tip['sha'] == pin['commit']:
             items.append({**item, 'status': 'current'})
             continue
-        relation = compare(entry['repository'], pin['commit'], tip['sha'])
+        relation = compare(entry['repository'], pin['commit'], tip['sha'], branch=entry['branch'])
         item['compare'] = relation
         if relation['status'] == 'ahead':
             items.append({**item, 'status': 'update'})
