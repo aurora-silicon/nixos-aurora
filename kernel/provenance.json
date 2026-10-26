@@ -1,5 +1,5 @@
 {
-  "kernel_commit": "5caf1cc55bf19330da59582fb06389bf34eb9e3b",
+  "kernel_commit": "916dcbf7d546f21eb8059d84a21ce5530fb79194",
   "config_source": "Retained Fedora-resolved policy baseline; the pinned kernel asahi.config and common requirements are merged at build time before native olddefconfig and validation.",
   "rpm_sha256": "36ba552ea706c5d35d626f0e08a3702b7f2e0401aeb20e09ed138418f40b5383",
   "config_sha256": "55497f2e29d0659804883aeeed8244c5a2dfd8ba3827e0616b976656c5c5469d",
