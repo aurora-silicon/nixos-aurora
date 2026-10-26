@@ -52,7 +52,7 @@ def device_tree(compatible):
 
 
 def stage2(boards=('j274', 'j700'), options=b'', aura=b'AURA-STAGE2-BINARY'):
-    return aura + b''.join(device_tree(f'apple,{board}') for board in boards) + gzip.compress(b'u-boot') + options
+    return aura + b''.join(device_tree(f'apple,{board}') for board in boards) + gzip.compress(b'u-boot', mtime=0) + options
 
 
 class CheckStage2Tests(unittest.TestCase):
@@ -65,7 +65,7 @@ class CheckStage2Tests(unittest.TestCase):
         aura = b'AURA-STAGE2-BINARY'
         bad = {
             'other aura': (stage2(aura=b'OTHER-AURA-BINARY!'), ['j700']),
-            'no device trees': (aura + gzip.compress(b'u-boot'), []),
+            'no device trees': (aura + gzip.compress(b'u-boot', mtime=0), []),
             'no MacBook Neo': (stage2(boards=('j274',)), ['j700']),
             'U-Boot not gzip': (aura + device_tree('apple,j700') + b'raw u-boot', []),
             'trailing garbage': (stage2(options=b'\x00\x01binary'), []),
