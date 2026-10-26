@@ -124,6 +124,11 @@ in {
       }).overrideAttrs (old: {
         env = old.env // { RUSTC_BOOTSTRAP = "1"; };
         nativeBuildInputs = old.nativeBuildInputs ++ [ final.binutils kernelLLVM.lld ];
+        # Prepare the source-tree entry point before any Rust availability probe.
+        postPatch = (old.postPatch or "") + ''
+          mkdir -p tools/aurora-bindgen/build/bin
+          ln -s ${final.aurora-bindgen}/bin/bindgen tools/aurora-bindgen/build/bin/bindgen
+        '';
         # Refresh compiler probes, then apply hardware defaults from the same
         # pinned source that is built. Distro requirements override them in order.
         configurePhase = final.lib.replaceStrings
