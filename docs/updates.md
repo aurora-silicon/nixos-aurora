@@ -112,3 +112,9 @@ and links its executable into that entry point. ALARM retains its exact
 compiler-lint adapter there. Every emitted layout assertion remains mandatory.
 Stock bindgen 0.73.2 loses alignment on empty C records such as
 `sched_statistics` with `SCHEDSTATS=n`; enabling statistics is not the fix.
+
+Cons3 also pins FAT's default codepage 437 and ASCII charset, with both
+converters built into the kernel. Asahi's early dracut vendor-firmware hook
+mounts the ESP without charset options; it must not depend on a charset module
+missing from initramfs. XZ and Zstd firmware loading are enabled for compressed
+distribution firmware files. The shared fragment carries these requirements.
