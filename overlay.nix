@@ -124,13 +124,27 @@ in {
       }).overrideAttrs (old: {
         env = old.env // { RUSTC_BOOTSTRAP = "1"; };
         nativeBuildInputs = old.nativeBuildInputs ++ [ final.binutils kernelLLVM.lld ];
-        # Refresh compiler capability probes using the same resolved hardware
-        # configuration as Fedora. Validate the shared fragments afterwards.
+        # Prepare the source-tree entry point before any Rust availability probe.
+        postPatch = (old.postPatch or "") + ''
+          mkdir -p tools/aurora-bindgen/build/bin
+          ln -s ${final.aurora-bindgen}/bin/bindgen tools/aurora-bindgen/build/bin/bindgen
+        '';
+        # Refresh compiler probes, then apply hardware defaults from the same
+        # pinned source that is built. Distro requirements override them in order.
         configurePhase = final.lib.replaceStrings
           [ "ln -sv" " oldconfig" ] [ "cp -v" " olddefconfig" ] old.configurePhase;
         postConfigure = ''
-          python3 ${stableFile ./kernel/validate-config.py} ${stableFile ./kernel/common.config} "$buildRoot/.config"
-          python3 ${stableFile ./kernel/validate-config.py} ${stableFile ./kernel/neo.config} "$buildRoot/.config"
+          sourcePath="$sourceRoot"
+          case "$sourcePath" in
+            /*) ;;
+            *) sourcePath="$NIX_BUILD_TOP/$sourcePath" ;;
+          esac
+          sharedFragment="$sourcePath/arch/arm64/configs/asahi.config"
+          bash "$sourcePath/scripts/kconfig/merge_config.sh" -m -O "$buildRoot" \
+            "$buildRoot/.config" "$sharedFragment" ${stableFile ./kernel/common.config}
+          make "''${makeFlags[@]}" olddefconfig
+          python3 ${stableFile ./kernel/validate-config.py} "$sharedFragment" \
+            ${stableFile ./kernel/common.config} "$buildRoot/.config"
           grep -qx 'CONFIG_RUST=y' "$buildRoot/.config"
           grep -qx 'CONFIG_ARM64_16K_PAGES=y' "$buildRoot/.config"
           make "''${makeFlags[@]}" rustavailable

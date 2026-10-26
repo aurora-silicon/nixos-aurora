@@ -102,3 +102,27 @@ gh workflow run promote.yml -R aurora-silicon/nixos-aurora --ref main
   the production key made.
 - Failed build attempts upload `failed-nix-<package>-attempt-N`, never `nix-<package>-closure`; the
   collector takes the newest artifact of each name and skips one without a build record.
+
+The kernel prepares the pinned, corrected bindgen at
+`tools/aurora-bindgen/build/bin/bindgen` before configuration. Kbuild selects it
+automatically, including out-of-tree builds. No `BINDGEN=` make argument or
+export is required. Fedora and ALARM build and compile-test the generator from
+the kernel's checked source manifest; Nix uses the matching patched derivation
+and links its executable into that entry point. ALARM retains its exact
+compiler-lint adapter there. Every emitted layout assertion remains mandatory.
+Stock bindgen 0.73.2 loses alignment on empty C records such as
+`sched_statistics` with `SCHEDSTATS=n`; enabling statistics is not the fix.
+
+Cons3 also pins FAT's default codepage 437 and ASCII charset, with both
+converters built into the kernel. Asahi's early dracut vendor-firmware hook
+mounts the ESP without charset options; it must not depend on a charset module
+missing from initramfs. XZ and Zstd firmware loading are enabled for compressed
+distribution firmware files. The shared fragment carries these requirements.
+
+The retained Apple-only policy bases also resolve the shared DAX requirements
+with memory hotplug/hot-remove enabled and keep socket diagnostics and the
+Apple HID core built in with their built-in consumers. They explicitly exclude
+ACPI I2C HID and Qualcomm on-SoC QMI audio offload, which are internal
+transports absent on Apple DT machines; ordinary OF HID and USB audio remain
+enabled. Validation applies the ordered shared/common policy without ignoring
+unmet requests. No display handoff or device admission gate is relaxed.
