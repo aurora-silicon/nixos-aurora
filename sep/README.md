@@ -12,10 +12,15 @@ holding up the desktop. fprintd also joins initialization when requested. The
 modprobe alias blacklist only defers automatic probing: the service explicitly
 loads SEP on every supported boot. Fedora uses Dracut to omit the module from the initramfs.
 
-Calibration extraction reads the local boot container without modifying it. A
-private cache is bound to its partition identity and SHA-256. The device-tree
-firmware name is respected. No calibration data is distributed or reused across
-machines. Models without a fingerprint reader can still initialize SEP trusted
+Each start rebuilds the fingerprint calibration from this Mac's own factory
+records, read without modification from the Hardware volume of its iBoot System
+Container: the calibration resealed with the seal that names this Mac's chip
+and ECID, and the trust bundle in use. The installed record is replaced only
+when it differs; the replaced bytes are kept privately as rollback evidence,
+and a record that is refused moves to private quarantine. Touch ID is marked
+ready in /run/aurora-sep only when the installed record is the one admitted, and
+fprintd and the reader activation wait for that. The device-tree firmware name
+is respected. No calibration data is distributed or reused across machines. Models without a fingerprint reader can still initialize SEP trusted
 keys; missing calibration is reported without suppressing the cryptographic
 services. Read XART-SAFETY.md for persistent identity ownership constraints.
 

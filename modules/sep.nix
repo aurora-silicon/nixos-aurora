@@ -40,7 +40,10 @@
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
-      ExecCondition = "${pkgs.aurora-sep}/libexec/aurora/sensor-present";
+      ExecCondition = [
+        "${pkgs.aurora-sep}/libexec/aurora/sensor-present"
+        "${pkgs.aurora-sep}/libexec/aurora/calibration-ready"
+      ];
       ExecStart = "${pkgs.aurora-sep}/libexec/aurora-sep-ready";
       TimeoutStartSec = 60;
     };
@@ -49,7 +52,10 @@
     requires = [ "aurora-sep.service" ];
     after = [ "aurora-sep.service" "aurora-sep-ready.service" ];
     unitConfig.ConditionPathExists = "/dev/sep-bio";
-    serviceConfig.ExecCondition = "${pkgs.aurora-sep}/libexec/aurora/sensor-present";
+    serviceConfig.ExecCondition = [
+      "${pkgs.aurora-sep}/libexec/aurora/sensor-present"
+      "${pkgs.aurora-sep}/libexec/aurora/calibration-ready"
+    ];
     serviceConfig.DeviceAllow = [ "/dev/sep-bio rw" "char-input r" ];
   };
 }
