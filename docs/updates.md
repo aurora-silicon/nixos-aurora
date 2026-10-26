@@ -118,3 +118,11 @@ converters built into the kernel. Asahi's early dracut vendor-firmware hook
 mounts the ESP without charset options; it must not depend on a charset module
 missing from initramfs. XZ and Zstd firmware loading are enabled for compressed
 distribution firmware files. The shared fragment carries these requirements.
+
+The retained Apple-only policy bases also resolve the shared DAX requirements
+with memory hotplug/hot-remove enabled and keep socket diagnostics and the
+Apple HID core built in with their built-in consumers. They explicitly exclude
+ACPI I2C HID and Qualcomm on-SoC QMI audio offload, which are internal
+transports absent on Apple DT machines; ordinary OF HID and USB audio remain
+enabled. Validation applies the ordered shared/common policy without ignoring
+unmet requests. No display handoff or device admission gate is relaxed.
