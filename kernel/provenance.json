@@ -1,5 +1,5 @@
 {
-  "kernel_commit": "311471f73e9919764bfb24acfe7eeb7c5230795a",
+  "kernel_commit": "9cbdd0734d9e186c5f5f5949a21b909d10c2571b",
   "config_source": "Integration shared asahi.config merged over the retained Fedora-resolved baseline and common/Neo requirements; native Nix olddefconfig resolves current Kconfig and compiler probes.",
   "rpm_sha256": "36ba552ea706c5d35d626f0e08a3702b7f2e0401aeb20e09ed138418f40b5383",
   "config_sha256": "55497f2e29d0659804883aeeed8244c5a2dfd8ba3827e0616b976656c5c5469d",
