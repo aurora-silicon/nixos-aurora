@@ -1,6 +1,6 @@
 { lib, mesa, src, vulkan-loader, llvmPackages, spirv-tools, stdenv
 , mesa-libclc, spirv-llvm-translator, lm_sensors, libunwind
-, rustc, rust-bindgen, rust-cbindgen
+, rustc, rust-bindgen, rust-cbindgen, valgrind-light
 , commit, guest ? false, compilerTools ? null }:
 (mesa.override { stdenv = if guest then stdenv else llvmPackages.stdenv; }).overrideAttrs (old: {
   inherit src;
@@ -11,13 +11,16 @@
     };
   patches = [ ];
   outputs = [ "out" ];
+  # Guest debug outputs would retain host source paths. Preserve the build
+  # IDs the drivers need explicitly, while shipping stripped guest libraries.
+  separateDebugInfo = if guest then false else old.separateDebugInfo;
   mesonAutoFeatures = "auto";
   # Nix splits Clang's library output from LLVM's library directory.
   postPatch = (old.postPatch or "") + lib.optionalString (!guest) ''
     substituteInPlace meson.build --replace-fail 'dirs : llvm_libdir' \
       "dirs : [llvm_libdir, '${lib.getLib llvmPackages.clang-unwrapped}/lib']"
   '';
-  preConfigure = (old.preConfigure or "") + ''
+  preConfigure = lib.optionalString (!guest) (old.preConfigure or "") + ''
     export CC=${if guest then "${stdenv.cc}/bin/cc" else "${llvmPackages.clang}/bin/clang"}
     export CXX=${if guest then "${stdenv.cc}/bin/c++" else "${llvmPackages.clang}/bin/clang++"}
     export CC_FOR_BUILD="$CC"
@@ -30,7 +33,7 @@
   buildInputs = if guest then lib.filter (input:
     !(lib.elem (lib.getName input) (map lib.getName [ llvmPackages.clang
       llvmPackages.clang-unwrapped llvmPackages.libllvm spirv-tools mesa-libclc
-      spirv-llvm-translator lm_sensors libunwind ]))) old.buildInputs else old.buildInputs;
+      spirv-llvm-translator lm_sensors libunwind valgrind-light ]))) old.buildInputs else old.buildInputs;
   nativeBuildInputs = if guest then lib.filter (input:
     !(lib.elem (lib.getName input) (map lib.getName [ rustc rust-bindgen rust-cbindgen ])))
     old.nativeBuildInputs else old.nativeBuildInputs;
@@ -41,7 +44,8 @@
     "-Dgles2=enabled" "-Dvideo-codecs=${if guest then "" else "all"}" "-Dexpat=enabled"
     "-Dzstd=enabled" "-Dlmsensors=${if guest then "disabled" else "enabled"}" "-Dlibunwind=disabled"
     "-Dvalgrind=disabled" "-Db_ndebug=true" "-Dwrap_mode=nodownload"
-  ] ++ lib.optionals guest [ "-Dgallium-rusticl=false" ];
+  ] ++ lib.optionals guest [ "-Dgallium-rusticl=false"
+    "-Dc_link_args=-Wl,--build-id=sha1" "-Dcpp_link_args=-Wl,--build-id=sha1" ];
   configurePhase = ''
     runHook preConfigure
   '' + lib.optionalString (compilerTools == null) ''

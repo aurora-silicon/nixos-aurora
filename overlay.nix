@@ -239,9 +239,11 @@ in {
     echo ${pins.mesa-aurora.commit} > $out/.aurora-mesa-commit
     for library in $out/usr/lib64/libgallium*.so $out/usr/lib64/libvulkan_asahi.so; do
       readelf -h "$library" | grep -q 'Advanced Micro Devices X86-64'
+      readelf -n "$library" | grep -Eq 'Build ID: [0-9a-f]{40}'
     done
     for library in $out/usr/lib/libgallium*.so $out/usr/lib/libvulkan_asahi.so; do
       readelf -h "$library" | grep -q 'Intel 80386'
+      readelf -n "$library" | grep -Eq 'Build ID: [0-9a-f]{40}'
     done
   '';
   aurora-flatpak-gl = final.callPackage ./flatpak-gl/package.nix {
