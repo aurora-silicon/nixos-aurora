@@ -22,6 +22,9 @@ in {
     assertions = [ {
       assertion = config.services.flatpak.enable;
       message = "aurora.flatpak.enable requires services.flatpak.enable.";
+    } {
+      assertion = (cfg.package.commit or null) == (pkgs.mesa.auroraCommit or "missing-host-commit");
+      message = "Aurora Flatpak GL must use the same Mesa commit as the host driver.";
     } ];
     services.flatpak.enable = lib.mkDefault true;
     xdg.portal.enable = lib.mkDefault true;

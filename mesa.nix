@@ -5,6 +5,7 @@
 (mesa.override { stdenv = if guest then stdenv else llvmPackages.stdenv; }).overrideAttrs (old: {
   inherit src;
   version = "26.3.0";
+  passthru = (old.passthru or { }) // { auroraCommit = commit; };
   env = (old.env or { }) // { MESA_GIT_SHA1_OVERRIDE = commit; }
     // lib.optionalAttrs guest {
       NIX_CFLAGS_COMPILE = "-ffile-prefix-map=/nix/store=/usr/src/nix -ffile-prefix-map=/build=/usr/src/mesa";

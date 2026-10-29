@@ -21,6 +21,9 @@ in {
       assertion = lib.hasPrefix "/" cfg.rootfs
         && !(lib.any (character: lib.hasInfix character cfg.rootfs) [ ":" "," "\n" "\\" ]);
       message = "aurora.fexMesa.rootfs must be an absolute directory without overlay mount delimiters.";
+    } {
+      assertion = (cfg.package.commit or null) == (pkgs.mesa.auroraCommit or "missing-host-commit");
+      message = "Aurora FEX guest Mesa must use the same commit as the host driver.";
     } ];
     environment.systemPackages = [ cfg.package ];
     systemd.tmpfiles.rules = [ "d ${provider} 0755 root root -" ];
