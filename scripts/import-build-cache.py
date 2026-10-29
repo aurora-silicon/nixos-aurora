@@ -17,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('cache_inputs', ROOT / 'scripts/collect-cache-inputs.py')
 cache_inputs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cache_inputs)
+spec = importlib.util.spec_from_file_location('image_closure', ROOT / 'scripts/verify-image-closure.py')
+image_closure = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(image_closure)
 REPOSITORY = cache_inputs.REPOSITORY
 
 
@@ -34,6 +37,7 @@ def import_build(commit, packages):
     if not packages or not set(packages) <= expected.keys():
         raise ValueError('Unknown or empty image input package set')
     proofs = []
+    admitted_hashes = {}
     # Routine images can use the already published, signed guest output. This
     # does not build foreign code on the ARM host or change Nix's trust policy.
     guest_available = False
@@ -95,10 +99,19 @@ def import_build(commit, packages):
             if not set(expected[package]['outputs']) <= cache_inputs.store_paths(cache):
                 raise ValueError(f'{package}: cache omits a declared output')
             subprocess.run(['nix', 'store', 'verify', '--store', cache.as_uri(), '--all', '--no-trust'], check=True)
+            hashes = image_closure.nar_hashes(json.loads(subprocess.check_output([
+                'nix', 'path-info', '--store', cache.as_uri(), '--json', '--recursive',
+                *expected[package]['outputs'],
+            ], text=True)))
+            if not hashes.keys() <= cache_inputs.store_paths(cache):
+                raise ValueError('An authenticated closure contains an unverified NAR')
+            if any(path in admitted_hashes and admitted_hashes[path] != value for path, value in hashes.items()):
+                raise ValueError('Conflicting authenticated NAR identities')
             subprocess.run(['nix', 'copy', '--no-check-sigs', '--from', cache.as_uri(), *expected[package]['outputs']], check=True)
+            admitted_hashes.update(hashes)
             proofs.append({'package': package, 'run': run_id, 'source_commit': source_commit, 'artifact': artifact['id'],
                            'artifact_digest': artifact['digest'], 'expected': expected[package]})
-    return {'schema': 1, 'commit': commit, 'inputs': proofs}
+    return {'schema': 1, 'commit': commit, 'inputs': proofs, 'narHashes': admitted_hashes}
 
 
 if __name__ == '__main__':
