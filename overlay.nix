@@ -154,7 +154,13 @@ in {
         extraMeta.branch = "7.3";
         features.rust = true;
         kernelPatches = _kernelPatches;
-      }).overrideAttrs (old: {
+      }).overrideAttrs (finalAttrs: old: {
+        # NixOS consumers (including ASLR limits) need the resolved config,
+        # which the kernel builder already installs in its development output.
+        # Keep the configure input fragment private to the build environment.
+        passthru = old.passthru // {
+          configfile = "${finalAttrs.finalPackage.dev}/lib/modules/${old.passthru.modDirVersion}/build/.config";
+        };
         env = old.env // { RUSTC_BOOTSTRAP = "1"; };
         nativeBuildInputs = old.nativeBuildInputs ++ [ final.binutils kernelLLVM.lld ];
         # The source-tree entry point is selected by the pinned Kbuild.
