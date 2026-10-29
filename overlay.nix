@@ -188,6 +188,9 @@ in {
           make "''${makeFlags[@]}" certs/
           "$buildRoot/certs/extract-cert" "" "$TMPDIR/aurora-empty-cert"
         '';
+        postInstall = (old.postInstall or "") + ''
+          echo ${pins.kernel-aurora.commit} > "$out/aurora-source-commit"
+        '';
       })))) { };
   m1n1 = (prev.m1n1.override { customLogo = null; }).overrideAttrs (old: {
     pname = "aura";

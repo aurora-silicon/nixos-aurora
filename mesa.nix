@@ -60,7 +60,9 @@ assert json.load(sys.stdin)["host"]["c"]["id"] == "clang", "Mesa must use the se
     meson test --print-errorlogs --num-processes "$NIX_BUILD_CORES"
     runHook postCheck
   '';
-  postInstall = "";
+  postInstall = ''
+    echo ${commit} > "$out/.aurora-mesa-commit"
+  '';
   # Guest libraries run inside a distribution rootfs, so they use its loaders
   # and dependencies, never the host's Nix store or release-specific LLVM.
   installPhase = if guest then ''
