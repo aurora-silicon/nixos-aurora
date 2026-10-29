@@ -23,6 +23,7 @@ in {
       description = "Aurora Mesa graphics provider for FEX";
       wantedBy = [ "multi-user.target" ];
       after = [ "systemd-tmpfiles-setup.service" "local-fs.target" ];
+      before = [ "display-manager.service" ];
       unitConfig.RequiresMountsFor = [ cfg.rootfs ];
       unitConfig.ConditionPathIsDirectory = "${cfg.rootfs}/usr";
       restartTriggers = [ cfg.package ];
@@ -40,5 +41,11 @@ in {
         export FEX_ROOTFS="''${FEX_ROOTFS:-${provider}}"
       fi
     '';
+    environment.etc."systemd/user-environment-generators/60-aurora-fex-rootfs".source =
+      pkgs.writeShellScript "aurora-fex-rootfs-environment" ''
+        if [ -z "''${FEX_ROOTFS:-}" ] && ${pkgs.util-linux}/bin/mountpoint -q ${provider}; then
+          printf 'FEX_ROOTFS=%s\n' ${provider}
+        fi
+      '';
   };
 }

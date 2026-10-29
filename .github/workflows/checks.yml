@@ -89,7 +89,9 @@ jobs:
       # Build jobs never see the cache key: the export is unsigned, and the
       # publisher signs only metadata it has verified (publish-cache.yml).
       - name: Export an unsigned candidate cache
-        if: github.event_name != 'pull_request'
+        # The native image job also needs the x86 guest payload on PR builds.
+        # This stays an unsigned build artifact; publication still rejects PRs.
+        if: github.event_name != 'pull_request' || matrix.package == 'fex-mesa'
         run: |
           mapfile -t outputs < <(jq -r '.[].outputs[]' build.json)
           bash scripts/export-cache "$PWD/cache" "${outputs[@]}"
