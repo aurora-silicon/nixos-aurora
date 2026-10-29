@@ -95,6 +95,9 @@ assert json.load(sys.stdin)["host"]["c"]["id"] == "clang", "Mesa must use the se
     runHook postInstall
   '');
   postFixup = if guest then ''
+    # Removing an RPATH tag alone leaves its old .dynstr bytes behind.
+    # Empty it first so neither the loader nor Nix retains host paths.
+    find "$out" -type f -name '*.so*' -exec patchelf --set-rpath "" {} +
     find "$out" -type f -name '*.so*' -exec patchelf --remove-rpath {} +
     rm -rf "$out/usr/include" "$out/usr/lib/pkgconfig" "$out/usr/lib64/pkgconfig"
     echo ${commit} > "$out/.aurora-mesa-commit"
