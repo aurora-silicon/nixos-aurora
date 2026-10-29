@@ -77,6 +77,8 @@
               "the image installs and pins GL before desktop login" =
                 lib.elem "multi-user.target" config.systemd.services.aurora-flatpak-gl.wantedBy
                 && lib.elem "display-manager.service" config.systemd.services.aurora-flatpak-gl.before;
+              "shutdown keeps installed Flatpak runtimes" =
+                config.systemd.services.aurora-flatpak-gl.unitConfig.DefaultDependencies == false;
               "FEX carries both guest architectures" = config.aurora.fexMesa.enable
                 && lib.elem config.aurora.fexMesa.package config.environment.systemPackages;
               "all four malcontent overrides name their retirement fix" = lib.all (name:

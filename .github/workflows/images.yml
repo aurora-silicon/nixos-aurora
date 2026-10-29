@@ -56,6 +56,7 @@ jobs:
           # same aura, the MacBook Neo's device tree and one U-Boot member.
           nix build --print-build-logs --out-link stage2 .#checks.aarch64-linux.stage2
           nix store verify --recursive ./system ./installer ./aura ./grub ./stage2
+          nix flake check --print-build-logs
       - name: Assemble the installer filesystem bundle
         env:
           DESKTOP: ${{ inputs.desktop }}

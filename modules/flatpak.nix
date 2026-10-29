@@ -37,8 +37,11 @@ in {
     systemd.services.aurora-flatpak-gl = {
       description = "Aurora Mesa for Flatpak applications";
       wantedBy = [ "multi-user.target" ];
-      after = [ "systemd-tmpfiles-setup.service" ];
-      before = [ "display-manager.service" ];
+      # Keep installed runtimes across shutdown. Explicit stops on a switch
+      # or disable still run ExecStop and remove only this provider's state.
+      unitConfig.DefaultDependencies = false;
+      after = [ "local-fs.target" "systemd-tmpfiles-setup.service" "dbus.service" ];
+      before = [ "multi-user.target" "display-manager.service" ];
       restartTriggers = [ cfg.package ];
       serviceConfig = {
         Type = "oneshot";
