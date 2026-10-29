@@ -21,8 +21,8 @@
     boot.loader.grub.efiInstallAsRemovable = true;
     boot.loader.grub.device = "nodev";
     boot.loader.efi.canTouchEfiVariables = false;
-    # The Apple kernel profile has no AHCI driver. Keep the Apple/USB/NVMe
-    # initrd set explicit instead of inheriting generic PC storage modules.
+    # Keep the Apple/USB/NVMe initrd set explicit. Native module additions
+    # (including audio, sensors and systemd) still merge into this list.
     boot.initrd.includeDefaultModules = false;
     boot.initrd.availableKernelModules = [
       "apple-mailbox" "apple_nvmem_spmi" "nvme_apple" "pinctrl-apple-gpio"
