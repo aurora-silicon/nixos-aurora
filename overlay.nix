@@ -235,6 +235,7 @@ in {
     cp -a ${guestMesa x86_32}/usr/lib $out/usr/
     cp -a ${guestMesa x86}/usr/share $out/usr/
     # The manifest directory is shared by both guest architectures.
+    chmod -R u+w $out/usr/share
     cp -a --update=none ${guestMesa x86_32}/usr/share/. $out/usr/share/
     echo ${pins.mesa-aurora.commit} > $out/.aurora-mesa-commit
     for library in $out/usr/lib64/libgallium*.so $out/usr/lib64/libvulkan_asahi.so; do
