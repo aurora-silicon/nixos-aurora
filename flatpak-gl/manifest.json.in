@@ -46,7 +46,8 @@
         {
           "type": "archive",
           "url": "https://codeload.github.com/KhronosGroup/SPIRV-Headers/tar.gz/04f10f650d514df88b76d25e83db360142c7b174",
-          "sha256": "1b220e3eec1714f0451b0e3652979bd280edf10893f617837b88e6359a804ded"
+          "sha256": "1b220e3eec1714f0451b0e3652979bd280edf10893f617837b88e6359a804ded",
+          "archive-type": "tar-gzip"
         }
       ]
     },
@@ -67,7 +68,8 @@
         {
           "type": "archive",
           "url": "https://codeload.github.com/KhronosGroup/SPIRV-Tools/tar.gz/fbe4f3ad913c44fe8700545f8ffe35d1382b7093",
-          "sha256": "cabb35f4eef0da3ef72ad9edd596af4191d7507a8f35c05df526d2d5ff889f59"
+          "sha256": "cabb35f4eef0da3ef72ad9edd596af4191d7507a8f35c05df526d2d5ff889f59",
+          "archive-type": "tar-gzip"
         }
       ]
     },
@@ -87,13 +89,15 @@
         {
           "type": "archive",
           "url": "https://codeload.github.com/KhronosGroup/SPIRV-LLVM-Translator/tar.gz/b4c9189bcba7ed9a1189d6a2c27edc3d9a3d5277",
-          "sha256": "d42dfc31cc629360cc84cb05446649fcd1eddd1a2e9e49d532a8f43ee91c327a"
+          "sha256": "d42dfc31cc629360cc84cb05446649fcd1eddd1a2e9e49d532a8f43ee91c327a",
+          "archive-type": "tar-gzip"
         },
         {
           "type": "archive",
           "url": "https://codeload.github.com/KhronosGroup/SPIRV-Headers/tar.gz/575b6512579ebde466ed3dfc04e413439d14d95d",
           "sha256": "775ee89eb77d067df3f5736e2b4bb2f5f3e39ead915f11f3d366139dcb42209d",
-          "dest": "spirv-headers"
+          "dest": "spirv-headers",
+          "archive-type": "tar-gzip"
         }
       ]
     },
@@ -176,7 +180,8 @@
           "type": "archive",
           "url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/@COMMIT@",
           "dest-filename": "mesa-@COMMIT@.tar.gz",
-          "sha256": "@SHA256@"
+          "sha256": "@SHA256@",
+          "archive-type": "tar-gzip"
         }
       ],
       "post-install": [
