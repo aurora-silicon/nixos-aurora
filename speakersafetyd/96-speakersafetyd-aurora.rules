@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Start speakersafetyd for the speaker cards of the machines whose profile
+# this package adds, as speakersafetyd's own 95-speakersafetyd.rules does
+# for the machines it lists. That file already keeps PipeWire off the
+# sense PCM (ACP_IGNORE) of every macaudio card.
+SUBSYSTEM=="sound", DRIVERS=="snd-soc-macaudio", GOTO="aurora_speakersafetyd_macaudio"
+GOTO="aurora_speakersafetyd_end"
+
+LABEL="aurora_speakersafetyd_macaudio"
+KERNEL=="pcmC*D2c", ATTRS{id}=="AppleJ616", TAG+="systemd", ENV{SYSTEMD_WANTS}="speakersafetyd.service"
+
+LABEL="aurora_speakersafetyd_end"

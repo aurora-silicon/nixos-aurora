@@ -34,6 +34,8 @@ NEEDS = {
     'avd-fw': ['avd-fw'],
     'upower': ['upower-aurora'],
     'speakerguardd': ['speakerguardd'],
+    'speakersafetyd': [],
+    'powerdevil': [],
     'bankstown': ['bankstown'],
     'neo-platform': ['aurora-neo-platform-config'],
     'aurora-bless': ['aurora-bless'],

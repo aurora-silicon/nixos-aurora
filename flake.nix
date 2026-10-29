@@ -48,6 +48,8 @@
         kernel = pkgs.linux-asahi.kernel;
         mesa = pkgs.mesa;
         speakerguardd = pkgs.speakerguardd;
+        speakersafetyd = pkgs.speakersafetyd;
+        powerdevil = pkgs.kdePackages.powerdevil;
         bankstown = pkgs.bankstown-lv2;
         neo-platform = pkgs.aurora-neo-platform-config;
         aurora-bless = pkgs.aurora-bless;

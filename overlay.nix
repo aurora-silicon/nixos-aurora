@@ -36,6 +36,9 @@ in {
     });
     powerdevil = kdePrev.powerdevil.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [
+        # Upstream 78e99fd9 (Plasma 6.8): no low-battery alert for a
+        # peripheral whose charge is unknown. Fedora Aurora carries it too.
+        ./patches/powerdevil-low-battery-unknown-percentage.patch
         ./patches/powerdevil-no-empty-keyboard-backlight.patch
       ];
     });
@@ -177,6 +180,17 @@ in {
   alsa-ucm-conf-asahi = prev.alsa-ucm-conf-asahi.overrideAttrs (old: {
     src = source "alsa-ucm-conf-aurora";
     version = pins.alsa-ucm-conf-aurora.version;
+  });
+  # Fedora Aurora's speakersafetyd-aurora-profiles: the J616s speaker model
+  # (speakersafetyd's J316 values with the J616 V/I sense layout) and the udev
+  # rule that starts the daemon for its card. The daemon reads its models from
+  # its own share directory, so they go into the package.
+  speakersafetyd = prev.speakersafetyd.overrideAttrs (old: {
+    postInstall = (old.postInstall or "") + ''
+      install -Dm644 ${stableFile ./speakersafetyd/j616.conf} $out/share/speakersafetyd/apple/j616.conf
+      install -Dm644 ${stableFile ./speakersafetyd/96-speakersafetyd-aurora.rules} \
+        $out/lib/udev/rules.d/96-speakersafetyd-aurora.rules
+    '';
   });
   speakerguardd = rustPackage "speakerguardd" ./locks/speakerguardd.Cargo.lock {
     nativeBuildInputs = [ final.pkg-config ];
