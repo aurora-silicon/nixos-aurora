@@ -85,9 +85,9 @@ in {
       '';
     };
     # The shared aurora-firstboot.service, declared here because the package
-    # carries no unit files. Desktop images protect the disk with a password
-    # asked on the boot splash, then the desktop's own setup creates the owner
-    # (Plasma Setup on KDE, GNOME Initial Setup on GNOME). Minimal images and
+    # carries no unit files. On desktop images the desktop's own setup creates
+    # the owner (Plasma Setup on KDE, GNOME Initial Setup on GNOME), whose
+    # password then also protects the disk. Minimal images and
     # any boot with aurora.firstboot=text use the text wizard on tty1, which
     # creates the owner itself; that option also starts it for recovery while
     # setup is no longer pending but no owner exists.
@@ -111,8 +111,50 @@ in {
         StandardInput = "null"; StandardOutput = "journal"; StandardError = "journal";
       };
     };
-    # The shared plymouth-quit.service drop-in: the splash stays up for the
-    # disk password prompt with any display manager.
+    # The owner's password, at its first sign-in, also becomes the disk
+    # password (aurora-firstboot); first boot asks nothing on the splash,
+    # which stops updating on the MacBook Neo once the system has started.
+    # NixOS generates /etc/pam.d, so the hooks are declared here and stay:
+    # they do nothing once the disk no longer opens with its temporary key.
+    # While it does, the gate holds the new owner's automatic login (Plasma
+    # Setup's) so the greeter asks for the password once.
+    environment.etc."aurora/password-hooks".text = "sddm sddm-autologin gdm-password\n";
+    security.pam.services = let
+      pamExec = "${config.security.pam.package}/lib/security/pam_exec.so";
+      hook = "${pkgs.aurora-firstboot}/lib/aurora/aurora-password-hook";
+      signIn = {
+        order = 0;
+        control = "optional";
+        modulePath = pamExec;
+        args = [ "quiet" "expose_authtok" hook ];
+      };
+    in lib.mkMerge [
+      (lib.mkIf config.services.displayManager.sddm.enable {
+        sddm.rules.auth.aurora-password-hook = signIn;
+        sddm-autologin.rules.auth.aurora-password-gate = {
+          order = 0;
+          control = "requisite";
+          modulePath = pamExec;
+          args = [ "quiet" hook "--gate" ];
+        };
+      })
+      (lib.mkIf config.services.displayManager.gdm.enable {
+        gdm-password.rules.auth.aurora-password-hook = signIn;
+      })
+    ];
+    systemd.services.aurora-disk-rekey = {
+      description = "Let the Aurora owner password unlock the disk";
+      unitConfig.ConditionPathExists = "/run/aurora-firstboot/password";
+      unitConfig.RequiresMountsFor = [ "/boot" ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${pkgs.aurora-firstboot}/lib/aurora/aurora-firstboot --rekey";
+        StandardOutput = "journal";
+        StandardError = "journal";
+      };
+    };
+    # The shared plymouth-quit.service drop-in: the splash stays up until
+    # first-boot setup has finished, with any display manager.
     systemd.services.plymouth-quit = lib.mkIf config.boot.plymouth.enable {
       after = [ "aurora-firstboot.service" ];
     };
