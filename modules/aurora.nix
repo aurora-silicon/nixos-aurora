@@ -48,6 +48,8 @@
     services.displayManager.sddm.enable = config.aurora.desktop == "kde";
     services.desktopManager.gnome.enable = config.aurora.desktop == "gnome";
     services.displayManager.gdm.enable = config.aurora.desktop == "gnome";
+    # Every Aurora desktop image comes with a web browser, as Fedora and ALARM do.
+    programs.firefox.enable = config.aurora.desktop != "minimal";
     # GDM keeps the splash until its greeter starts and replaces
     # plymouth-quit.service; give SDDM the same role, so the splash is still up
     # when first boot asks for the disk password. If SDDM fails,
