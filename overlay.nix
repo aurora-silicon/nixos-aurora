@@ -77,6 +77,8 @@ in {
     plasma-setup = kdePrev.plasma-setup.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [
         ./patches/plasma-setup-nixos-paths.patch
+        # NixOS shows each page package under two data directories; list each page once.
+        ./patches/plasma-setup-unique-pages.patch
       ];
     });
   });

@@ -14,6 +14,9 @@ in stdenvNoCC.mkDerivation {
     make install-common PREFIX=$out
     substituteInPlace $out/lib/aurora/aurora-initrd-root \
       --replace-fail /usr/lib/aurora/vendor/omarchy-mac-encrypt $out/lib/aurora/vendor/omarchy-mac-encrypt
+    # The PAM hook runs the first-boot program from the store.
+    substituteInPlace $out/lib/aurora/aurora-password-hook \
+      --replace-fail /usr/lib/aurora/aurora-firstboot $out/lib/aurora/aurora-firstboot
     patchShebangs $out/lib/aurora
     wrapProgram $out/lib/aurora/aurora-initrd-root --prefix PATH : ${lib.makeBinPath rootTools}
     # The Plymouth client is the one the system runs (installed with

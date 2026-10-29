@@ -1,0 +1,27 @@
+--- a/src/pagesmodel.cpp
++++ b/src/pagesmodel.cpp
+@@ -7,6 +7,7 @@
+ 
+ #include <KPackage/PackageLoader>
+ #include <KPluginMetaData>
++#include <QSet>
+ 
+ using namespace Qt::StringLiterals;
+ 
+@@ -28,7 +29,16 @@
+         return leftData["X-KDE-Weight"_L1].toInt() < rightData["X-KDE-Weight"_L1].toInt();
+     });
+ 
++    QSet<QString> listed;
+     for (const auto &package : std::as_const(packages)) {
++        // A page installed under several data directories (on NixOS, the
++        // system profile and the package's own share) is listed once.
++        const auto id = package.metadata().pluginId();
++        if (listed.contains(id)) {
++            continue;
++        }
++        listed.insert(id);
++
+         // Create the module so we can check if it's available
+         const auto qmlPath = package.filePath("ui", QStringLiteral("main.qml"));
+         std::unique_ptr<SetupModule> module(createGui(qmlPath));
