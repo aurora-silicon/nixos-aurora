@@ -419,6 +419,10 @@ def ci_state(repository, sha, workflows):
     return overall, states
 
 
+def main_head(repository):
+    return lib.gh_api(f'repos/{repository}/commits/main')['sha']
+
+
 def head_commit_is_bot(repository, sha):
     commit = lib.gh_api(f'repos/{repository}/commits/{sha}')
     author = (commit.get('author') or {}).get('login', '')
@@ -571,6 +575,15 @@ def merge_command(args, workflows):
     head = pr['head']['sha']
     if not record or record.get('head') != head or not head_commit_is_bot(repository, head):
         lib.log(f'PR #{pr["number"]} head is not the tracker\'s recorded commit; a maintainer decides.')
+        return
+    # CI ran on the proposal as planned on record['base']. If main has moved
+    # since, a change that landed in between (a new lockstep recipe, say) was
+    # never checked against it: leave the merge to the next plan, which
+    # replans on the new main and refreshes the PR.
+    main = main_head(repository)
+    if record.get('base') != main:
+        lib.log(f'PR #{pr["number"]} was planned on {record.get("base")} but main is {main}; '
+                'the next run replans it.')
         return
     state, states = ci_state(repository, head, workflows)
     lib.log(f'PR #{pr["number"]} CI: {state} {states}')

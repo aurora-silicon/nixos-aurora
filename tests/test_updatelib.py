@@ -267,6 +267,28 @@ class TrackerTests(unittest.TestCase):
         items = {item['key']: item for item in tl.plan(Path('.'), self.tracking(), pins, resolve, compare_behind)}
         self.assertEqual(items['mesa-aurora']['status'], 'pin-ahead-of-branch')
 
+    def test_merge_waits_for_a_replan_when_main_moved(self):
+        import argparse, os
+        from unittest import mock
+        record = {'head': B, 'base': A, 'auto_merge': True, 'reasons': []}
+        pr = {'number': 7, 'head': {'sha': B},
+              'body': f'<!-- {tl.MARKER} {json.dumps(record)} -->'}
+        args = argparse.Namespace(repository='aurora-silicon/x', dry_run=False, publish_workflow='')
+        merged = []
+        with mock.patch.object(tl, 'load_tracking', return_value={'branch': 'auto/track-sources'}), \
+             mock.patch.object(tl, 'open_pr', return_value=pr), \
+             mock.patch.object(tl, 'head_commit_is_bot', return_value=True), \
+             mock.patch.object(tl, 'ci_state', return_value=('success', {})), \
+             mock.patch.object(tl.lib, 'gh', side_effect=lambda *a, **k: merged.append(a)), \
+             mock.patch.object(tl.lib, 'log'), \
+             mock.patch.dict(os.environ, {'AUTO_MERGE_SOURCES': 'true'}):
+            with mock.patch.object(tl, 'main_head', return_value='c' * 40):
+                tl.merge_command(args, ['checks.yml'])
+            self.assertEqual(merged, [])
+            with mock.patch.object(tl, 'main_head', return_value=A):
+                tl.merge_command(args, ['checks.yml'])
+            self.assertEqual(merged[0][:3], ('pr', 'merge', '7'))
+
     def test_merge_policy(self):
         base = {'status': 'update', 'tree_verified': True}
         auto, reasons = tl.merge_decision([{**base, 'key': 'aura', 'merge': 'auto'}], None)
