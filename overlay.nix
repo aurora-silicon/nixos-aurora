@@ -258,10 +258,16 @@ in {
   asahi-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
     version = pins.aurora-audio.version;
+    postInstall = (old.postInstall or "") + ''
+      echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
+    '';
   });
   alsa-ucm-conf-asahi = prev.alsa-ucm-conf-asahi.overrideAttrs (old: {
     src = source "alsa-ucm-conf-aurora";
     version = pins.alsa-ucm-conf-aurora.version;
+    postInstall = (old.postInstall or "") + ''
+      echo ${pins.alsa-ucm-conf-aurora.commit} > "$out/.aurora-ucm-commit"
+    '';
   });
   speakerguardd = rustPackage "speakerguardd" ./locks/speakerguardd.Cargo.lock {
     nativeBuildInputs = [ final.pkg-config ];

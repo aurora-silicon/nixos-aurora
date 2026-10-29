@@ -70,6 +70,8 @@ def check(root):
     for key, file, commit in (
             ('kernel', 'aurora-source-commit', data['kernelCommit']),
             ('mesa', '.aurora-mesa-commit', data['mesaCommit']),
+            ('audio', '.aurora-audio-commit', data['audioCommit']),
+            ('ucm', '.aurora-ucm-commit', data['ucmCommit']),
             ('fexMesa', '.aurora-mesa-commit', data['mesaCommit']),
             ('flatpakGL', 'aurora-mesa-commit.25.08', data['mesaCommit']),
             ('flatpakGL', 'aurora-mesa-commit.26.08', data['mesaCommit'])):
@@ -78,6 +80,8 @@ def check(root):
     for arch in ('lib64', 'lib'):
         if not root.path(f'{data["fexMesa"]}/usr/{arch}/libvulkan_asahi.so').is_file():
             raise ValueError(f'FEX Mesa {arch} is missing')
+    if not root.path(f'{data["alsaUtils"]}/bin/alsactl').is_file():
+        raise ValueError('the patched ALSA utilities are missing')
     for branch in ('25.08', '26.08'):
         if not root.path(f'{data["flatpakGL"]}/refs/heads/runtime/org.freedesktop.Platform.GL.aurora/aarch64/{branch}').is_file():
             raise ValueError(f'Flatpak GL {branch} is missing')

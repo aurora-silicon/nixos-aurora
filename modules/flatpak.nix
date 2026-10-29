@@ -6,7 +6,7 @@ let
     runtimeInputs = [ config.services.flatpak.package pkgs.ostree pkgs.python3 ];
     text = ''
       exec python3 ${../flatpak-gl}/manage.py "$@" \
-        --repo ${lib.escapeShellArg (toString cfg.package)} --commit ${cfg.package.commit}
+        --repo ${lib.escapeShellArg (toString cfg.package)} --commit ${lib.escapeShellArg cfg.package.commit}
     '';
   };
 in {

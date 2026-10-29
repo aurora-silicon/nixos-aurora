@@ -7,8 +7,13 @@ in {
     schema = 1;
     mesaCommit = pins.mesa-aurora.commit;
     kernelCommit = pins.kernel-aurora.commit;
+    audioCommit = pins.aurora-audio.commit;
+    ucmCommit = pins.alsa-ucm-conf-aurora.commit;
     kernel = toString config.boot.kernelPackages.kernel;
     mesa = toString pkgs.mesa;
+    alsaUtils = if config.aurora.audio.skipLockedControls then toString pkgs.alsa-utils else null;
+    audio = toString pkgs.asahi-audio;
+    ucm = toString pkgs.alsa-ucm-conf-asahi;
     fexMesa = if config.aurora.fexMesa.enable then toString config.aurora.fexMesa.package else null;
     flatpakGL = if config.aurora.flatpak.enable then toString config.aurora.flatpak.package else null;
     avdFirmware = toString pkgs.aurora-avd-firmware;

@@ -68,8 +68,13 @@
         failures = lib.concatMap (value: let config = value.config; in
           lib.mapAttrsToList (name: _: "${config.aurora.desktop}: ${name}")
             (lib.filterAttrs (_: passed: !passed) {
-              "ALSA restore skips controls owned by another process" = hasPatch value.pkgs.alsa-utils;
+              "ALSA restore skips controls owned by another process" = hasPatch value.pkgs.alsa-utils
+                && lib.elem value.pkgs.alsa-utils config.environment.systemPackages;
               "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
+              "PipeWire and WirePlumber use the pinned audio and UCM profiles" =
+                lib.elem value.pkgs.asahi-audio config.services.pipewire.configPackages
+                && lib.elem value.pkgs.asahi-audio config.services.pipewire.wireplumber.configPackages
+                && config.environment.variables.ALSA_CONFIG_UCM2 == "${value.pkgs.alsa-ucm-conf-asahi}/share/alsa/ucm2";
               "Flatpak uses the Aurora repository" = config.services.flatpak.enable
                 && config.aurora.flatpak.enable
                 && config.aurora.flatpak.package.commit == pkgs.aurora-flatpak-gl.commit

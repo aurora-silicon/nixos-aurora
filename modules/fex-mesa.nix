@@ -1,4 +1,4 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, utils, ... }:
 let
   cfg = config.aurora.fexMesa;
   provider = "/var/lib/aurora/fex/mesa-rootfs";
@@ -17,6 +17,11 @@ in {
     package = lib.mkPackageOption pkgs "aurora-fex-mesa" { };
   };
   config = lib.mkIf cfg.enable {
+    assertions = [ {
+      assertion = lib.hasPrefix "/" cfg.rootfs
+        && !(lib.any (character: lib.hasInfix character cfg.rootfs) [ ":" "," "\n" "\\" ]);
+      message = "aurora.fexMesa.rootfs must be an absolute directory without overlay mount delimiters.";
+    } ];
     environment.systemPackages = [ cfg.package ];
     systemd.tmpfiles.rules = [ "d ${provider} 0755 root root -" ];
     systemd.services.aurora-fex-mesa = {
@@ -30,7 +35,8 @@ in {
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        ExecStart = "${pkgs.util-linux}/bin/mount -t overlay overlay -o ro,lowerdir=${cfg.package}:${cfg.rootfs} ${provider}";
+        ExecStart = utils.escapeSystemdExecArgs [ "${pkgs.util-linux}/bin/mount" "-t" "overlay" "overlay"
+          "-o" "ro,lowerdir=${cfg.package}:${cfg.rootfs}" provider ];
         ExecStop = "${pkgs.util-linux}/bin/umount ${provider}";
       };
     };

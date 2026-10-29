@@ -15,6 +15,7 @@
   config = lib.mkMerge [
     (lib.mkIf config.aurora.audio.skipLockedControls {
       nixpkgs.overlays = [ (final: _: { alsa-utils = final.aurora-alsa-utils; }) ];
+      environment.systemPackages = [ pkgs.alsa-utils ];
     })
     (lib.mkIf config.aurora.audio.initrdSequencer {
       # availableKernelModules includes it without forcing an early load.

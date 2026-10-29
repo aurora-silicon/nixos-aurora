@@ -34,10 +34,12 @@ jobs:
           extra_nix_config: |
             extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
             extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
-      - name: Import this commit's verified x86 guest graphics build
+      - name: Import this commit's verified hardware builds
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/import-fex-cache.py --output fex-import.json
+        run: |
+          python3 scripts/import-build-cache.py --output build-import.json \
+            --packages fex-mesa flatpak-gl kernel mesa audio ucm aura avd-fw alsa-utils
       # Kernel-derived tools (cpupower and others) are not in the Aurora cache
       # and need the kernel archive; take every pinned archive from the source
       # cache (or codeload with Retry-After backoff), verified against
@@ -79,5 +81,5 @@ jobs:
             out/*-filesystems.tar.zst*
             out/*-installer/image.json
             out/*-installer/closure.json
-            fex-import.json
+            build-import.json
           retention-days: 14
