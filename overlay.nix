@@ -150,6 +150,9 @@ in {
     };
     postPatch = "";
     makeFlags = [ "RELEASE=1" "CHAINLOADING=1" "BUILTIN_LOGO=aurora" ];
+    # This pin is the v1.0.0b1 tag, so the build carries that release label
+    # instead of 1.0.0b1-g<commit>. track-sources.py drops it when aura moves on.
+    env = (old.env or { }) // { AURA_VERSION_TAG = "1.0.0b1"; };
     postBuild = ''
       mkdir -p stage1
       cp build/aura.bin stage1/aura-raw.bin
