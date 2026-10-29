@@ -17,6 +17,9 @@ stdenvNoCC.mkDerivation {
       ostree refs --repo="$out" --create=${lib.escapeShellArg ref} ${lib.escapeShellArg commit}
     '') lock.refs)}
     ostree remote delete --repo="$out" flathub
+    # Detached signatures may be refreshed independently of the immutable
+    # commit. Object checksums provide this fetch's content verification.
+    find "$out/objects" -type f -name '*.commitmeta' -delete
     rm -rf "$out/tmp" "$out/state" "$out/refs/remotes" "$out/repo.lock"
     mkdir -p "$out/tmp" "$out/state" "$out/refs/remotes"
   '';
