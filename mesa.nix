@@ -1,5 +1,6 @@
 { lib, mesa, src, vulkan-loader, llvmPackages, spirv-tools, stdenv
 , mesa-libclc, spirv-llvm-translator, lm_sensors, libunwind
+, rustc, rust-bindgen, rust-cbindgen
 , commit, guest ? false, compilerTools ? null }:
 (mesa.override { stdenv = if guest then stdenv else llvmPackages.stdenv; }).overrideAttrs (old: {
   inherit src;
@@ -30,6 +31,9 @@
     !(lib.elem (lib.getName input) (map lib.getName [ llvmPackages.clang
       llvmPackages.clang-unwrapped llvmPackages.libllvm spirv-tools mesa-libclc
       spirv-llvm-translator lm_sensors libunwind ]))) old.buildInputs else old.buildInputs;
+  nativeBuildInputs = if guest then lib.filter (input:
+    !(lib.elem (lib.getName input) (map lib.getName [ rustc rust-bindgen rust-cbindgen ])))
+    old.nativeBuildInputs else old.nativeBuildInputs;
   mesonFlags = [
     "-Dplatforms=x11,wayland" "-Dgallium-drivers=asahi,zink,softpipe"
     "-Dvulkan-drivers=asahi" "-Dvulkan-layers=" "-Dglvnd=enabled"
@@ -37,7 +41,7 @@
     "-Dgles2=enabled" "-Dvideo-codecs=${if guest then "" else "all"}" "-Dexpat=enabled"
     "-Dzstd=enabled" "-Dlmsensors=${if guest then "disabled" else "enabled"}" "-Dlibunwind=disabled"
     "-Dvalgrind=disabled" "-Db_ndebug=true" "-Dwrap_mode=nodownload"
-  ];
+  ] ++ lib.optionals guest [ "-Dgallium-rusticl=false" ];
   configurePhase = ''
     runHook preConfigure
   '' + lib.optionalString (compilerTools == null) ''

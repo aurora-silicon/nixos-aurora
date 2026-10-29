@@ -92,6 +92,25 @@ class RepositoryTests(unittest.TestCase):
 
 
 class CleanupTests(unittest.TestCase):
+    def test_an_administrators_replacement_remote_keeps_its_runtimes(self):
+        calls = []
+        def flatpak(*args):
+            calls.append(args)
+            return 'aurora-gl\thttps://admin.example/repo\n'
+        with patch.object(manager, 'remove_owned_overrides'), patch.object(manager, 'flatpak', side_effect=flatpak):
+            manager.disable('/nix/store/our-repository')
+        self.assertEqual(calls, [('remotes', '--columns=name,url')])
+
+    def test_an_administrators_managed_override_symlink_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'managed'
+            target.write_text('[Environment]\n' + '\n'.join(f'{key}={value}' for key, value in manager.ENV.items()) + '\n')
+            path = Path(directory) / 'global'
+            path.symlink_to(target)
+            manager.remove_owned_overrides(path)
+            self.assertTrue(path.is_symlink())
+            self.assertIn('VK_DRIVER_FILES=', target.read_text())
+
     def test_removing_owned_keys_preserves_admin_values_and_other_groups(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'global'

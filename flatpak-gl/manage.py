@@ -47,7 +47,7 @@ def enable(repo, commit):
 def remove_owned_overrides(path):
     """Keep keys changed by an administrator, including other environments."""
     path = Path(path)
-    if not path.is_file():
+    if path.is_symlink() or not path.is_file():
         return
     lines = path.read_text().splitlines(keepends=True)
     section = None
@@ -70,6 +70,9 @@ def remove_owned_overrides(path):
 
 def disable(repo):
     remove_owned_overrides('/var/lib/flatpak/overrides/global')
+    # A remote replaced by an administrator no longer owns our deployments.
+    if remotes().get(REMOTE) != Path(repo).as_uri():
+        return
     for line in flatpak('list', '--runtime', '--columns=ref,origin').splitlines():
         ref, _, origin = line.partition('\t')
         if ref.startswith(repository.ID + '/aarch64/') and origin == REMOTE:

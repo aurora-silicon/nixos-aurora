@@ -35,6 +35,8 @@ def fetch(path, destination, ca_file):
         ORIGIN + path,
     ], capture_output=True, text=True)
     status = int(result.stdout) if result.stdout.isdigit() else 502
+    if not 200 <= status <= 599:
+        status = 502
     if result.returncode != 0 and status == 200:
         status = 502
     return status
