@@ -10,8 +10,8 @@
     // lib.optionalAttrs guest {
       NIX_CFLAGS_COMPILE = "-ffile-prefix-map=/nix/store=/usr/src/nix -ffile-prefix-map=/build=/usr/src/mesa";
     };
-  patches = lib.optionals guest [ (writeText "mesa-hk-memory-oom-size-t.patch"
-    (builtins.readFile ./patches/mesa-hk-memory-oom-size-t.patch)) ];
+  patches = lib.optionals guest [ (writeText "mesa-hk-tests-bind-size-t.patch"
+    (builtins.readFile ./patches/mesa-hk-tests-bind-size-t.patch)) ];
   outputs = [ "out" ];
   # Guest debug outputs would retain host source paths. Preserve the build
   # IDs the drivers need explicitly, while shipping stripped guest libraries.

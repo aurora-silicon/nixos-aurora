@@ -1,0 +1,43 @@
+Subject: [PATCH] hk/tests: match agx_bo_bind's size_t parameter
+
+The BO bind mocks used uint64_t for size. The production API takes size_t,
+which differs on i686 and conflicts with the __typeof__ declarations.
+Match the production prototype in all three mocks without changing test
+behavior. This test-only backport keeps the i686 suite enabled.
+Remove it once the pinned Mesa source includes the corrected signatures.
+
+Sources at https://github.com/aurora-silicon/mesa/tree/108c7218bbb6cddcb91c29680ff0770d29afcecc/src/asahi/vulkan/tests
+
+--- a/src/asahi/vulkan/tests/test-hk-memory-oom.c
++++ b/src/asahi/vulkan/tests/test-hk-memory-oom.c
+@@ -86,7 +86,7 @@
+ 
+ int
+ __wrap_agx_bo_bind(struct agx_device *dev, struct agx_bo *bo, uint64_t address,
+-                   uint64_t size, uint64_t offset, uint32_t flags)
++                   size_t size, uint64_t offset, uint32_t flags)
+ {
+    return bind_fails ? -1 : 0;
+ }
+--- a/src/asahi/vulkan/tests/test-hk-rt-on-demand.c
++++ b/src/asahi/vulkan/tests/test-hk-rt-on-demand.c
+@@ -114,7 +114,7 @@
+ 
+ int
+ __wrap_agx_bo_bind(struct agx_device *dev, struct agx_bo *bo, uint64_t address,
+-                   uint64_t size, uint64_t offset, uint32_t flags)
++                   size_t size, uint64_t offset, uint32_t flags)
+ {
+    if (flags & DRM_ASAHI_BIND_UNBIND)
+       ++unbinds;
+--- a/src/asahi/vulkan/tests/test-hk-as-registry.c
++++ b/src/asahi/vulkan/tests/test-hk-as-registry.c
+@@ -47,7 +47,7 @@
+ int __wrap_agx_bo_bind(struct agx_device *, struct agx_bo *, uint64_t,
+                       uint64_t, uint64_t, uint32_t);
+ int __wrap_agx_bo_bind(struct agx_device *d, struct agx_bo *b, uint64_t addr,
+-                      uint64_t size, uint64_t offset, uint32_t flags)
++                      size_t size, uint64_t offset, uint32_t flags)
+ { return 0; }
+ static uint64_t next_va = 0x1000000000;
+ struct agx_va *__wrap_agx_va_alloc(struct agx_device *, uint64_t, uint64_t,

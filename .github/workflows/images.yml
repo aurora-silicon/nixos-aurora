@@ -33,8 +33,9 @@ jobs:
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
         with:
           extra_nix_config: |
-            extra-experimental-features = auto-allocate-uids
+            extra-experimental-features = auto-allocate-uids cgroups
             auto-allocate-uids = true
+            use-cgroups = true
             extra-system-features = uid-range
             extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
             extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=

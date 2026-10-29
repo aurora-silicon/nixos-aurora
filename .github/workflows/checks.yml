@@ -73,8 +73,9 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
-            extra-experimental-features = auto-allocate-uids
+            extra-experimental-features = auto-allocate-uids cgroups
             auto-allocate-uids = true
+            use-cgroups = true
             extra-system-features = uid-range
             extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
             extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
