@@ -57,6 +57,8 @@
         neo-platform = pkgs.aurora-neo-platform-config;
         aurora-bless = pkgs.aurora-bless;
       };
+      # The payload runs in an ARM machine's x86 guest, and is built on x86.
+      packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;
       checks.${system} = {
       fedora-parity = let
         inherit (nixpkgs) lib;

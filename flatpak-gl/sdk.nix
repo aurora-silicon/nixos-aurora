@@ -11,7 +11,8 @@ stdenvNoCC.mkDerivation {
   SSL_CERT_FILE = "${cacert}/etc/ssl/certs/ca-bundle.crt";
   buildCommand = ''
     ostree init --repo="$out" --mode=archive-z2
-    ostree remote add --repo="$out" --no-gpg-verify flathub https://dl.flathub.org/repo
+    ostree remote add --repo="$out" --no-gpg-verify \
+      --set=tls-ca-path=${cacert}/etc/ssl/certs/ca-bundle.crt flathub https://dl.flathub.org/repo
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (ref: commit: ''
       ostree pull --repo="$out" --depth=0 flathub ${lib.escapeShellArg commit}
       ostree refs --repo="$out" --create=${lib.escapeShellArg ref} ${lib.escapeShellArg commit}

@@ -80,7 +80,7 @@ jobs:
           PACKAGE: ${{ matrix.package }}
         run: python3 scripts/prefetch-sources.py "$PACKAGE"
       - name: Build the pinned Aurora hardware package
-        run: nix build --keep-going --max-jobs 1 --cores 4 --print-build-logs --json '.#${{ matrix.package }}^*' > build.json
+        run: nix build --keep-going --max-jobs 1 --cores 4 --print-build-logs --json '.#packages.aarch64-linux.${{ matrix.package }}^*' > build.json
       - name: Record output identity and closure
         run: |
           mapfile -t outputs < <(jq -r '.[].outputs[]' build.json)

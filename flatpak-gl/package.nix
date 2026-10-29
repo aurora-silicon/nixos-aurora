@@ -34,7 +34,10 @@ let
     nativeBuildInputs = [ flatpak flatpak-builder ostree python3 ];
     dontUnpack = true;
     manifestJSON = builtins.toJSON manifest;
-    passAsFile = [ "manifestJSON" ];
+    publicManifestJSON = builtins.replaceStrings
+      [ "@BRANCH@" "@COMMIT@" "@SHA256@" ]
+      [ branch mesaPin.commit mesaPin.sha256 ] (builtins.readFile ./manifest.json.in);
+    passAsFile = [ "manifestJSON" "publicManifestJSON" ];
     buildPhase = ''
       runHook preBuild
       export HOME="$PWD/home" XDG_DATA_HOME="$PWD/data" XDG_CACHE_HOME="$PWD/cache"
@@ -49,6 +52,9 @@ let
       cp "$manifestJSONPath" manifest.json
       flatpak-builder --arch=aarch64 --disable-rofiles-fuse --disable-download \
         --override-source-date-epoch=1 --force-clean --state-dir="$PWD/state" build manifest.json
+      # Publish reproducible public source locations in the extension's
+      # manifest, rather than the build-only Nix archive paths.
+      install -m644 "$publicManifestJSONPath" build/files/manifest.json
       python3 - build/metadata <<'PY'
     from pathlib import Path
     import sys
