@@ -29,6 +29,12 @@ class BuildImportTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 module.validate_run({**self.run, key: bad}, self.commit)
 
+    def test_only_proven_history_can_supply_an_unchanged_derivation(self):
+        older = {**self.run, 'head_sha': '2' * 40}
+        module.validate_run(older, self.commit, lambda source: source == '2' * 40)
+        with self.assertRaises(ValueError):
+            module.validate_run(older, self.commit, lambda _source: False)
+
 
 if __name__ == '__main__':
     unittest.main()
