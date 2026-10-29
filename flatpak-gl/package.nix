@@ -32,6 +32,8 @@ let
     pname = "aurora-flatpak-gl-${branch}";
     version = "${mesaPin.version}-${builtins.substring 0 12 mesaPin.commit}";
     nativeBuildInputs = [ flatpak flatpak-builder ostree python3 ];
+    # Flatpak's nested sandbox needs an isolated root with a full UID range.
+    requiredSystemFeatures = [ "uid-range" ];
     dontUnpack = true;
     manifestJSON = builtins.toJSON manifest;
     publicManifestJSON = builtins.replaceStrings
@@ -40,6 +42,7 @@ let
     passAsFile = [ "manifestJSON" "publicManifestJSON" ];
     buildPhase = ''
       runHook preBuild
+      mkdir -p /homeless-shelter
       export XDG_DATA_HOME="$PWD/data" XDG_CACHE_HOME="$PWD/cache" XDG_CONFIG_HOME="$PWD/config"
       export XDG_RUNTIME_DIR="$PWD/runtime" FLATPAK_SYSTEM_DIR="$PWD/empty-system"
       mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR" "$FLATPAK_SYSTEM_DIR"
