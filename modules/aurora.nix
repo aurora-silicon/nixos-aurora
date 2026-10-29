@@ -1,6 +1,8 @@
 { config, lib, pkgs, ... }:
 {
-  imports = [ ./firmware.nix ./platform.nix ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ];
+  imports = [ ./firmware.nix ./platform.nix ./audio.nix ./system-fixes.nix
+    ./flatpak.nix ./fex-mesa.nix
+    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";
@@ -21,7 +23,8 @@
     boot.loader.efi.canTouchEfiVariables = false;
     # The Apple kernel profile has no AHCI driver. Keep the Apple/USB/NVMe
     # initrd set explicit instead of inheriting generic PC storage modules.
-    boot.initrd.availableKernelModules = lib.mkForce [
+    boot.initrd.includeDefaultModules = false;
+    boot.initrd.availableKernelModules = [
       "apple-mailbox" "apple_nvmem_spmi" "nvme_apple" "pinctrl-apple-gpio"
       "macsmc" "macsmc-power" "macsmc-input" "macsmc-hwmon" "macsmc-reboot"
       "i2c-pasemi-platform" "tps6598x" "sn201202x" "apple-dart" "dwc3"

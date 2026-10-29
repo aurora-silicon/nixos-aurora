@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject requested capabilities that Kconfig silently dropped."""
+"""Reject dropped capabilities after applying ordered fragment overrides."""
 from pathlib import Path
 import sys
 
@@ -15,16 +15,18 @@ def values(path):
     return result
 
 
-def validate(fragment, resolved):
+def validate(fragment, resolved, *overrides):
     requested, actual = values(fragment), values(resolved)
+    for override in overrides:
+        requested.update(values(override))
     missing = [f'{name}: wanted {value}, got {actual.get(name, "absent")}'
-               for name, value in requested.items() if actual.get(name) != value]
+               for name, value in requested.items() if actual.get(name, 'n') != value]
     if missing:
         raise ValueError('Kernel capabilities disabled by Kconfig:\n' + '\n'.join(missing))
 
 
 if __name__ == '__main__':
     try:
-        validate(*sys.argv[1:])
+        validate(sys.argv[1], sys.argv[-1], *sys.argv[2:-1])
     except (ValueError, OSError) as error:
         sys.exit(str(error))

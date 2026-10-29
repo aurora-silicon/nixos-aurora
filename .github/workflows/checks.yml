@@ -39,7 +39,7 @@ jobs:
         run: |
           nix flake check --no-build
           nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
-            .#checks.aarch64-linux.stage2-tools
+            .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity
       - name: Inspect KDE graphical login configuration
         run: |
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.defaultUnit
@@ -53,7 +53,8 @@ jobs:
   hardware:
     needs: evaluate
     if: needs.evaluate.outputs.packages != '[]'
-    runs-on: ubuntu-24.04-arm
+    # Guest drivers contain x86 code and must be built on x86, as on Fedora.
+    runs-on: ${{ matrix.package == 'fex-mesa' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
     timeout-minutes: 180
     permissions:
       contents: read

@@ -47,12 +47,49 @@
         uboot = pkgs.uboot-asahi;
         kernel = pkgs.linux-asahi.kernel;
         mesa = pkgs.mesa;
+        alsa-utils = pkgs.aurora-alsa-utils;
+        audio = pkgs.asahi-audio;
+        ucm = pkgs.alsa-ucm-conf-asahi;
+        fex-mesa = pkgs.aurora-fex-mesa;
+        flatpak-gl = pkgs.aurora-flatpak-gl;
         speakerguardd = pkgs.speakerguardd;
         bankstown = pkgs.bankstown-lv2;
         neo-platform = pkgs.aurora-neo-platform-config;
         aurora-bless = pkgs.aurora-bless;
       };
       checks.${system} = {
+      fedora-parity = let
+        inherit (nixpkgs) lib;
+        profiles = lib.attrValues self.nixosConfigurations;
+        hasPatch = package: lib.any (patch: lib.hasSuffix "-alsactl-skip-locked-controls.patch" (toString patch))
+          (package.patches or [ ]);
+        failures = lib.concatMap (value: let config = value.config; in
+          lib.mapAttrsToList (name: _: "${config.aurora.desktop}: ${name}")
+            (lib.filterAttrs (_: passed: !passed) {
+              "ALSA restore skips controls owned by another process" = hasPatch value.pkgs.alsa-utils;
+              "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
+              "Flatpak uses the Aurora repository" = config.services.flatpak.enable
+                && config.aurora.flatpak.enable
+                && config.aurora.flatpak.package.commit == pkgs.aurora-flatpak-gl.commit
+                && config.aurora.flatpak.package.commit == pkgs.aurora-fex-mesa.commit;
+              "the image installs and pins GL before desktop login" =
+                lib.elem "multi-user.target" config.systemd.services.aurora-flatpak-gl.wantedBy
+                && lib.elem "display-manager.service" config.systemd.services.aurora-flatpak-gl.before;
+              "FEX carries both guest architectures" = config.aurora.fexMesa.enable
+                && lib.elem config.aurora.fexMesa.package config.environment.systemPackages;
+              "all four malcontent overrides name their retirement fix" = lib.all (name:
+                let unit = config.systemd.units."${name}.service"; in
+                unit.overrideStrategy == "asDropin" && lib.hasInfix "af8226a7d3c3" unit.text
+                && lib.hasInfix "SystemCallFilter=@signal" unit.text
+                && (name == "malcontent-webd-update" || lib.hasInfix "SuccessExitStatus=71" unit.text))
+                [ "malcontent-timerd" "malcontent-timer-extension-agent" "malcontent-webd" "malcontent-webd-update" ];
+            })) profiles;
+      in pkgs.runCommand "aurora-fedora-parity-evaluation" {
+        failures = lib.concatStringsSep "\n" failures;
+      } ''
+        if [[ -n "$failures" ]]; then printf '%s\n' "$failures" >&2; exit 1; fi
+        touch $out
+      '';
       sep-kernel-transition = pkgs.runCommand "aurora-sep-running-kernel-check" {
         nativeBuildInputs = [ pkgs.python3 pkgs.gnugrep ];
         sepCondition = imageProbe.config.systemd.services.aurora-sep.serviceConfig.ExecCondition;
