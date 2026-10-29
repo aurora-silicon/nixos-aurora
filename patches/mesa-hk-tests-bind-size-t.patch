@@ -32,9 +32,13 @@ Sources at https://github.com/aurora-silicon/mesa/tree/108c7218bbb6cddcb91c29680
        ++unbinds;
 --- a/src/asahi/vulkan/tests/test-hk-as-registry.c
 +++ b/src/asahi/vulkan/tests/test-hk-as-registry.c
-@@ -47,7 +47,7 @@
- int __wrap_agx_bo_bind(struct agx_device *, struct agx_bo *, uint64_t,
-                       uint64_t, uint64_t, uint32_t);
+@@ -44,10 +44,9 @@
+    assert(bo->_map);
+    return bo;
+ }
+-int __wrap_agx_bo_bind(struct agx_device *, struct agx_bo *, uint64_t,
+-                      uint64_t, uint64_t, uint32_t);
++__typeof__(agx_bo_bind) __wrap_agx_bo_bind;
  int __wrap_agx_bo_bind(struct agx_device *d, struct agx_bo *b, uint64_t addr,
 -                      uint64_t size, uint64_t offset, uint32_t flags)
 +                      size_t size, uint64_t offset, uint32_t flags)
