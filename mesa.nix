@@ -1,6 +1,6 @@
 { lib, mesa, src, vulkan-loader, llvmPackages, spirv-tools, stdenv
 , mesa-libclc, spirv-llvm-translator, lm_sensors, libunwind
-, rustc, rust-bindgen, rust-cbindgen, valgrind-light
+, rustc, rust-bindgen, rust-cbindgen, valgrind-light, writeText
 , commit, guest ? false, compilerTools ? null }:
 (mesa.override { stdenv = if guest then stdenv else llvmPackages.stdenv; }).overrideAttrs (old: {
   inherit src;
@@ -10,7 +10,8 @@
     // lib.optionalAttrs guest {
       NIX_CFLAGS_COMPILE = "-ffile-prefix-map=/nix/store=/usr/src/nix -ffile-prefix-map=/build=/usr/src/mesa";
     };
-  patches = [ ];
+  patches = lib.optionals guest [ (writeText "mesa-hk-memory-oom-size-t.patch"
+    (builtins.readFile ./patches/mesa-hk-memory-oom-size-t.patch)) ];
   outputs = [ "out" ];
   # Guest debug outputs would retain host source paths. Preserve the build
   # IDs the drivers need explicitly, while shipping stripped guest libraries.
@@ -98,7 +99,7 @@ assert json.load(sys.stdin)["host"]["c"]["id"] == "clang", "Mesa must use the se
     rm -rf "$out/usr/include" "$out/usr/lib/pkgconfig" "$out/usr/lib64/pkgconfig"
     echo ${commit} > "$out/.aurora-mesa-commit"
     if find "$out" -type f -name '*.so*' -exec readelf -d {} + | \
-      grep -E 'NEEDED.*(libLLVM|libSPIRV-Tools|libsensors|libunwind)|/nix/store'; then
+      grep -E '\(NEEDED\).*(libLLVM|libSPIRV-Tools|libsensors|libunwind|/nix/store)|\((RPATH|RUNPATH)\).*/nix/store'; then
       echo 'guest Mesa retains a host or release-specific dependency' >&2
       exit 1
     fi
