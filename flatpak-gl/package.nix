@@ -40,9 +40,9 @@ let
     passAsFile = [ "manifestJSON" "publicManifestJSON" ];
     buildPhase = ''
       runHook preBuild
-      export HOME="$PWD/home" XDG_DATA_HOME="$PWD/data" XDG_CACHE_HOME="$PWD/cache"
+      export XDG_DATA_HOME="$PWD/data" XDG_CACHE_HOME="$PWD/cache" XDG_CONFIG_HOME="$PWD/config"
       export XDG_RUNTIME_DIR="$PWD/runtime" FLATPAK_SYSTEM_DIR="$PWD/empty-system"
-      mkdir -p "$HOME" "$XDG_RUNTIME_DIR" "$FLATPAK_SYSTEM_DIR"
+      mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR" "$FLATPAK_SYSTEM_DIR"
       chmod 700 "$XDG_RUNTIME_DIR"
       cp -r --no-preserve=mode ${sdk} sdk-repo
       flatpak build-update-repo sdk-repo
