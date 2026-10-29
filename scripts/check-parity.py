@@ -82,6 +82,9 @@ def check(root):
             raise ValueError(f'FEX Mesa {arch} is missing')
     if not root.path(f'{data["alsaUtils"]}/bin/alsactl').is_file():
         raise ValueError('the patched ALSA utilities are missing')
+    mic = root.text(f'{data["ucm"]}/share/alsa/ucm2/conf.d/aop_audio/3chan/HiFi.conf') or ''
+    if 'JackControl "Internal Mic Jack"' not in mic:
+        raise ValueError('the installed UCM profiles do not carry the microphone lid jack')
     for branch in ('25.08', '26.08'):
         if not root.path(f'{data["flatpakGL"]}/refs/heads/runtime/org.freedesktop.Platform.GL.aurora/aarch64/{branch}').is_file():
             raise ValueError(f'Flatpak GL {branch} is missing')

@@ -271,13 +271,41 @@ in {
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
     '';
   });
-  alsa-ucm-conf-asahi = prev.alsa-ucm-conf-asahi.overrideAttrs (old: {
-    src = source "alsa-ucm-conf-aurora";
-    version = pins.alsa-ucm-conf-aurora.version;
-    postInstall = (old.postInstall or "") + ''
-      echo ${pins.alsa-ucm-conf-aurora.commit} > "$out/.aurora-ucm-commit"
+  # nixpkgs exposes a symlink join here: overriding its src does not replace
+  # the inner model derivation. Build the pinned models explicitly, then merge
+  # them ahead of the native common UCM definitions.
+  alsa-ucm-conf-asahi = let
+    models = final.stdenvNoCC.mkDerivation {
+      pname = "aurora-ucm-models";
+      version = pins.alsa-ucm-conf-aurora.version;
+      src = source "alsa-ucm-conf-aurora";
+      dontBuild = true;
+      installPhase = ''
+        runHook preInstall
+        mkdir -p "$out/share/alsa"
+        cp -r ucm2 "$out/share/alsa/"
+        echo ${pins.alsa-ucm-conf-aurora.commit} > "$out/.aurora-ucm-commit"
+        runHook postInstall
+      '';
+    };
+  in final.symlinkJoin {
+    pname = "alsa-ucm-conf-aurora";
+    inherit (models) version src;
+    paths = [ models final.alsa-ucm-conf ];
+    postBuild = ''
+      test "$(cat "$out/.aurora-ucm-commit")" = ${pins.alsa-ucm-conf-aurora.commit}
+      grep -qF 'JackControl "Internal Mic Jack"' \
+        "$out/share/alsa/ucm2/conf.d/aop_audio/3chan/HiFi.conf"
+      test -f "$out/share/alsa/ucm2/conf.d/macaudio/MacBook Neo J700.conf"
     '';
-  });
+    passthru.commit = pins.alsa-ucm-conf-aurora.commit;
+    meta = {
+      description = "Aurora model profiles with native common ALSA UCM definitions";
+      homepage = "https://github.com/aurora-silicon/alsa-ucm-conf-asahi";
+      license = final.lib.licenses.bsd3;
+      platforms = [ "aarch64-linux" ];
+    };
+  };
   speakerguardd = rustPackage "speakerguardd" ./locks/speakerguardd.Cargo.lock {
     nativeBuildInputs = [ final.pkg-config ];
     buildInputs = [ final.alsa-lib ];

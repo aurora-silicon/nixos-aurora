@@ -39,6 +39,8 @@ class ImageParityTests(unittest.TestCase):
         for arch in ('lib64', 'lib'):
             self.write(f'/nix/store/fexMesa/usr/{arch}/libvulkan_asahi.so', b'ELF')
         self.write('/nix/store/alsaUtils/bin/alsactl', b'ELF')
+        self.write('/nix/store/ucm/share/alsa/ucm2/conf.d/aop_audio/3chan/HiFi.conf',
+                   'JackControl "Internal Mic Jack"\n')
         for branch in ('25.08', '26.08'):
             self.write('/nix/store/flatpakGL/refs/heads/runtime/org.freedesktop.Platform.GL.aurora/aarch64/' + branch, 'ostree-commit')
         for variant in ('v2-t0', 'v3-t0', 'v3-t1', 'v4-t0', 'v5-t0', 'v5-t1'):
@@ -82,6 +84,11 @@ class ImageParityTests(unittest.TestCase):
     def test_the_sequencer_must_be_in_the_actual_initrd(self):
         self.write(self.system + '/initrd', cpio('lib/modules/kernel/snd-pcm.ko') + cpio('TRAILER!!!', b''))
         with self.assertRaisesRegex(ValueError, 'does not carry snd-seq'):
+            self.check()
+
+    def test_a_ucm_stamp_cannot_replace_the_actual_lid_jack_profile(self):
+        self.write('/nix/store/ucm/share/alsa/ucm2/conf.d/aop_audio/3chan/HiFi.conf', '# old profiles\n')
+        with self.assertRaisesRegex(ValueError, 'microphone lid jack'):
             self.check()
 
     def test_missing_or_disabled_defaults_are_rejected(self):
