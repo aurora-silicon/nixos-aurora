@@ -174,6 +174,15 @@ in {
     src = source "aurora-audio";
     version = pins.aurora-audio.version;
   });
+  # A VRR-capable output defaults to variable refresh rate: the variable
+  # variant of the preferred mode becomes the preferred one, which new monitor
+  # configurations use. Saved configurations still win. The same patch is in
+  # fedora-aurora's mutter package (fedora-aurora PR 41).
+  mutter = prev.mutter.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ map stableFile [
+      ./patches/mutter-prefer-variable-refresh-rate.patch
+    ];
+  });
   alsa-ucm-conf-asahi = prev.alsa-ucm-conf-asahi.overrideAttrs (old: {
     src = source "alsa-ucm-conf-aurora";
     version = pins.alsa-ucm-conf-aurora.version;
