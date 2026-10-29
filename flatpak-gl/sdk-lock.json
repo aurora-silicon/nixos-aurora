@@ -5,7 +5,7 @@
       "runtime/org.freedesktop.Platform/aarch64/25.08": "267273fb9ff1ab690e70234efbd142cc003e41de9bbe383a6a99842c38cbc93a",
       "runtime/org.freedesktop.Sdk.Extension.llvm22/aarch64/25.08": "58c444e3c536ceb9176c11ddfaef9ff1feb3ac4f4f6d003ad974e5cc4aabec50"
     },
-    "nix_hash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    "nix_hash": "sha256-F/VcCeLdvFwkCmjMaYC63YtYgzc7vhiHRYsDbE7O8Es="
   },
   "26.08": {
     "refs": {
@@ -13,6 +13,6 @@
       "runtime/org.freedesktop.Platform/aarch64/26.08": "b66eec6a19d747f56191c318c11a6ec765b8d7cc45cf16e4926349a64504d620",
       "runtime/org.freedesktop.Sdk.Extension.llvm22/aarch64/26.08": "eae2178a24b7e7a47b4a38b1e1b77a2d4c0955623608ebcd562d9aaf756a9981"
     },
-    "nix_hash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    "nix_hash": "sha256-VFCDz1puDSCBKI8IacCRue+rK7dzba6+stIEXV9zqq0="
   }
 }
