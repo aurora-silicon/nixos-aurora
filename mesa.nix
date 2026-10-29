@@ -1,6 +1,7 @@
-{ lib, mesa, src, vulkan-loader, llvmPackages, spirv-tools
+{ lib, mesa, src, vulkan-loader, llvmPackages, spirv-tools, stdenv
+, mesa-libclc, spirv-llvm-translator, lm_sensors, libunwind
 , commit, guest ? false, compilerTools ? null }:
-(mesa.override { stdenv = llvmPackages.stdenv; }).overrideAttrs (old: {
+(mesa.override { stdenv = if guest then stdenv else llvmPackages.stdenv; }).overrideAttrs (old: {
   inherit src;
   version = "26.3.0";
   env = (old.env or { }) // { MESA_GIT_SHA1_OVERRIDE = commit; };
@@ -8,18 +9,24 @@
   outputs = [ "out" ];
   mesonAutoFeatures = "auto";
   # Nix splits Clang's library output from LLVM's library directory.
-  postPatch = (old.postPatch or "") + ''
+  postPatch = (old.postPatch or "") + lib.optionalString (!guest) ''
     substituteInPlace meson.build --replace-fail 'dirs : llvm_libdir' \
       "dirs : [llvm_libdir, '${lib.getLib llvmPackages.clang-unwrapped}/lib']"
   '';
   preConfigure = (old.preConfigure or "") + ''
-    export CC=${llvmPackages.clang}/bin/clang
-    export CXX=${llvmPackages.clang}/bin/clang++
+    export CC=${if guest then "${stdenv.cc}/bin/cc" else "${llvmPackages.clang}/bin/clang"}
+    export CXX=${if guest then "${stdenv.cc}/bin/c++" else "${llvmPackages.clang}/bin/clang++"}
     export CC_FOR_BUILD="$CC"
     export CXX_FOR_BUILD="$CXX"
     "$CC" --version
   '';
   mesonBuildType = "release";
+  # The guest builds use the same native x86 shader tools. In particular,
+  # they neither build nor link an i686 LLVM/translator stack.
+  buildInputs = if guest then lib.filter (input:
+    !(lib.elem (lib.getName input) (map lib.getName [ llvmPackages.clang
+      llvmPackages.clang-unwrapped llvmPackages.libllvm spirv-tools mesa-libclc
+      spirv-llvm-translator lm_sensors libunwind ]))) old.buildInputs else old.buildInputs;
   mesonFlags = [
     "-Dplatforms=x11,wayland" "-Dgallium-drivers=asahi,zink,softpipe"
     "-Dvulkan-drivers=asahi" "-Dvulkan-layers=" "-Dglvnd=enabled"

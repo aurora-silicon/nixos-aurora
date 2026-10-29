@@ -23,7 +23,7 @@ in {
       description = "Aurora Mesa graphics provider for FEX";
       wantedBy = [ "multi-user.target" ];
       after = [ "systemd-tmpfiles-setup.service" "local-fs.target" ];
-      requiresMountsFor = [ cfg.rootfs ];
+      unitConfig.RequiresMountsFor = [ cfg.rootfs ];
       unitConfig.ConditionPathIsDirectory = "${cfg.rootfs}/usr";
       restartTriggers = [ cfg.package ];
       serviceConfig = {
