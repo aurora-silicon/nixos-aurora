@@ -67,6 +67,12 @@ class PayloadValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'library_path'):
             validator.validate_payload(self.root, COMMIT)
 
+    def test_existing_but_wrong_json_target_is_rejected(self):
+        self.write('vulkan/icd.d/asahi_icd.aarch64.json',
+                   json.dumps({'ICD': {'library_path': 'libvulkan_lvp.so'}}))
+        with self.assertRaisesRegex(ValueError, 'wrong driver'):
+            validator.validate_payload(self.root, COMMIT)
+
 
 class RepositoryValidationTests(PayloadValidationTests):
     def setUp(self):

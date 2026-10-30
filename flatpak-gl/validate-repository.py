@@ -32,15 +32,18 @@ def validate_payload(root, commit):
             header = stream.read(20)
         if len(header) != 20 or header[:6] != b'\x7fELF\x02\x01' or struct.unpack('<H', header[18:20])[0] != 183:
             raise ValueError(f'{name}: not an AArch64 ELF library')
-    for name in ('vulkan/icd.d/asahi_icd.aarch64.json',
-                 'vulkan/icd.d/lvp_icd.aarch64.json',
-                 'glvnd/egl_vendor.d/50_mesa.json'):
+    for name, expected_library in (
+            ('vulkan/icd.d/asahi_icd.aarch64.json', 'libvulkan_asahi.so'),
+            ('vulkan/icd.d/lvp_icd.aarch64.json', 'libvulkan_lvp.so'),
+            ('glvnd/egl_vendor.d/50_mesa.json', 'libEGL_mesa.so.0')):
         data = json.loads((root / name).read_text())['ICD']
         library = data['library_path'].removeprefix('/usr/lib/aarch64-linux-gnu/GL/aurora/')
         # The loader can also use the basename with the extension's library path.
         path = root / (library if '/' in library else 'lib/' + library)
         if not path.is_file() or not path.resolve().is_relative_to(root):
             raise ValueError(f'{name}: library_path is absent from the payload')
+        if path.resolve() != (root / 'lib' / expected_library).resolve(strict=True):
+            raise ValueError(f'{name}: library_path selects the wrong driver')
     defaults = (root / 'share/drirc.d/00-hk-defaults.conf').read_text()
     if 'hk_report_honeykrisp_driver_id' not in defaults:
         raise ValueError('GL payload lacks the DXVK/vkd3d driver-ID defaults')
