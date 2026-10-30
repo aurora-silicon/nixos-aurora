@@ -6,6 +6,14 @@
     default = "kde";
     description = "Desktop selected by the Aurora native installer profile.";
   };
+  options.aurora.openssh.startAtBoot = lib.mkOption {
+    type = lib.types.bool;
+    default = false;
+    description = ''
+      Start the OpenSSH server (and its host key generation) at boot. Off by
+      default: the server is installed but starts only on request.
+    '';
+  };
   config = {
     hardware.asahi.enable = true;
     nixpkgs.hostPlatform = "aarch64-linux";
@@ -50,6 +58,19 @@
     services.displayManager.gdm.enable = config.aurora.desktop == "gnome";
     # Every Aurora desktop image comes with a web browser, as Fedora and ALARM do.
     programs.firefox.enable = config.aurora.desktop != "minimal";
+    # Every image has the OpenSSH server, but nothing starts it: no unit at
+    # boot wants sshd or its host key generation, and the firewall keeps
+    # port 22 closed. `sudo systemctl start sshd` starts it without a rebuild
+    # and makes the host keys on first use. Remote clients also need the
+    # port: `sudo nixos-firewall-tool open tcp 22` until the next firewall
+    # reload, or services.openssh.openFirewall. aurora.openssh.startAtBoot
+    # starts it at every boot.
+    services.openssh.enable = lib.mkDefault true;
+    services.openssh.openFirewall = lib.mkDefault false;
+    systemd.services.sshd = lib.mkIf (config.services.openssh.enable && !config.services.openssh.startWhenNeeded
+      && !config.aurora.openssh.startAtBoot) { wantedBy = lib.mkForce [ ]; };
+    systemd.services.sshd-keygen = lib.mkIf (config.services.openssh.enable && config.services.openssh.generateHostKeys
+      && !config.aurora.openssh.startAtBoot) { wantedBy = lib.mkForce [ ]; };
     # GDM keeps the splash until its greeter starts and replaces
     # plymouth-quit.service; give SDDM the same role, so the splash is still up
     # when first boot asks for the disk password. If SDDM fails,
