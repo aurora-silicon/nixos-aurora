@@ -3,6 +3,7 @@
 set -euo pipefail
 baseline=${1:?full baseline Git revision required}
 [[ $baseline =~ ^[0-9a-f]{40}$ ]]
+commit=$(python3 -c 'import json; print(json.load(open("sources.json"))["mesa-aurora"]["commit"])')
 proof=$PWD/graphics-generation
 mkdir -p "$proof"
 old=$(nix build --no-link --print-out-paths "git+file://$PWD?rev=$baseline#packages.aarch64-linux.mesa")
@@ -12,12 +13,12 @@ nix-env --profile "$profile" --set "$old"
 readlink -f "$profile" > "$proof/before.txt"
 sha256sum "$profile/lib/libvulkan_asahi.so" > "$proof/before.sha256"
 nix-env --profile "$profile" --set "$new"
-test "$(cat "$profile/.aurora-mesa-commit")" = cf4e08105dfa526b8874318b6a52b3ce948f6297
+test "$(cat "$profile/.aurora-mesa-commit")" = "$commit"
 test -f "$profile/include/gbm.h"
 test -f "$profile/lib/pkgconfig/gbm.pc"
 test -f "$profile/lib/libgbm.so"
 test -f "$(cat "$profile/etc/OpenCL/vendors/rusticl.icd")"
-strings "$profile/lib/libvulkan_asahi.so" | grep -F '(git-cf4e08105d), Borealis'
+strings "$profile/lib/libvulkan_asahi.so" | grep -F "(git-${commit:0:10}), Borealis"
 ldd "$profile/lib/libRusticlOpenCL.so.1.0.0" | tee "$proof/rusticl-ldd.txt"
 ! grep -F 'not found' "$proof/rusticl-ldd.txt"
 OCL_ICD_VENDORS="$profile/etc/OpenCL/vendors" clinfo --list | tee "$proof/clinfo.txt"

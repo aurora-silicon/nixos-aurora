@@ -97,6 +97,11 @@
                 lib.elem value.pkgs.asahi-audio config.services.pipewire.configPackages
                 && lib.elem value.pkgs.asahi-audio config.services.pipewire.wireplumber.configPackages
                 && config.environment.variables.ALSA_CONFIG_UCM2 == "${value.pkgs.alsa-ucm-conf-asahi}/share/alsa/ucm2";
+              "Mesa development and OpenCL interfaces match the native pin" =
+                value.pkgs.mesa ? dev
+                && value.pkgs.mesa.opencl.outPath == value.pkgs.aurora-rusticl.outPath
+                && value.pkgs.mesa.auroraCommit == value.pkgs.aurora-rusticl.auroraCommit
+                && lib.elem value.pkgs.mesa.opencl config.hardware.graphics.extraPackages;
               "Flatpak uses the Aurora repository" = config.services.flatpak.enable
                 && config.aurora.flatpak.enable
                 && config.aurora.flatpak.package.commit == pkgs.aurora-flatpak-gl.commit
