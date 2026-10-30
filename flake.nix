@@ -84,6 +84,11 @@
         setupAutologin = lineOf (line: lib.hasPrefix "auth sufficient " line && lib.hasInfix "pam_succeed_if.so" line
           && lib.hasInfix "user = plasma-setup" line);
         uidAutologin = lineOf (line: lib.hasInfix "pam_succeed_if.so" line && lib.hasInfix "uid >= 1000" line);
+        kdeWith = module: (self.nixosConfigurations.aurora-kde.extendModules { modules = [ module ]; }).config;
+        # What the rekey writes into owner.nix once the password unlocks the disk.
+        kdeRekeyed = kdeWith { aurora.firstboot.passwordHooks = false; };
+        kdeGerman = kdeWith { services.xserver.xkb.layout = "de"; };
+        kdeGermanFrenchConsole = kdeWith { services.xserver.xkb.layout = "de"; console.keyMap = "fr"; };
         # Graphical first boot: each failed expectation is reported by name.
         desktopExpectations = {
           "desktop images boot with the spinner splash" = kde.boot.plymouth.enable && gnome.boot.plymouth.enable
@@ -144,6 +149,22 @@
             gnome.environment.etc."aurora/desktop-account-setup".text == "gnome-initial-setup\n"
             && !(kde.environment.etc ? "aurora/desktop-account-setup")
             && !(minimal.environment.etc ? "aurora/desktop-account-setup");
+          "the first password sign-in hooks are declared until the rekey" =
+            kde.security.pam.services.sddm.rules.auth ? aurora-password-hook
+            && kde.security.pam.services.sddm-autologin.rules.auth ? aurora-password-gate
+            && gnome.security.pam.services.gdm-password.rules.auth ? aurora-password-hook
+            && kde.environment.etc ? "aurora/password-hooks";
+          "a rebuild after the rekey removes the hooks" =
+            !(kdeRekeyed.security.pam.services.sddm.rules.auth ? aurora-password-hook)
+            && !(kdeRekeyed.security.pam.services.sddm-autologin.rules.auth ? aurora-password-gate)
+            && !(lib.hasInfix "aurora-password-hook" kdeRekeyed.security.pam.services.sddm.text)
+            && !(kdeRekeyed.environment.etc ? "aurora/password-hooks");
+          "the console keymap follows the XKB layout unless set" = kde.console.keyMap == "us"
+            && lib.hasSuffix "-xkb-console-keymap" (toString kdeGerman.console.keyMap)
+            && kdeGermanFrenchConsole.console.keyMap == "fr"
+            && lib.hasInfix "layout=de\n" kdeGerman.environment.etc."aurora/keyboard".text;
+          "the initrd unlock prompt waits for the console keymap" = lib.elem "systemd-vconsole-setup.service"
+            imageProbe.config.boot.initrd.systemd.services.aurora-initrd-root.after;
         };
       in pkgs.runCommand "aurora-firstboot-image-evaluation" {
         desktopFailures = lib.concatStringsSep "\n" (lib.attrNames (lib.filterAttrs (_: met: !met) desktopExpectations));

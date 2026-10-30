@@ -49,6 +49,22 @@ trap cleanup EXIT HUP INT TERM
 
 start=$(uptime_s)
 deadline=$((start + ready_timeout))
+
+# The kernel instantiates every key under one global mutex, and a trusted key
+# made before the enclave's bring-up has ended waits there for it, up to 90 s.
+# Meanwhile no other key can be created, and systemd creates one for each
+# service it starts, so the whole boot stalls behind this probe. The driver's
+# diag/keystore attribute leaves "unknown" once the bring-up has ended, and
+# reading it takes no lock, so wait on that first. Without the attribute the
+# probe below still works, as before.
+for keystore in /sys/bus/platform/drivers/apple_sep/*/diag/keystore; do
+    [ -r "$keystore" ] || continue
+    while [ "$(cat "$keystore" 2>/dev/null || echo unknown)" = unknown ] &&
+        [ "$(uptime_s)" -lt "$deadline" ]; do
+        sleep 0.1
+    done
+done
+
 verified=false
 while :; do
     key_id=$(printf 'new 32' | keyctl padd trusted aurora-sep-check @s 2>/dev/null || true)

@@ -7,7 +7,18 @@ let
     boot_uuid=${layout.bootUUID}
     root_subvolume=root
   '';
+  xkb = config.services.xserver.xkb;
 in {
+  options.aurora.firstboot.passwordHooks = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = ''
+      Declare the first-boot PAM hooks that let the owner's first password
+      sign-in become the disk password. aurora-firstboot sets this to false in
+      /etc/nixos/owner.nix once the password unlocks the disk, so the next
+      rebuild removes the hooks; until then they do nothing.
+    '';
+  };
   options.aurora.imageLayout = lib.mkOption {
     default = null;
     description = "Filesystem identities sealed into an Aurora installer image.";
@@ -48,7 +59,9 @@ in {
       description = "Prepare and unlock the Aurora root filesystem";
       wantedBy = [ "initrd.target" ];
       wants = [ "systemd-udev-settle.service" ];
-      after = [ "systemd-udev-settle.service" "aurora-vendor-firmware.service" "plymouth-start.service" ];
+      # The unlock prompt reads the disk password with the console keymap.
+      after = [ "systemd-udev-settle.service" "aurora-vendor-firmware.service" "plymouth-start.service"
+        "systemd-vconsole-setup.service" ];
       before = [ "sysroot.mount" "cryptsetup-pre.target" "initrd-root-device.target" ];
       unitConfig.DefaultDependencies = false;
       serviceConfig = {
@@ -85,9 +98,9 @@ in {
       '';
     };
     # The shared aurora-firstboot.service, declared here because the package
-    # carries no unit files. Desktop images protect the disk with a password
-    # asked on the boot splash, then the desktop's own setup creates the owner
-    # (Plasma Setup on KDE, GNOME Initial Setup on GNOME). Minimal images and
+    # carries no unit files. On desktop images the desktop's own setup creates
+    # the owner (Plasma Setup on KDE, GNOME Initial Setup on GNOME), whose
+    # password then also protects the disk. Minimal images and
     # any boot with aurora.firstboot=text use the text wizard on tty1, which
     # creates the owner itself; that option also starts it for recovery while
     # setup is no longer pending but no owner exists.
@@ -111,8 +124,73 @@ in {
         StandardInput = "null"; StandardOutput = "journal"; StandardError = "journal";
       };
     };
-    # The shared plymouth-quit.service drop-in: the splash stays up for the
-    # disk password prompt with any display manager.
+    # The owner's password, at its first sign-in, also becomes the disk
+    # password (aurora-firstboot); first boot asks nothing on the splash,
+    # which stops updating on the MacBook Neo once the system has started.
+    # NixOS generates /etc/pam.d, so the hooks are declared here. While the
+    # disk opens with its temporary key, the gate holds the new owner's
+    # automatic login (Plasma Setup's) so the greeter asks for the password
+    # once. After the rekey they return at once (the disk-rekeyed marker), and
+    # the rekey sets aurora.firstboot.passwordHooks = false in owner.nix, so
+    # the next rebuild removes them.
+    environment.etc."aurora/password-hooks" = lib.mkIf config.aurora.firstboot.passwordHooks {
+      text = "sddm sddm-autologin gdm-password\n";
+    };
+    security.pam.services = lib.mkIf config.aurora.firstboot.passwordHooks (let
+      pamExec = "${config.security.pam.package}/lib/security/pam_exec.so";
+      hook = "${pkgs.aurora-firstboot}/lib/aurora/aurora-password-hook";
+      signIn = {
+        order = 0;
+        control = "optional";
+        modulePath = pamExec;
+        args = [ "quiet" "expose_authtok" hook ];
+      };
+    in lib.mkMerge [
+      (lib.mkIf config.services.displayManager.sddm.enable {
+        sddm.rules.auth.aurora-password-hook = signIn;
+        sddm-autologin.rules.auth.aurora-password-gate = {
+          order = 0;
+          control = "requisite";
+          modulePath = pamExec;
+          args = [ "quiet" hook "--gate" ];
+        };
+      })
+      (lib.mkIf config.services.displayManager.gdm.enable {
+        gdm-password.rules.auth.aurora-password-hook = signIn;
+      })
+    ]);
+    # The disk password is typed at the initrd prompt with console.keyMap and
+    # at the greeter with the XKB layout. Derive the console keymap from the
+    # XKB settings, as console.useXkbConfig does, but with mkDefault priority:
+    # an explicit console.keyMap or console.useXkbConfig still wins.
+    console.keyMap = lib.mkIf (xkb.layout != "us" || xkb.variant != "") (lib.mkDefault
+      (pkgs.runCommand "xkb-console-keymap" { preferLocalBuild = true; } ''
+        '${pkgs.buildPackages.ckbcomp}/bin/ckbcomp' \
+          ${lib.optionalString (config.environment.sessionVariables ? XKB_CONFIG_ROOT)
+            "-I${config.environment.sessionVariables.XKB_CONFIG_ROOT}"} \
+          -model '${xkb.model}' -layout '${xkb.layout}' \
+          -option '${xkb.options}' -variant '${xkb.variant}' > "$out"
+      ''));
+    # NixOS's localed is read-only and writes no 00-keyboard.conf: tell
+    # aurora-firstboot which layout the greeter uses, so the rekey can compare
+    # it with the console keymap.
+    environment.etc."aurora/keyboard".text = ''
+      layout=${xkb.layout}
+      variant=${xkb.variant}
+    '';
+    systemd.services.aurora-disk-rekey = {
+      description = "Let the Aurora owner password unlock the disk";
+      unitConfig.ConditionPathExists = "/run/aurora-firstboot/password";
+      unitConfig.RequiresMountsFor = [ "/boot" ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${pkgs.aurora-firstboot}/lib/aurora/aurora-firstboot --rekey";
+        StandardOutput = "journal";
+        StandardError = "journal";
+      };
+    };
+    # The shared plymouth-quit.service drop-in: the splash stays up until
+    # first-boot setup has finished, with any display manager.
     systemd.services.plymouth-quit = lib.mkIf config.boot.plymouth.enable {
       after = [ "aurora-firstboot.service" ];
     };
