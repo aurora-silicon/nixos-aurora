@@ -282,7 +282,7 @@ in {
   });
   asahi-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
-    version = pins.aurora-audio.version;
+    version = "${pins.aurora-audio.version}-aurora7";
     postInstall = (old.postInstall or "") + ''
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
     '';
