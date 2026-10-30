@@ -134,5 +134,14 @@
     "archive_root": "alsa-utils-1.2.16",
     "sha256": "092399d5e8749a1d5e188e393157521cec4b75693b60ebb79bbce728cff2232c",
     "nix_hash": "sha256-CSOZ1eh0mh1eGI45MVdSHOxLdWk7YOu3m7znKM/yIyw="
+  },
+  "omarchy-ane-tools": {
+    "repository": "https://github.com/joshuaswarren/omarchy-ane",
+    "commit": "68e92712bbffa08f5002dcc542434fe1393f0578",
+    "version": "0.5.7",
+    "source_url": "https://codeload.github.com/joshuaswarren/omarchy-ane/tar.gz/68e92712bbffa08f5002dcc542434fe1393f0578",
+    "archive_root": "omarchy-ane-68e92712bbffa08f5002dcc542434fe1393f0578",
+    "sha256": "09fee8d386728939d4752acb21a3ff99192809bf608f8d1bca6cd426b460aea6",
+    "nix_hash": "sha256-Cf7o04ZyiTnUdSrLIaP/mRkoCb9gj40bymzUJrRgrqY="
   }
 }

@@ -41,6 +41,7 @@
         sep = pkgs.aurora-sep;
         libfprint = pkgs.libfprint;
         avd-fw = pkgs.aurora-avd-firmware;
+        omarchy-ane-tools = pkgs.omarchy-ane-tools;
         upower = pkgs.upower;
         bindgen = pkgs.aurora-bindgen;
         aura = pkgs.m1n1;

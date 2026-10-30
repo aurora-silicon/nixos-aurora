@@ -37,6 +37,7 @@ NEEDS = {
     'firstboot': ['aurora-firstboot'],
     'libfprint': ['libfprint'],
     'avd-fw': ['avd-fw'],
+    'omarchy-ane-tools': ['omarchy-ane-tools'],
     'upower': ['upower-aurora'],
     'speakerguardd': ['speakerguardd'],
     'mutter': [],

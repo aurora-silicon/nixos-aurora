@@ -119,6 +119,11 @@ in {
     src = source "avd-fw";
     version = pins.avd-fw.version;
   };
+  # Userspace for the kernel's ANE driver; no firmware, module or overlays.
+  omarchy-ane-tools = final.callPackage ./omarchy-ane-tools.nix {
+    src = source "omarchy-ane-tools";
+    version = pins.omarchy-ane-tools.version;
+  };
   upower = prev.upower.overrideAttrs (old: {
     src = source "upower-aurora";
     version = pins.upower-aurora.version;
