@@ -31,7 +31,7 @@
     patchelf --add-rpath ${vulkan-loader}/lib "$out/lib/libRusticlOpenCL.so.1.0.0"
     test -f "$(cat "$out/etc/OpenCL/vendors/rusticl.icd")"
     readelf -h "$out/lib/libRusticlOpenCL.so.1.0.0" | grep 'Machine:.*AArch64'
-    readelf -Ws "$out/lib/libRusticlOpenCL.so.1.0.0" | grep 'clGetPlatformIDs'
+    readelf -Ws "$out/lib/libRusticlOpenCL.so.1.0.0" | grep 'clIcdGetPlatformIDsKHR'
   '';
   disallowedRequisites = [ ];
 })
