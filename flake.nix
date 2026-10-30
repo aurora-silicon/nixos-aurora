@@ -49,6 +49,7 @@
         mesa = pkgs.mesa;
         speakerguardd = pkgs.speakerguardd;
         mutter = pkgs.mutter;
+        speakersafetyd = pkgs.speakersafetyd;
         bankstown = pkgs.bankstown-lv2;
         neo-platform = pkgs.aurora-neo-platform-config;
         aurora-bless = pkgs.aurora-bless;

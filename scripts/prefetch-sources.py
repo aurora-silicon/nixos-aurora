@@ -35,6 +35,7 @@ NEEDS = {
     'upower': ['upower-aurora'],
     'speakerguardd': ['speakerguardd'],
     'mutter': [],
+    'speakersafetyd': [],
     'bankstown': ['bankstown'],
     'neo-platform': ['aurora-neo-platform-config'],
     'aurora-bless': ['aurora-bless'],
