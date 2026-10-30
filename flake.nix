@@ -47,6 +47,16 @@
         uboot = pkgs.uboot-asahi;
         kernel = pkgs.linux-asahi.kernel;
         mesa = pkgs.mesa;
+        rusticl = pkgs.aurora-rusticl;
+        graphics = pkgs.buildEnv {
+          name = "aurora-graphics-interfaces";
+          paths = [ pkgs.mesa pkgs.mesa.dev pkgs.aurora-rusticl ];
+          pathsToLink = [ "/lib" "/include" "/etc" "/share" ];
+          postBuild = ''
+            cmp ${pkgs.mesa}/.aurora-mesa-commit ${pkgs.aurora-rusticl}/.aurora-mesa-commit
+            cp ${pkgs.mesa}/.aurora-mesa-commit $out/.aurora-mesa-commit
+          '';
+        };
         alsa-utils = pkgs.aurora-alsa-utils;
         audio = pkgs.asahi-audio;
         ucm = pkgs.alsa-ucm-conf-asahi;

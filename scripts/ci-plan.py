@@ -35,7 +35,9 @@ def main():
     requested = event.get('inputs', {}).get('packages', '').split()
     previous = None
     before = event.get('before', '')
-    if not requested and os.environ['GITHUB_EVENT_NAME'] == 'push' and before.strip('0'):
+    if not requested:
+        if os.environ['GITHUB_EVENT_NAME'] == 'pull_request' or not before.strip('0'):
+            before = subprocess.check_output(['git', 'merge-base', 'HEAD', 'origin/main'], text=True).strip()
         previous = derivations(before)
     print('packages=' + json.dumps(select(current, previous, requested)))
 

@@ -248,6 +248,11 @@ in {
     src = source "mesa-aurora";
     commit = pins.mesa-aurora.commit;
   };
+  aurora-rusticl = final.callPackage ./rusticl.nix {
+    mesa = prev.mesa;
+    src = source "mesa-aurora";
+    commit = pins.mesa-aurora.commit;
+  };
   aurora-fex-mesa = x86.runCommand "aurora-fex-mesa-${pins.mesa-aurora.version}-${builtins.substring 0 12 pins.mesa-aurora.commit}" {
     nativeBuildInputs = [ x86.binutils ];
     passthru = { inherit (pins.mesa-aurora) commit; };
