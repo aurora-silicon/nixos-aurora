@@ -149,7 +149,12 @@ in {
       outputHashes."fatfs-0.4.0" = "sha256-r1STNZupll2U5MppT0gNmEKDl9gevRTYZFOAVimtZxU=";
     };
     postPatch = "";
-    makeFlags = [ "RELEASE=1" "CHAINLOADING=1" "BUILTIN_LOGO=aurora" ];
+    # Build with clang and lld, as Fedora and Arch do. With GCC, aura's image
+    # outgrows the space that aura-raw.ld leaves before the DCP log buffer.
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
+      kernelLLVM.clang-unwrapped kernelLLVM.lld kernelLLVM.llvm
+    ];
+    makeFlags = [ "RELEASE=1" "CHAINLOADING=1" "BUILTIN_LOGO=aurora" "USE_CLANG=1" ];
     # This pin is the v1.0.0b1 tag, so the build carries that release label
     # instead of 1.0.0b1-g<commit>. track-sources.py drops it when aura moves on.
     env = (old.env or { }) // { AURA_VERSION_TAG = "1.0.0b1"; };

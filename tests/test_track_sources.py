@@ -73,7 +73,7 @@ class NixPinTests(unittest.TestCase):
         text = overlay.read_text()
         self.assertNotIn('AURA_VERSION_TAG', text)
         self.assertNotIn('release label', text)
-        self.assertIn('makeFlags = [ "RELEASE=1" "CHAINLOADING=1" "BUILTIN_LOGO=aurora" ];\n    postBuild', text)
+        self.assertIn('"BUILTIN_LOGO=aurora" "USE_CLANG=1" ];\n    postBuild', text)
 
     def test_mesa_version_change_edits_the_recipe(self):
         item = self.item('mesa-aurora', version='26.9.0', version_changed=True)
