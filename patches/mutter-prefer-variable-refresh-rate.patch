@@ -1,0 +1,46 @@
+From 7ecc847bb3c30b2bfac6faee24d70159fce88900 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Thu, 29 Oct 2026 12:03:02 +1100
+Subject: [PATCH] native/output-kms: Prefer variable refresh rate on
+ VRR-capable outputs
+
+A monitor configuration that mutter creates for a display it has not
+seen before uses the preferred mode, and on an output that supports
+variable refresh rate that was the fixed variant of the kernel's
+preferred mode. VRR then stayed off until the user picked the variable
+variant in Settings.
+
+Make the variable variant the preferred mode on such outputs, so new
+configurations use variable refresh rate. When variable refresh rate
+is active is unchanged: only while a fullscreen surface is a scanout
+candidate. Saved configurations, including one that picks the fixed
+variant, are applied as before, and Settings offers both.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ src/backends/native/meta-output-kms.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/backends/native/meta-output-kms.c b/src/backends/native/meta-output-kms.c
+index c4b5a74..f4e4cee 100644
+--- a/src/backends/native/meta-output-kms.c
++++ b/src/backends/native/meta-output-kms.c
+@@ -360,7 +360,13 @@ init_output_modes (MetaOutputInfo    *output_info,
+                                                  kms_mode,
+                                                  META_CRTC_REFRESH_RATE_MODE_VARIABLE);
+           output_info->modes[i++] = g_object_ref (crtc_mode);
+-          if (!output_info->preferred_mode && kms_mode == kms_preferred_mode)
++          /*
++           * A display that supports variable refresh rate defaults to it:
++           * its variable variant of the preferred mode is the preferred
++           * one, which new configurations use. A configuration that picks
++           * the fixed variant keeps it.
++           */
++          if (kms_mode == kms_preferred_mode)
+             output_info->preferred_mode = crtc_mode;
+         }
+     }
+-- 
+2.54.0
+
