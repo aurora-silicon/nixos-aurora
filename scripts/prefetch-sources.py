@@ -36,6 +36,7 @@ NEEDS = {
     'ucm': ['alsa-ucm-conf-aurora'],
     'firstboot': ['aurora-firstboot'],
     'libfprint': ['libfprint'],
+    'fprintd': [],  # nixpkgs' pinned release, with the local companion patch
     'avd-fw': ['avd-fw'],
     'upower': ['upower-aurora'],
     'speakerguardd': ['speakerguardd'],
