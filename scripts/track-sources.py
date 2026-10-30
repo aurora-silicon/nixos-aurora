@@ -62,6 +62,12 @@ def update_recipe(root, item, today):
                 if tl.cargo_git_sources(new_lock) != tl.cargo_git_sources(old_lock):
                     item.setdefault('needs_review', []).append(
                         'git dependencies changed; update importCargoLock outputHashes in overlay.nix')
+    if key == 'aura':
+        # A release label belongs to the commit it was tagged on, not to the next one.
+        path = root / 'overlay.nix'
+        text = path.read_text()
+        path.write_text(re.sub(r'^(\s*#.*\n)*\s*env = .*\bAURA_VERSION_TAG = "[^"]*";.*\n', '', text,
+                               flags=re.M))
     old_version = item.get('previous_version')
     if item.get('version_changed') and old_version:
         if key == 'kernel-aurora':
