@@ -1,0 +1,19 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# NixOS keeps the kernel's firmware search path on /run, so the Touch ID
+# files aurora-touchid-setup built live in /var/lib/aurora-sep/firmware.
+# Link each one into the search path before the SEP driver loads. This only
+# creates links; it reads and rebuilds nothing.
+kept=${AURORA_TOUCHID_FIRMWARE_DIR:-/var/lib/aurora-sep/firmware}
+search=$(cat /sys/module/firmware_class/parameters/path 2>/dev/null)
+[ -n "$search" ] && [ "$search" != "$kept" ] || exit 0
+for file in "$kept"/apple/*.bin; do
+    [ -f "$file" ] || continue
+    link="$search/apple/${file##*/}"
+    if [ -e "$link" ] && [ ! -L "$link" ]; then
+        echo "touchid-publish: $link is a file this package did not place; leaving it" >&2
+        continue
+    fi
+    mkdir -p "$search/apple" && ln -sfn "$file" "$link"
+done
