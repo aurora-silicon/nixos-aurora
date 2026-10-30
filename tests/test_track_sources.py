@@ -64,6 +64,17 @@ class NixPinTests(unittest.TestCase):
         self.assertEqual((self.root / 'locks/aura.Cargo.lock').read_text(), changed)
         self.assertTrue(item.get('needs_review'))
 
+    def test_a_release_label_is_dropped_when_aura_moves(self):
+        overlay = self.root / 'overlay.nix'
+        self.assertIn('AURA_VERSION_TAG', overlay.read_text())
+        current = (ROOT / 'locks/aura.Cargo.lock').read_text().encode()
+        item = self.item('aura', archive_path=self.archive({'rust/Cargo.lock': current}))
+        module.update_recipe(self.root, item, TODAY)
+        text = overlay.read_text()
+        self.assertNotIn('AURA_VERSION_TAG', text)
+        self.assertNotIn('release label', text)
+        self.assertIn('"BUILTIN_LOGO=aurora" "USE_CLANG=1" ];\n    postBuild', text)
+
     def test_mesa_version_change_edits_the_recipe(self):
         item = self.item('mesa-aurora', version='26.9.0', version_changed=True)
         module.update_recipe(self.root, item, TODAY)
