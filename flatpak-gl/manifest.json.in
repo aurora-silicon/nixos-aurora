@@ -1,0 +1,200 @@
+{
+  "id": "org.freedesktop.Platform.GL.aurora",
+  "branch": "@BRANCH@",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "@BRANCH@",
+  "sdk": "org.freedesktop.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.llvm22"
+  ],
+  "build-extension": true,
+  "separate-locales": false,
+  "appstream-compose": false,
+  "build-options": {
+    "prefix": "/usr/lib/aarch64-linux-gnu/GL/aurora",
+    "libdir": "/usr/lib/aarch64-linux-gnu/GL/aurora/lib",
+    "prepend-path": "/usr/lib/aarch64-linux-gnu/GL/aurora/bin:/usr/lib/sdk/llvm22/bin",
+    "prepend-ld-library-path": "/usr/lib/aarch64-linux-gnu/GL/aurora/lib:/usr/lib/sdk/llvm22/lib",
+    "prepend-pkg-config-path": "/usr/lib/aarch64-linux-gnu/GL/aurora/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/GL/aurora/share/pkgconfig",
+    "cflags": "-O2 -pipe",
+    "cflags-override": true,
+    "cxxflags": "-O2 -pipe",
+    "cxxflags-override": true,
+    "no-debuginfo": true,
+    "strip": false
+  },
+  "cleanup": [
+    "/bin",
+    "/include",
+    "/lib/cmake",
+    "/lib/pkgconfig",
+    "/share/pkgconfig",
+    "/share/clc",
+    "/share/build-python",
+    "/share/doc",
+    "/share/man",
+    "*.a",
+    "*.la",
+    "/lib/libSPIRV-Tools-shared.so"
+  ],
+  "modules": [
+    {
+      "name": "spirv-headers",
+      "buildsystem": "cmake-ninja",
+      "builddir": true,
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://codeload.github.com/KhronosGroup/SPIRV-Headers/tar.gz/04f10f650d514df88b76d25e83db360142c7b174",
+          "sha256": "1b220e3eec1714f0451b0e3652979bd280edf10893f617837b88e6359a804ded",
+          "archive-type": "tar-gzip"
+        }
+      ]
+    },
+    {
+      "name": "spirv-tools",
+      "buildsystem": "cmake-ninja",
+      "builddir": true,
+      "config-opts": [
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DSPIRV-Headers_SOURCE_DIR=/usr/lib/aarch64-linux-gnu/GL/aurora",
+        "-DSPIRV_SKIP_TESTS=ON",
+        "-DSPIRV_SKIP_EXECUTABLES=ON",
+        "-DSPIRV_WERROR=OFF",
+        "-DBUILD_SHARED_LIBS=OFF",
+        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://codeload.github.com/KhronosGroup/SPIRV-Tools/tar.gz/fbe4f3ad913c44fe8700545f8ffe35d1382b7093",
+          "sha256": "cabb35f4eef0da3ef72ad9edd596af4191d7507a8f35c05df526d2d5ff889f59",
+          "archive-type": "tar-gzip"
+        }
+      ]
+    },
+    {
+      "name": "spirv-llvm-translator",
+      "buildsystem": "cmake-ninja",
+      "builddir": true,
+      "config-opts": [
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DLLVM_DIR=/usr/lib/sdk/llvm22/lib/cmake/llvm",
+        "-DLLVM_EXTERNAL_SPIRV_HEADERS_SOURCE_DIR=/run/build/spirv-llvm-translator/spirv-headers",
+        "-DLLVM_SPIRV_INCLUDE_TESTS=OFF",
+        "-DBUILD_SHARED_LIBS=OFF",
+        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://codeload.github.com/KhronosGroup/SPIRV-LLVM-Translator/tar.gz/b4c9189bcba7ed9a1189d6a2c27edc3d9a3d5277",
+          "sha256": "d42dfc31cc629360cc84cb05446649fcd1eddd1a2e9e49d532a8f43ee91c327a",
+          "archive-type": "tar-gzip"
+        },
+        {
+          "type": "archive",
+          "url": "https://codeload.github.com/KhronosGroup/SPIRV-Headers/tar.gz/575b6512579ebde466ed3dfc04e413439d14d95d",
+          "sha256": "775ee89eb77d067df3f5736e2b4bb2f5f3e39ead915f11f3d366139dcb42209d",
+          "dest": "spirv-headers",
+          "archive-type": "tar-gzip"
+        }
+      ]
+    },
+    {
+      "name": "libclc",
+      "buildsystem": "cmake-ninja",
+      "builddir": true,
+      "subdir": "libclc",
+      "config-opts": [
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DLLVM_DIR=/usr/lib/sdk/llvm22/lib/cmake/llvm",
+        "-DLIBCLC_TARGETS_TO_BUILD=spirv-mesa3d-;spirv64-mesa3d-",
+        "-DLLVM_SPIRV=/usr/lib/aarch64-linux-gnu/GL/aurora/bin/llvm-spirv"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz",
+          "sha256": "922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888"
+        }
+      ]
+    },
+    {
+      "name": "pyyaml",
+      "buildsystem": "simple",
+      "build-commands": [
+        "mkdir -p ${FLATPAK_DEST}/share/build-python",
+        "cp -r lib/yaml ${FLATPAK_DEST}/share/build-python/"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://files.pythonhosted.org/packages/05/8e/961c0007c59b8dd7729d542c61a4d537767a59645b82a0b521206e1e25c2/pyyaml-6.0.3.tar.gz",
+          "sha256": "d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f"
+        }
+      ]
+    },
+    {
+      "name": "mesa",
+      "buildsystem": "meson",
+      "builddir": true,
+      "build-options": {
+        "env": {
+          "MESA_GIT_SHA1_OVERRIDE": "@COMMIT@",
+          "PYTHONPATH": "/usr/lib/aarch64-linux-gnu/GL/aurora/share/build-python"
+        }
+      },
+      "config-opts": [
+        "--buildtype=release",
+        "-Db_ndebug=true",
+        "-Dplatforms=x11,wayland",
+        "-Dgallium-drivers=asahi,llvmpipe,zink",
+        "-Dvulkan-drivers=asahi,swrast",
+        "-Dvulkan-layers=device-select",
+        "-Dgallium-va=disabled",
+        "-Dgallium-rusticl=false",
+        "-Dteflon=false",
+        "-Dgles1=enabled",
+        "-Dgles2=enabled",
+        "-Dopengl=true",
+        "-Dgbm=enabled",
+        "-Dglx=dri",
+        "-Degl=enabled",
+        "-Dglvnd=enabled",
+        "-Dllvm=enabled",
+        "-Dshared-llvm=enabled",
+        "-Dspirv-tools=enabled",
+        "-Dmicrosoft-clc=disabled",
+        "-Dintel-rt=disabled",
+        "-Dvalgrind=disabled",
+        "-Dlibunwind=disabled",
+        "-Dlmsensors=disabled",
+        "-Dandroid-libbacktrace=disabled",
+        "-Dbuild-tests=false",
+        "-Dc_link_args=-L/usr/lib/aarch64-linux-gnu/GL/aurora/lib",
+        "-Dcpp_link_args=-L/usr/lib/aarch64-linux-gnu/GL/aurora/lib"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/@COMMIT@",
+          "dest-filename": "mesa-@COMMIT@.tar.gz",
+          "sha256": "@SHA256@",
+          "archive-type": "tar-gzip"
+        }
+      ],
+      "post-install": [
+        "mkdir -p ${FLATPAK_DEST}/vulkan ${FLATPAK_DEST}/glvnd",
+        "mv ${FLATPAK_DEST}/share/vulkan/icd.d ${FLATPAK_DEST}/vulkan/icd.d",
+        "mv ${FLATPAK_DEST}/share/vulkan/implicit_layer.d ${FLATPAK_DEST}/vulkan/implicit_layer.d",
+        "mv ${FLATPAK_DEST}/share/glvnd/egl_vendor.d ${FLATPAK_DEST}/glvnd/egl_vendor.d",
+        "sed -i \"s|\\\"libEGL_mesa.so.0\\\"|\\\"${FLATPAK_DEST}/lib/libEGL_mesa.so.0\\\"|\" ${FLATPAK_DEST}/glvnd/egl_vendor.d/50_mesa.json",
+        "install -m644 /usr/lib/sdk/llvm22/lib/libLLVM.so.22.1 ${FLATPAK_DEST}/lib/",
+        "find ${FLATPAK_DEST}/lib -name '*.so*' -type f -exec strip --strip-unneeded {} +",
+        "install -Dm644 -t ${FLATPAK_DEST}/share/licenses/llvm /usr/lib/sdk/llvm22/share/licenses/llvm/* || true",
+        "install -Dm644 ../docs/license.rst ${FLATPAK_DEST}/share/licenses/mesa/license.rst"
+      ]
+    }
+  ]
+}

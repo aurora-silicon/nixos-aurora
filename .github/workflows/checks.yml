@@ -39,7 +39,7 @@ jobs:
         run: |
           nix flake check --no-build
           nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
-            .#checks.aarch64-linux.stage2-tools
+            .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity
       - name: Inspect KDE graphical login configuration
         run: |
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.defaultUnit
@@ -53,7 +53,8 @@ jobs:
   hardware:
     needs: evaluate
     if: needs.evaluate.outputs.packages != '[]'
-    runs-on: ubuntu-24.04-arm
+    # Guest drivers contain x86 code and must be built on x86, as on Fedora.
+    runs-on: ${{ matrix.package == 'fex-mesa' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
     timeout-minutes: 180
     permissions:
       contents: read
@@ -72,14 +73,21 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+            extra-experimental-features = auto-allocate-uids cgroups
+            auto-allocate-uids = true
+            use-cgroups = true
+            extra-system-features = uid-range
             extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
             extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
+      - name: Check isolated Flatpak build namespaces before fetching SDKs
+        if: matrix.package == 'flatpak-gl'
+        run: nix build --no-link --print-build-logs .#checks.aarch64-linux.flatpak-sandbox
       - name: Fetch pinned sources with verification and rate-limit backoff
         env:
           PACKAGE: ${{ matrix.package }}
         run: python3 scripts/prefetch-sources.py "$PACKAGE"
       - name: Build the pinned Aurora hardware package
-        run: nix build --max-jobs 1 --cores 4 --print-build-logs --json '.#${{ matrix.package }}^*' > build.json
+        run: nix build --max-jobs 1 --cores 4 --print-build-logs --json '.#packages.aarch64-linux.${{ matrix.package }}^*' > build.json
       - name: Record output identity and closure
         run: |
           mapfile -t outputs < <(jq -r '.[].outputs[]' build.json)

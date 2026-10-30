@@ -22,17 +22,30 @@ jobs:
     timeout-minutes: 180
     permissions:
       contents: read
+      actions: read
       id-token: write
       attestations: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
         with:
           extra_nix_config: |
+            experimental-features = nix-command flakes
+            extra-experimental-features = auto-allocate-uids cgroups
+            auto-allocate-uids = true
+            use-cgroups = true
+            extra-system-features = uid-range
             extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
             extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
+      - name: Import this commit's verified hardware builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/import-build-cache.py --output build-import.json \
+            --packages fex-mesa flatpak-gl kernel mesa audio ucm aura avd-fw alsa-utils
       # Kernel-derived tools (cpupower and others) are not in the Aurora cache
       # and need the kernel archive; take every pinned archive from the source
       # cache (or codeload with Retry-After backoff), verified against
@@ -50,7 +63,8 @@ jobs:
           # The Stage 2 installed systems refresh on rebuild, checked for the
           # same aura, the MacBook Neo's device tree and one U-Boot member.
           nix build --print-build-logs --out-link stage2 .#checks.aarch64-linux.stage2
-          nix store verify --recursive ./system ./installer ./aura ./grub ./stage2
+          python3 scripts/verify-image-closure.py --proof build-import.json ./system ./installer ./aura ./grub ./stage2
+          nix flake check --print-build-logs
       - name: Assemble the installer filesystem bundle
         env:
           DESKTOP: ${{ inputs.desktop }}
@@ -73,4 +87,5 @@ jobs:
             out/*-filesystems.tar.zst*
             out/*-installer/image.json
             out/*-installer/closure.json
+            build-import.json
           retention-days: 14

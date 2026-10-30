@@ -1,0 +1,27 @@
+From: Ryan Murray <ryan@aurorasilicon.org>
+Subject: [PATCH] alsactl: skip controls another process has locked
+
+A control locked by another process (SNDRV_CTL_IOCTL_ELEM_LOCK) can only
+be written by its owner, so restoring it fails with EPERM and alsactl
+logged "Cannot write control ... Operation not permitted" for each one.
+On Apple Silicon Macs the speaker protection daemon locks the speaker
+amplifier controls before alsa-restore runs, which gave about 25 errors
+per boot. Treat a control locked by someone else like a read-only one
+and leave it to its owner.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+--- a/alsactl/state.c
++++ b/alsactl/state.c
+@@ -1427,6 +1427,10 @@
+ 
+ 	if (snd_ctl_elem_info_is_inactive(info) ||
+ 				!snd_ctl_elem_info_is_writable(info))
++		return 0;
++	/* A control another process has locked is that process's to set. */
++	if (snd_ctl_elem_info_is_locked(info) &&
++	    !snd_ctl_elem_info_is_owner(info))
+ 		return 0;
+ 	snd_ctl_elem_value_set_numid(ctl, snd_ctl_elem_id_get_numid(elem_id1));
+ 

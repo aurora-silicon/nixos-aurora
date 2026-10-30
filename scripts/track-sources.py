@@ -98,7 +98,12 @@ def run_checks(root):
 
 
 def ci_inputs(packages):
-    return {'checks.yml': {'packages': ' '.join(packages)}}
+    packages = set(packages)
+    if 'mesa' in packages:
+        # All three recipes consume mesa-aurora directly. A tracker change
+        # must build the runtime payloads too, even with an explicit matrix.
+        packages.update(('fex-mesa', 'flatpak-gl'))
+    return {'checks.yml': {'packages': ' '.join(sorted(packages))}}
 
 
 if __name__ == '__main__':

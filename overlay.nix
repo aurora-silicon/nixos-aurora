@@ -5,7 +5,7 @@ let
     let matched = builtins.match "(CONFIG_[^=]+)=([ym])" line;
     in final.lib.optional (matched != null) {
       name = builtins.elemAt matched 0; value = builtins.elemAt matched 1;
-    }) (final.lib.splitString "\n" (builtins.readFile ./kernel/config)));
+    }) (final.lib.splitString "\n" (builtins.readFile ./kernel/nixos.config)));
   kernelLLVM = final.llvmPackages_22;
   # GNOME Initial Setup creates the owner account on GNOME images (its
   # new-user mode). nixpkgs' vendor file skips the account and password pages,
@@ -27,6 +27,39 @@ let
     cargoLock.lockFile = lock;
     doCheck = true;
   } // extra);
+  guestPkgs = system: import final.path { inherit system; };
+  x86 = guestPkgs "x86_64-linux";
+  x86_32 = guestPkgs "i686-linux";
+  mesaCompilerTools = (x86.callPackage ./mesa.nix {
+    src = source "mesa-aurora";
+    commit = pins.mesa-aurora.commit;
+  }).overrideAttrs (old: {
+    pname = "aurora-mesa-compiler-tools";
+    configurePhase = ''
+      runHook preConfigure
+      meson setup tools --prefix="$out" --libdir=lib --buildtype=release "''${mesonFlags[@]}" \
+        -Dllvm=enabled -Dbuild-tests=false
+    '';
+    buildPhase = ''
+      ninja -C tools -j "$NIX_BUILD_CORES" src/compiler/clc/mesa_clc \
+        src/compiler/spirv/vtn_bindgen2 src/asahi/clc/asahi_clc
+    '';
+    doCheck = false;
+    installPhase = ''
+      mkdir -p $out/bin
+      cp tools/src/compiler/clc/mesa_clc tools/src/compiler/spirv/vtn_bindgen2 \
+        tools/src/asahi/clc/asahi_clc $out/bin/
+    '';
+    postFixup = "";
+    disallowedRequisites = [ ];
+    allowedReferences = null;
+  });
+  guestMesa = packages: packages.callPackage ./mesa.nix {
+    src = source "mesa-aurora";
+    commit = pins.mesa-aurora.commit;
+    guest = true;
+    compilerTools = mesaCompilerTools;
+  };
 in {
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
@@ -103,7 +136,7 @@ in {
         version = "7.3.0";
         modDirVersion = "7.3.0";
         src = source "kernel-aurora";
-        configfile = stableFile ./kernel/config;
+        configfile = stableFile ./kernel/nixos.config;
         config = kernelConfig;
         stdenv = kernelLLVM.stdenv;
         # Keep the native wrapped host compiler for host tools/RPATHs;
@@ -123,21 +156,48 @@ in {
         extraMeta.branch = "7.3";
         features.rust = true;
         kernelPatches = _kernelPatches;
-      }).overrideAttrs (old: {
+      }).overrideAttrs (finalAttrs: old: {
+        # NixOS consumers (including ASLR limits) need the resolved config,
+        # which the kernel builder already installs in its development output.
+        # Keep the configure input fragment private to the build environment.
+        passthru = old.passthru // {
+          configfile = "${finalAttrs.finalPackage.dev}/lib/modules/${old.passthru.modDirVersion}/build/.config";
+        };
         env = old.env // { RUSTC_BOOTSTRAP = "1"; };
         nativeBuildInputs = old.nativeBuildInputs ++ [ final.binutils kernelLLVM.lld ];
-        # Refresh compiler capability probes using the same resolved hardware
-        # configuration as Fedora. Validate the shared fragments afterwards.
-        configurePhase = final.lib.replaceStrings
-          [ "ln -sv" " oldconfig" ] [ "cp -v" " olddefconfig" ] old.configurePhase;
+        # The source-tree entry point is selected by the pinned Kbuild.
+        postPatch = (old.postPatch or "") + ''
+          mkdir -p tools/aurora-bindgen/build/bin
+          ln -s ${final.aurora-bindgen}/bin/bindgen tools/aurora-bindgen/build/bin/bindgen
+        '';
+        # Always derive the universal configuration from this source's
+        # defconfig and hardware defaults, rather than a stale resolved base.
+        configurePhase = ''
+          runHook preConfigure
+          mkdir build
+          export buildRoot="$PWD/build"
+          make "''${makeFlags[@]}" defconfig
+          bash scripts/kconfig/merge_config.sh -m -O "$buildRoot" \
+            "$buildRoot/.config" arch/arm64/configs/asahi.config \
+            ${stableFile ./kernel/common.config} ${stableFile ./kernel/nixos.config}
+          make "''${makeFlags[@]}" olddefconfig
+          runHook postConfigure
+          make "''${makeFlags[@]}" prepare
+          test "$(cat "$buildRoot/include/config/kernel.release")" = 7.3.0
+          buildFlags+=("KBUILD_BUILD_TIMESTAMP=$(date -u -d @$SOURCE_DATE_EPOCH)")
+          cd "$buildRoot"
+        '';
         postConfigure = ''
-          python3 ${stableFile ./kernel/validate-config.py} ${stableFile ./kernel/common.config} "$buildRoot/.config"
-          python3 ${stableFile ./kernel/validate-config.py} ${stableFile ./kernel/neo.config} "$buildRoot/.config"
+          python3 ${stableFile ./kernel/validate-config.py} arch/arm64/configs/asahi.config \
+            ${stableFile ./kernel/common.config} ${stableFile ./kernel/nixos.config} "$buildRoot/.config"
           grep -qx 'CONFIG_RUST=y' "$buildRoot/.config"
           grep -qx 'CONFIG_ARM64_16K_PAGES=y' "$buildRoot/.config"
           make "''${makeFlags[@]}" rustavailable
           make "''${makeFlags[@]}" certs/
           "$buildRoot/certs/extract-cert" "" "$TMPDIR/aurora-empty-cert"
+        '';
+        postInstall = (old.postInstall or "") + ''
+          echo ${pins.kernel-aurora.commit} > "$out/aurora-source-commit"
         '';
       })))) { };
   m1n1 = (prev.m1n1.override { customLogo = null; }).overrideAttrs (old: {
@@ -178,10 +238,49 @@ in {
     version = pins.uboot-aurora.version;
     patches = [ ];
   });
-  mesa = final.callPackage ./mesa.nix { mesa = prev.mesa; src = source "mesa-aurora"; };
+  mesa = final.callPackage ./mesa.nix {
+    mesa = prev.mesa;
+    src = source "mesa-aurora";
+    commit = pins.mesa-aurora.commit;
+  };
+  aurora-fex-mesa = x86.runCommand "aurora-fex-mesa-${pins.mesa-aurora.version}-${builtins.substring 0 12 pins.mesa-aurora.commit}" {
+    nativeBuildInputs = [ x86.binutils ];
+    passthru = { inherit (pins.mesa-aurora) commit; };
+  } ''
+    mkdir -p $out/usr
+    cp -a ${guestMesa x86}/usr/lib64 $out/usr/
+    cp -a ${guestMesa x86_32}/usr/lib $out/usr/
+    cp -a ${guestMesa x86}/usr/share $out/usr/
+    # The manifest directory is shared by both guest architectures.
+    chmod -R u+w $out/usr/share
+    cp -a --update=none ${guestMesa x86_32}/usr/share/. $out/usr/share/
+    echo ${pins.mesa-aurora.commit} > $out/.aurora-mesa-commit
+    for library in $out/usr/lib64/libgallium*.so $out/usr/lib64/libvulkan_asahi.so; do
+      readelf -h "$library" | grep -q 'Advanced Micro Devices X86-64'
+      readelf -n "$library" | grep -Eq 'Build ID: [0-9a-f]{40}'
+    done
+    for library in $out/usr/lib/libgallium*.so $out/usr/lib/libvulkan_asahi.so; do
+      readelf -h "$library" | grep -q 'Intel 80386'
+      readelf -n "$library" | grep -Eq 'Build ID: [0-9a-f]{40}'
+    done
+  '';
+  aurora-flatpak-gl = final.callPackage ./flatpak-gl/package.nix {
+    mesaSrc = source "mesa-aurora";
+    mesaPin = pins.mesa-aurora;
+  };
+  aurora-alsa-utils = (final.callPackage (final.path + "/pkgs/by-name/al/alsa-utils/package.nix") { }).overrideAttrs (old: {
+    src = source "alsa-utils";
+    version = pins.alsa-utils.version;
+    patches = (old.patches or [ ]) ++ map stableFile [
+      ./patches/alsactl-skip-locked-controls.patch
+    ];
+  });
   asahi-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
     version = pins.aurora-audio.version;
+    postInstall = (old.postInstall or "") + ''
+      echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
+    '';
   });
   # A VRR-capable output defaults to variable refresh rate: the variable
   # variant of the preferred mode becomes the preferred one, which new monitor
@@ -192,10 +291,41 @@ in {
       ./patches/mutter-prefer-variable-refresh-rate.patch
     ];
   });
-  alsa-ucm-conf-asahi = prev.alsa-ucm-conf-asahi.overrideAttrs (old: {
-    src = source "alsa-ucm-conf-aurora";
-    version = pins.alsa-ucm-conf-aurora.version;
-  });
+  # nixpkgs exposes a symlink join here: overriding its src does not replace
+  # the inner model derivation. Build the pinned models explicitly, then merge
+  # them ahead of the native common UCM definitions.
+  alsa-ucm-conf-asahi = let
+    models = final.stdenvNoCC.mkDerivation {
+      pname = "aurora-ucm-models";
+      version = pins.alsa-ucm-conf-aurora.version;
+      src = source "alsa-ucm-conf-aurora";
+      dontBuild = true;
+      installPhase = ''
+        runHook preInstall
+        mkdir -p "$out/share/alsa"
+        cp -r ucm2 "$out/share/alsa/"
+        echo ${pins.alsa-ucm-conf-aurora.commit} > "$out/.aurora-ucm-commit"
+        runHook postInstall
+      '';
+    };
+  in final.symlinkJoin {
+    pname = "alsa-ucm-conf-aurora";
+    inherit (models) version src;
+    paths = [ models final.alsa-ucm-conf ];
+    postBuild = ''
+      test "$(cat "$out/.aurora-ucm-commit")" = ${pins.alsa-ucm-conf-aurora.commit}
+      grep -qF 'JackControl "Internal Mic Jack"' \
+        "$out/share/alsa/ucm2/conf.d/aop_audio/3chan/HiFi.conf"
+      test -f "$out/share/alsa/ucm2/conf.d/macaudio/MacBook Neo J700.conf"
+    '';
+    passthru.commit = pins.alsa-ucm-conf-aurora.commit;
+    meta = {
+      description = "Aurora model profiles with native common ALSA UCM definitions";
+      homepage = "https://github.com/aurora-silicon/alsa-ucm-conf-asahi";
+      license = final.lib.licenses.bsd3;
+      platforms = [ "aarch64-linux" ];
+    };
+  };
   # Fedora Aurora's speakersafetyd-aurora-profiles: the J616s speaker model
   # (speakersafetyd's J316 values with the J616 V/I sense layout) and the udev
   # rule that starts the daemon for its card. The daemon reads its models from

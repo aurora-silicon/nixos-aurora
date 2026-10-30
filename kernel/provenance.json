@@ -1,8 +1,9 @@
 {
-  "kernel_commit": "311471f73e9919764bfb24acfe7eeb7c5230795a",
-  "config_source": "Integration shared asahi.config merged over the retained Fedora-resolved baseline and common/Neo requirements; native Nix olddefconfig resolves current Kconfig and compiler probes.",
+  "kernel_commit": "d266c703c13f099068284d622d397292241a0224",
+  "config_source": "ARM64 defconfig + arch/arm64/configs/asahi.config from the pinned source + kernel/common.config + kernel/nixos.config, resolved and strictly validated at build time. kernel/config is retained only as historical baseline evidence.",
   "rpm_sha256": "36ba552ea706c5d35d626f0e08a3702b7f2e0401aeb20e09ed138418f40b5383",
   "config_sha256": "55497f2e29d0659804883aeeed8244c5a2dfd8ba3827e0616b976656c5c5469d",
   "baseline_kernel_commit": "e0fa50d863ee7747de0af16525dfd974cdd826f8",
-  "upstream_fragment_sha256": "5f77ce72cbe96e94fc6857bd7caf7d9875a80e51d74481d0129fc4e03cec8e5c"
+  "shared_fragment_source": "arch/arm64/configs/asahi.config at kernel_commit",
+  "baseline_upstream_fragment_sha256": "5f77ce72cbe96e94fc6857bd7caf7d9875a80e51d74481d0129fc4e03cec8e5c"
 }

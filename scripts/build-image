@@ -61,6 +61,7 @@ grep -aqF '/EFI/BOOT' "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI"
 # one fails here instead of on a Mac.
 python3 "$root/scripts/check-basics.py" --profile "$desktop" --root "$target" --system "$system" \
   --esp "$target/boot/efi" --boot-dir "$target/boot" --boot-uuid "$boot_uuid"
+python3 "$root/scripts/check-parity.py" --root "$target" --system "$system"
 install -d -m 0700 "$target/var/lib/aurora/firstboot"
 install -d -m 0755 "$target/usr/lib/aurora" "$target/etc/nixos" "$target/boot/efi/aurora"
 printf 'aurora-btrfs-v1\n' > "$target/usr/lib/aurora/image-format"
