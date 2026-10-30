@@ -1,17 +1,21 @@
 {
   "repository": "https://github.com/aurora-silicon/linux",
-  "commit": "e0fa50d863ee7747de0af16525dfd974cdd826f8",
+  "commit": "7cc30f35ecea3e90ceedd44babbde128c1d487a6",
   "source_directory": "tools/aurora-sep",
   "upstream_files_sha256": {
     "load-driver": "abea60bb264ced349f7cf671d8d26e1609a81a60ea4c34d66ec6f7f73b847dbb",
     "aurora-sep.service": "447f99cc3c7e683134f31b993aa825fadde24e4854954a3035c96e6631d4d4d0",
     "fprintd-aurora.conf": "f8d0c4b9385e6716d5ac5dd9941a57459fbc551a8238383bcde36cd929d0523f",
-    "README.md": "d89804109884f22881b29d6e799a5f3ac6f2bbe79db82d1fd2c9ece0858099d3",
-    "XART-SAFETY.md": "3d92b3be06bc1b670666dec3d0032893fe8c7be428a4f1200d7c9803980c769a",
-    "aurora-sep-ready": "2db07d3a0191e8d14581a3056505a8c4225b2fc8e6ea4a1956ae5493abcbb0ae",
-    "aurora-sep-ready.service": "5a5e5c7e93d1462d9d1023446fdb297926aeb93d8988867b515aca7adafe4487",
+    "README.md": "25e3db3e49d6932d76a73fe9c732e3298b256190c1386714b0bb9b0293e620e1",
+    "XART-SAFETY.md": "4422988e5e7f2417791957d066c501741e929705724083da76cdf1cb70d7a2fc",
+    "OS-IDENTITY.md": "52020e636e62b60f0c3e6251c3b67b8a8c409bff0486bc3463f356fd3073384b",
+    "aurora-sep-ready": "40f0d21446a85bab3e3800b31342e94e553af0fcde2c985503147519737e011d",
+    "aurora-sep-ready.service": "f38421360c2f885bb102bc5076d81006d352d03d12b5fb35b4da8a5132f4ccc0",
     "fprintd-no-timeout.conf.in": "8d8df0ba2a6861b2edb2110e606906d84ca4848617621ad3cb48493a1522971d",
-    "extract-mesa-calibration": "15a878dcf382a22c5d807f0f2c754fe70d39baec88f65aea183b1fe56cf69441"
+    "extract-mesa-calibration": "15a878dcf382a22c5d807f0f2c754fe70d39baec88f65aea183b1fe56cf69441",
+    "aurora-sep-greeter-fingerprint": "5936eb76db666496a8700dade7ac6bcb3785b517958dcea10685690f1822c86f",
+    "aurora-sep-greeter-fingerprint.service": "ffab97b20bfd5f0eb1ab641179a131843349cf16890fff0cf2d893f0b5681b37",
+    "logind-aurora-sep.conf": "0695bd9ce4c207241db13c3ea07819a032d8213417021378f5015ab9317cde12"
   },
-  "adaptations": "Late root-filesystem loading, timer, optional per-device calibration, trusted-key-only success without a reader; no PAM or power-button policy changes."
+  "adaptations": "Late root-filesystem loading, timer, optional per-device calibration, trusted-key-only success without a reader, reader-presence gate on the readiness unit and fprintd; units are NixOS module options, with the login screen fingerprint unit behind aurora.sep.greeterFingerprint.enable (off by default, display-manager.service in place of gdm.service, GNOME Shell named from the store) and the logind power-button snippet as documentation; no PAM or power-button policy changes. No SELinux policy, as NixOS does not support SELinux. README.md is the module's own; XART-SAFETY.md, OS-IDENTITY.md and aurora-sep-ready are unmodified."
 }
