@@ -11,6 +11,8 @@ let
   new = layer "new";
 in pkgs.testers.runNixOSTest {
   name = "aurora-fex-overlay-upgrade";
+  # GitHub's arm64 runners have no /dev/kvm; QEMU falls back to TCG.
+  requiredFeatures.kvm = false;
   nodes.machine = { lib, ... }: {
     imports = [ ../modules/fex-mesa.nix ];
     aurora.fexMesa.package = old;
