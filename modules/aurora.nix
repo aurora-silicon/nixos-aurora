@@ -43,6 +43,10 @@
       "nvme" "virtio_blk" "virtio_pci" "uas" "sd_mod"
       "vfat" "dm-crypt" "btrfs" "ext4" "aop" "mt7932-fullmac" "mt7932_bt_pcie"
     ];
+    # Apple silicon Macs have no TPM, and the shared distribution kernel has no
+    # TPM drivers (its TPM 2.0 CRB interface would need ACPI). Do not ask the
+    # systemd initrd for tpm-tis and tpm-crb.
+    boot.initrd.systemd.tpm2.enable = lib.mkDefault false;
     boot.supportedFilesystems = [ "ext4" "btrfs" ];
     # Quiet by default: failures still reach the console, and systemd shows
     # status only when a unit fails or stalls.

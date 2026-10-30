@@ -1,11 +1,13 @@
 final: prev:
 let
   stableFile = path: final.writeText (builtins.baseNameOf path) (builtins.readFile path);
+  # The shared distribution config with NixOS's requirements on top, as the
+  # build merges them. NixOS modules read kernel features from this.
   kernelConfig = final.lib.listToAttrs (final.lib.concatMap (line:
     let matched = builtins.match "(CONFIG_[^=]+)=([ym])" line;
     in final.lib.optional (matched != null) {
       name = builtins.elemAt matched 0; value = builtins.elemAt matched 1;
-    }) (final.lib.splitString "\n" (builtins.readFile ./kernel/nixos.config)));
+    }) (final.lib.splitString "\n" (builtins.readFile ./kernel/config + "\n" + builtins.readFile ./kernel/nixos.config)));
   kernelLLVM = final.llvmPackages_22;
   # GNOME Initial Setup creates the owner account on GNOME images (its
   # new-user mode). nixpkgs' vendor file skips the account and password pages,
@@ -136,7 +138,7 @@ in {
         version = "7.3.0";
         modDirVersion = "7.3.0";
         src = source "kernel-aurora";
-        configfile = stableFile ./kernel/nixos.config;
+        configfile = stableFile ./kernel/config;
         config = kernelConfig;
         stdenv = kernelLLVM.stdenv;
         # Keep the native wrapped host compiler for host tools/RPATHs;
@@ -170,16 +172,18 @@ in {
           mkdir -p tools/aurora-bindgen/build/bin
           ln -s ${final.aurora-bindgen}/bin/bindgen tools/aurora-bindgen/build/bin/bindgen
         '';
-        # Always derive the universal configuration from this source's
-        # defconfig and hardware defaults, rather than a stale resolved base.
+        # Start from the resolved configuration alarm-aurora ships for this
+        # kernel (kernel/config, see kernel/provenance.json), so every
+        # distribution builds the same options, and add only NixOS's own
+        # requirements on top.
         configurePhase = ''
           runHook preConfigure
           mkdir build
           export buildRoot="$PWD/build"
-          make "''${makeFlags[@]}" defconfig
+          cp ${stableFile ./kernel/config} "$buildRoot/.config"
+          chmod u+w "$buildRoot/.config"
           bash scripts/kconfig/merge_config.sh -m -O "$buildRoot" \
-            "$buildRoot/.config" arch/arm64/configs/asahi.config \
-            ${stableFile ./kernel/common.config} ${stableFile ./kernel/nixos.config}
+            "$buildRoot/.config" ${stableFile ./kernel/nixos.config}
           make "''${makeFlags[@]}" olddefconfig
           runHook postConfigure
           make "''${makeFlags[@]}" prepare
@@ -190,6 +194,7 @@ in {
         postConfigure = ''
           python3 ${stableFile ./kernel/validate-config.py} arch/arm64/configs/asahi.config \
             ${stableFile ./kernel/common.config} ${stableFile ./kernel/nixos.config} "$buildRoot/.config"
+          python3 ${stableFile ./kernel/check-required.py} "$buildRoot/.config"
           grep -qx 'CONFIG_RUST=y' "$buildRoot/.config"
           grep -qx 'CONFIG_ARM64_16K_PAGES=y' "$buildRoot/.config"
           make "''${makeFlags[@]}" rustavailable
