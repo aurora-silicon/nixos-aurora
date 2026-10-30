@@ -1,12 +1,12 @@
 {
   "kernel-aurora": {
     "repository": "https://github.com/aurora-silicon/linux",
-    "commit": "d266c703c13f099068284d622d397292241a0224",
+    "commit": "695d9745c2118afb03d998602abe36e0464a15d0",
     "version": "7.3.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/linux/tar.gz/d266c703c13f099068284d622d397292241a0224",
-    "archive_root": "linux-d266c703c13f099068284d622d397292241a0224",
-    "sha256": "67f799fa1bc13ed37bb2135be5000262df9157173785c90e928de3d0f080935f",
-    "nix_hash": "sha256-Z/eZ+hvBPtN7shNb5QACYt+RVxc3hckOko3j0PCAk18="
+    "source_url": "https://codeload.github.com/aurora-silicon/linux/tar.gz/695d9745c2118afb03d998602abe36e0464a15d0",
+    "archive_root": "linux-695d9745c2118afb03d998602abe36e0464a15d0",
+    "sha256": "57b7a2454d6cf23680b468ff9c5450ee26abd4b8474b4a7ea6203d66f4718145",
+    "nix_hash": "sha256-V7eiRU1s8jaAtGj/nFRQ7iar1LhHS0p+piA9ZvRxgUU="
   },
   "aura": {
     "repository": "https://github.com/aurora-silicon/aura",
@@ -28,12 +28,12 @@
   },
   "mesa-aurora": {
     "repository": "https://github.com/aurora-silicon/mesa",
-    "commit": "108c7218bbb6cddcb91c29680ff0770d29afcecc",
+    "commit": "14b6b0c453146a09d08f377e9a6c9905d64e442a",
     "version": "26.3.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/108c7218bbb6cddcb91c29680ff0770d29afcecc",
-    "archive_root": "mesa-108c7218bbb6cddcb91c29680ff0770d29afcecc",
-    "sha256": "2472af9e23c604f9d568d66d6d278de367ae3181640a734044facda12097b16d",
-    "nix_hash": "sha256-JHKvniPGBPnVaNZtbSeN42euMYFkCnNARPrNoSCXsW0="
+    "source_url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/14b6b0c453146a09d08f377e9a6c9905d64e442a",
+    "archive_root": "mesa-14b6b0c453146a09d08f377e9a6c9905d64e442a",
+    "sha256": "0e310f8da7e495664778b83e1d9c9c438ca57ff91ebc3d2c6440370d85b0b2a3",
+    "nix_hash": "sha256-DjEPjafklWZHeLg+HZycQ4ylf/kevD0sZEA3DYWwsqM="
   },
   "speakerguardd": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
