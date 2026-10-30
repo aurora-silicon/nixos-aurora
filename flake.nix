@@ -153,6 +153,9 @@
           "desktop images boot with the spinner splash" = kde.boot.plymouth.enable && gnome.boot.plymouth.enable
             && kde.boot.plymouth.theme == "spinner" && gnome.boot.plymouth.theme == "spinner";
           "minimal images boot without a splash" = !minimal.boot.plymouth.enable;
+          "the initrd asks for no TPM drivers, which the shared kernel lacks" = lib.all (c:
+            !(lib.elem "tpm-tis" c.boot.initrd.availableKernelModules)
+            && !(lib.elem "tpm-crb" c.boot.initrd.availableKernelModules)) [ kde gnome minimal ];
           "every image has an OpenSSH server that starts only on request" = lib.all (c:
             c.services.openssh.enable && !c.services.openssh.startWhenNeeded
             && c.systemd.services.sshd.wantedBy == [ ] && c.systemd.services.sshd-keygen.wantedBy == [ ]
