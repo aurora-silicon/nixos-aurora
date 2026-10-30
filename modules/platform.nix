@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ lib, pkgs, ... }:
 {
   hardware.bluetooth.enable = true;
   hardware.enableRedistributableFirmware = true;
@@ -12,4 +12,9 @@
     "${pkgs.speakerguardd}/libexec/speakerguardd/use-feedback-guard";
   environment.etc."NetworkManager/conf.d/80-aurora-neo-mt7932.conf".source =
     "${pkgs.aurora-neo-platform-config}/lib/NetworkManager/conf.d/80-aurora-neo-mt7932.conf";
+  # The MacBook Neo trackpad quirk (it matches only the J700 device tree).
+  # libinput reads quirks from its own store path and from this file only,
+  # so it goes here; a system that sets its own local overrides wins.
+  environment.etc."libinput/local-overrides.quirks".source = lib.mkDefault
+    "${pkgs.aurora-neo-platform-config}/share/libinput/60-aurora-neo-j700.quirks";
 }

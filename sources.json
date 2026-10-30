@@ -37,12 +37,12 @@
   },
   "speakerguardd": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "e03febfe52a540e9255036a01e18030e0a5135f9",
-    "version": "0.1.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/e03febfe52a540e9255036a01e18030e0a5135f9",
-    "archive_root": "speakerguardd-e03febfe52a540e9255036a01e18030e0a5135f9",
-    "sha256": "a195d0d5e631ad45761753e18acb9d651e615d2e145ee266d48d9cac455a8970",
-    "nix_hash": "sha256-oZXQ1eYxrUV2F1PhisudZR5hXS4UXuJm1I2crEVaiXA="
+    "commit": "34aeed9085ad0f66cb8f266f997e11dd781470a6",
+    "version": "0.1.12",
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/34aeed9085ad0f66cb8f266f997e11dd781470a6",
+    "archive_root": "speakerguardd-34aeed9085ad0f66cb8f266f997e11dd781470a6",
+    "sha256": "726c7e7062297fabac79a547d779c643221369f53dff34d332c4a2ef846d7dbb",
+    "nix_hash": "sha256-cmx+cGIpf6useaVH13nGQyITafU9/zTTMsSi74Rtfbs="
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",
@@ -73,12 +73,12 @@
   },
   "aurora-neo-platform-config": {
     "repository": "https://github.com/aurora-silicon/aurora-neo-platform-config",
-    "commit": "834fe2dda273540b184b57ed16985b9d7effd244",
+    "commit": "8f18039e37ccdec03049d04844d59de2909f680c",
     "version": "0.1.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/aurora-neo-platform-config/tar.gz/834fe2dda273540b184b57ed16985b9d7effd244",
-    "archive_root": "aurora-neo-platform-config-834fe2dda273540b184b57ed16985b9d7effd244",
-    "sha256": "5fe9c9d14e8942466b514c676102634135afdc2bf76011332576ae05cd02597c",
-    "nix_hash": "sha256-X+nJ0U6JQkZrUUxnYQJjQTWv3Cv3YBEzJXauBc0CWXw="
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-neo-platform-config/tar.gz/8f18039e37ccdec03049d04844d59de2909f680c",
+    "archive_root": "aurora-neo-platform-config-8f18039e37ccdec03049d04844d59de2909f680c",
+    "sha256": "5496dc8d28688b30ec4d5e3007a4c911a751663c1d7c2a937bb6ae397d3d4314",
+    "nix_hash": "sha256-VJbcjShoizDsTV4wB6TJEadRZjwdfCqTe7auOX09QxQ="
   },
   "bankstown": {
     "repository": "https://github.com/chadmed/bankstown",
