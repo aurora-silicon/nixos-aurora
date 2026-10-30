@@ -36,9 +36,6 @@ in {
     });
     powerdevil = kdePrev.powerdevil.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [
-        # Upstream 78e99fd9 (Plasma 6.8): no low-battery alert for a
-        # peripheral whose charge is unknown. Fedora Aurora carries it too.
-        ./patches/powerdevil-low-battery-unknown-percentage.patch
         ./patches/powerdevil-no-empty-keyboard-backlight.patch
       ];
     });
