@@ -1,26 +1,55 @@
 #!/usr/bin/python3
-"""Install this Mac's fingerprint calibration in the layout its enclave loads.
+"""Set up this Mac's Touch ID calibration.
 
-The enclave refuses a standalone FSC2 calibration image. It loads one only
-resealed with this Mac's own factory records:
+    aurora-touchid-setup                  set up what is missing
+    aurora-touchid-setup --check          report only, write nothing
+    aurora-touchid-setup --force-rebuild  rebuild and replace what differs
+    add --json for a machine-readable result
 
-  comb { fdrd: IMG4 { IM4P, [0] seal-<CHIP>-<ECID> }, secb: trust bundle }
+The fingerprint sensor's driver loads per-device factory data that no
+package can ship. The sensor node's firmware-name list in the device tree
+names it, and the driver reads it as follows:
+  - the first entry is the calibration (apple/mesa_calibration.bin when the
+    node names none);
+  - the second entry is the sensor's signed root key, which sensors with a
+    nonce session load (MacBook Neo, M4 Pro). The driver's default is
+    apple/msrk-j700.bin when the node names only the calibration.
 
-Every start rebuilds that record from the factory cache on the iBoot System
-Container's Hardware volume, read-only, and installs it unless the installed
-record is already byte-identical. The seal must name the chip and ECID of the
-running Mac (from the boot's local policy manifest), carry its serial number
-and list the calibration's SHA-384; the trust bundle is the one in use. These
-are provenance and structure checks: the enclave alone verifies the
-signatures. A Mac whose container holds an FSCl comb record installs that
-record as it is.
+Where the bytes come from, read-only:
+  - Macs whose factory cache holds an FSC2 calibration (J700, J713, J616s).
+    Each file is rebuilt from the factory records on the Hardware volume of
+    the iBoot System Container, in the layout the enclave loads:
+      comb { fdrd: IMG4 { IM4P, [0] seal-<CHIP>-<ECID> }, secb: trust bundle }
+    The seal must name this Mac's CHIP, ECID and serial number and cover the
+    record. The root key is rebuilt the same way from the MSRk record.
+  - Other Macs (M1, M2) keep a comb record in the container, which is
+    installed as carved.
+The enclave alone verifies the signatures; these are provenance and
+structure checks.
 
-Touch ID is marked ready, in /run/aurora-sep, only when the installed record is
-the one just admitted. Anything that cannot be admitted leaves it unready:
-a record positively rejected is moved out of the firmware path into private
-quarantine, and a replaced record is kept as private rollback evidence. SEP
-trusted keys start either way.
+When it runs. It is never routine boot work:
+  1. A file is missing. aurora-touchid-setup.service runs once at boot,
+     before Touch ID starts. A boot where every file is in place skips it,
+     on a condition that only checks that the files exist.
+  2. The enclave refused the installed file. aurora-sep-ready finds the
+     refusal in this boot's kernel log and starts the service once. The
+     file is replaced, with a rollback copy kept. There is at most one
+     automatic rebuild per boot.
+  3. The owner runs it, with --check for a report or --force-rebuild to
+     rebuild anyway.
+
+A file this tool did not install is never replaced, unless the enclave
+refused it this boot or --force-rebuild asks for it. Every replacement
+keeps the old bytes in /var/lib/aurora-sep/rollback. The new file is
+written atomically with mode 0600 and read back. The last result is in
+/var/lib/aurora-sep/touchid-setup.json, with one JSON line per run in
+touchid-setup.log.
 """
+# The factory-record reader and the sealed-record rebuild below (the files,
+# DER, APFS and admission sections) are Erik Bourget's work, first proposed
+# in aurora-silicon/alarm-aurora#26, fedora-aurora#28 and nixos-aurora#27.
+# This tool runs them on demand, adds the root key and keeps his checks.
+import argparse
 import fcntl
 import hashlib
 import json
@@ -38,7 +67,6 @@ import time
 DEVICE = Path('/dev/disk/by-partlabel/iBootSystemContainer')
 STATE = Path('/var/lib/aurora-sep')
 RUN = Path('/run/aurora-sep')
-READY = 'calibration-ready'
 EXTRACTOR = Path('/usr/libexec/aurora/extract-mesa-calibration')
 DT = Path('/sys/firmware/devicetree/base')
 SOURCE_LIMIT = 4 * 1024 * 1024
@@ -122,9 +150,11 @@ def keep_evidence(directory, name, data):
     """Keep `data` as private evidence in `directory`, with the newest few."""
     private_directory(directory)
     stamp = time.strftime('%Y%m%dT%H%M%S', time.gmtime())
-    atomic_write(directory / f'{stamp}-{hashlib.sha256(data).hexdigest()[:16]}-{name}', data)
+    path = directory / f'{stamp}-{hashlib.sha256(data).hexdigest()[:16]}-{name}'
+    atomic_write(path, data)
     for old in sorted(directory.iterdir())[:-KEEP_EVIDENCE]:
         old.unlink()
+    return path
 
 
 def quarantine(target, state, why):
@@ -135,7 +165,7 @@ def quarantine(target, state, why):
         keep_evidence(state / 'quarantine', target.name, found[0])
     target.unlink(missing_ok=True)
     sync_directory(target.parent)
-    print(f'aurora-sep: moved the calibration at {target} to quarantine: {why}', flush=True)
+    print(f'aurora-touchid-setup: moved {target} aside to private quarantine: {why}', file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------- DER
@@ -549,9 +579,10 @@ def live_identity(tree):
     return chip, ecid, serial
 
 
-def admit(records, identity):
+def admit(records, identity, kind=b'FSC2'):
     """The record this Mac's enclave loads, rebuilt from its factory records,
-    and the digests that identify what it was built from."""
+    and the digests that identify what it was built from. `kind` is FSC2 for
+    the calibration and MSRk for the sensor's signed root key."""
     chip, ecid, serial = identity
     if None in identity:
         raise Refused('the running Mac does not identify itself (CHIP, ECID and serial number)')
@@ -567,15 +598,15 @@ def admit(records, identity):
     objects = manifest(seal)
     if objects.get(b'MANP', {}).get(b'SrNm') != (0x04, serial):
         raise Refused("the seal does not carry this Mac's serial number")
-    calibrations = [name for name in records if name.startswith('FSC2-')]
+    calibrations = [name for name in records if name.startswith(kind.decode() + '-')]
     if len(calibrations) != 1:
-        raise Refused(f'expected exactly one FSC2 calibration, found {len(calibrations)}')
+        raise Refused(f'expected exactly one {kind.decode()} record, found {len(calibrations)}')
     source = records[calibrations[0]]
     if len(source) > SOURCE_LIMIT:
         raise Refused('oversized calibration')
-    payload, _ = image(source, b'FSC2')
-    if objects.get(b'FSC2', {}).get(b'DGST') != (0x04, hashlib.sha384(payload).digest()):
-        raise Refused('the seal does not cover this calibration')
+    payload, _ = image(source, kind)
+    if objects.get(kind, {}).get(b'DGST') != (0x04, hashlib.sha384(payload).digest()):
+        raise Refused(f'the seal does not cover this {kind.decode()} record')
     trust = trust_bundle(records)
     return reseal(payload, seal, trust), {
         'source': calibrations[0],
@@ -673,15 +704,57 @@ def in_order(der, start, end, count, values=True):
     return out
 
 
-# ---------------------------------------------------------------- prepare
+# ---------------------------------------------------------------- setup
 
-def carve(device, state, extractor):
-    with tempfile.TemporaryDirectory(prefix='.extract-', dir=state) as tmp:
-        output = Path(tmp) / 'calibration.bin'
-        subprocess.run([str(extractor), str(device), '--output', str(output)], check=True)
-        if not regular(output) or not 0 < output.stat().st_size <= SOURCE_LIMIT:
-            raise Refused('unsafe or oversized calibration output')
-        return output.read_bytes()
+DEFAULT_CALIBRATION = 'apple/mesa_calibration.bin'
+# The driver's root-key name when the board names only the calibration.
+DEFAULT_ROOT_KEY = 'apple/msrk-j700.bin'
+FIRMWARE_PATH = Path('/sys/module/firmware_class/parameters/path')
+DIAG = Path('/sys/bus/platform/devices')
+BOOT_ID = Path('/proc/sys/kernel/random/boot_id')
+REFUSED = 'calibration-refused'    # in RUN: aurora-sep-ready saw a refusal
+AUTO_DONE = 'touchid-auto-rebuild'  # in RUN: this boot's automatic rebuild ran
+RESULT = 'touchid-setup.json'       # in STATE: the last result
+FILES = 'touchid-files'             # in STATE: the files the boot condition checks
+HISTORY = 'touchid-setup.log'       # in STATE: one JSON line per run
+KEEP_HISTORY = 100
+FIRMWARE_NAME = re.compile(r'apple/[A-Za-z0-9_.-]+\.bin')
+KINDS = {'calibration': b'FSC2', 'root key': b'MSRk'}
+
+
+def log(message):
+    print(f'aurora-touchid-setup: {message}', file=sys.stderr, flush=True)
+
+
+def sensor_names(tree):
+    """[calibration, root key] as the sensor's driver names them, from the
+    fingerprint node's firmware-name list; None without a fingerprint node."""
+    found = set()
+    for item in tree.rglob('compatible'):
+        if b'apple,mesa-fingerprint' not in item.read_bytes().split(b'\0'):
+            continue
+        path = item.with_name('firmware-name')
+        value = path.read_bytes() if path.exists() else b''
+        entries = tuple(entry.decode('ascii', 'replace') for entry in value.split(b'\0') if entry)
+        if not all(FIRMWARE_NAME.fullmatch(entry) for entry in entries):
+            raise ValueError('unsafe fingerprint firmware name')
+        found.add(entries)
+    if not found:
+        return None
+    if len(found) > 1:
+        raise ValueError('conflicting fingerprint firmware names')
+    entries = found.pop()
+    return [entries[0] if entries else DEFAULT_CALIBRATION,
+            entries[1] if len(entries) > 1 else DEFAULT_ROOT_KEY]
+
+
+class Wanted:
+    """One file the driver loads, and the bytes it should hold."""
+
+    def __init__(self, role, name):
+        self.role, self.name = role, name
+        self.data = self.source = self.error = None
+        self.evidence = {}
 
 
 def factory(read):
@@ -691,110 +764,358 @@ def factory(read):
         return {}, str(error)
 
 
-def prepare(read, device, state, run, firmware, name, extractor, identity):
-    """Install and admit this Mac's calibration; True when Touch ID is ready."""
-    private_directory(state)
-    private_directory(run)
-    lock = os.open(state / '.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+def carve(device, extractor, work=None):
+    """The calibration record the extractor carves from the container."""
+    with tempfile.TemporaryDirectory(prefix='.extract-', dir=work) as tmp:
+        output = Path(tmp) / 'calibration.bin'
+        done = subprocess.run([str(extractor), str(device), '--output', str(output)],
+                              capture_output=True, text=True)
+        if done.returncode:
+            reason = (done.stderr.strip().splitlines() or ['no output'])[-1]
+            raise Refused(f'the extractor found no calibration ({reason})')
+        if not regular(output) or not 0 < output.stat().st_size <= SOURCE_LIMIT:
+            raise Refused('unsafe or oversized calibration output')
+        return output.read_bytes()
+
+
+def build(read, device, extractor, identity, names, work=None):
+    """The files this Mac's sensor loads, built from its own factory data."""
+    calibration = Wanted('calibration', names[0])
+    wanted = [calibration]
+    records, unreadable = factory(read)
     try:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        (run / READY).unlink(missing_ok=True)
-        parent = firmware / 'apple'
-        parent.mkdir(mode=0o755, parents=True, exist_ok=True)
-        if not stat.S_ISDIR(parent.lstat().st_mode):
-            raise ValueError('unsafe fingerprint firmware directory')
-        target = firmware / name
-        records, unreadable = factory(read)
-        try:
-            if any(record.startswith('FSC2-') for record in records):
-                expected, evidence = admit(records, identity)
-            else:
-                source = carve(device, state, extractor)
-                try:
-                    expected = fscl_record(source)
-                except Refused:
-                    raise Refused('the factory cache does not hold this calibration ('
-                                  + (unreadable or 'no FSC2 record') + ')') from None
-                evidence = {'source': 'iBoot System Container',
-                            'source_sha384': hashlib.sha384(source).hexdigest()}
-        except Refused as error:
-            refuse(target, state, identity[2], error)
-            return False
-        if len(expected) > RECORD_LIMIT:
-            raise Refused('oversized calibration record')
-        install(target, state, expected)
-        evidence.update(target=str(target), sha256=hashlib.sha256(expected).hexdigest())
-        atomic_write(run / READY, (json.dumps(evidence, sort_keys=True) + '\n').encode())
-        print(f'aurora-sep: Touch ID calibration ready at {target}', flush=True)
-        return True
-    finally:
-        os.close(lock)
-
-
-def install(target, state, expected):
-    """Make `target` exactly `expected`, mode 0600, keeping replaced bytes as
-    rollback evidence; the replacement is read back before it counts."""
-    found = read_installed(target)
-    if isinstance(found, tuple) and found[0] == expected:
-        if found[1] != 0o600:
-            fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        if any(name.startswith('FSC2-') for name in records):
+            calibration.data, calibration.evidence = admit(records, identity, b'FSC2')
+            calibration.source = 'resealed from the factory records'
+        else:
+            source = carve(device, extractor, work)
             try:
-                os.fchmod(fd, 0o600)
-            finally:
-                os.close(fd)
-        return
-    if isinstance(found, tuple) and found[0] is not None:
-        keep_evidence(state / 'rollback', target.name, found[0])
-    elif isinstance(found, tuple):
-        quarantine(target, state, found[1])
-    atomic_write(target, expected)
-    check = read_installed(target)
-    if not isinstance(check, tuple) or check != (expected, 0o600):
-        raise ValueError(f'the calibration at {target} did not read back')
-    print(f'aurora-sep: installed the sealed calibration at {target}', flush=True)
+                calibration.data = fscl_record(source)
+            except Refused:
+                raise Refused('the factory cache does not hold this calibration ('
+                              + (unreadable or 'no FSC2 record')
+                              + ') and the container holds no FSCl comb record') from None
+            calibration.source = 'carved from the iBoot System Container'
+            calibration.evidence = {'source_sha384': hashlib.sha384(source).hexdigest()}
+    except Refused as error:
+        calibration.error = str(error)
+    if any(name.startswith('MSRk-') for name in records):
+        root_key = Wanted('root key', names[1])
+        try:
+            root_key.data, root_key.evidence = admit(records, identity, b'MSRk')
+            root_key.source = 'resealed from the factory records'
+        except Refused as error:
+            root_key.error = str(error)
+        wanted.append(root_key)
+    for item in wanted:
+        if item.data is not None:
+            try:
+                self_check(item)
+            except Refused as error:
+                item.data, item.error = None, f'the built record does not read back: {error}'
+    return wanted
 
 
-def refuse(target, state, serial, error):
-    found = read_installed(target)
-    if isinstance(found, tuple):
-        problem = found[1] if found[0] is None else installed_problem(found[0], serial)
-        if problem is not None:
-            quarantine(target, state, problem)
-    print(f'aurora-sep: Touch ID needs a calibration refresh: {error}', flush=True)
+def self_check(item):
+    """Read a built record back the way the checks above read a source."""
+    if len(item.data) > RECORD_LIMIT:
+        raise Refused('oversized record')
+    if item.source.startswith('carved'):
+        fscl_record(item.data)
+    else:
+        fdrd, _ = combined(item.data)
+        image(fdrd, KINDS[item.role])
 
 
-def firmware_name(tree):
-    names = set()
-    for item in tree.rglob('compatible'):
-        if b'apple,mesa-fingerprint' not in item.read_bytes().split(b'\0'):
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def installed_by_us(state):
+    """Digests of the files earlier runs installed, including the record and
+    cache that prepare-sep-calibration kept."""
+    ours = set()
+    found = read_installed(state / RESULT)
+    if isinstance(found, tuple) and found[0]:
+        try:
+            for item in json.loads(found[0]).get('files', []):
+                for key in ('sha256', 'installed_sha256'):
+                    if item.get('action') in ('install', 'replace', 'keep') and \
+                            re.fullmatch(r'[0-9a-f]{64}', str(item.get(key))):
+                        ours.add(item[key])
+        except (ValueError, AttributeError):
+            pass
+    for name in ('installed.sha256', 'mesa-calibration.bin'):
+        found = read_installed(state / name)
+        if not isinstance(found, tuple) or not found[0]:
             continue
-        name = item.with_name('firmware-name')
-        if name.exists():
-            names.add(name.read_bytes().rstrip(b'\0').decode('ascii'))
-    if len(names) > 1:
-        raise ValueError('conflicting fingerprint firmware names')
-    name = next(iter(names), 'apple/mesa_calibration.bin')
-    if not re.fullmatch(r'apple/[A-Za-z0-9_.-]+\.bin', name):
-        raise ValueError('unsafe fingerprint firmware name')
-    return name
+        if name.endswith('.sha256'):
+            text = found[0].decode('ascii', 'replace').strip()
+            if re.fullmatch(r'[0-9a-f]{64}', text):
+                ours.add(text)
+        else:
+            ours.add(digest(found[0]))
+    return ours
 
 
-def main():
-    if not stat.S_ISBLK(DEVICE.stat().st_mode):
-        raise ValueError('calibration input is not a block device')
-    firmware = Path('/sys/module/firmware_class/parameters/path').read_text().strip()
-    fd = os.open(DEVICE, os.O_RDONLY | os.O_CLOEXEC)
+def decide(item, installed, ours, trigger):
+    """(action, reason) for one file: keep, install, replace, leave or fail."""
+    if item.data is None:
+        return 'fail', item.error
+    if installed is None:
+        return 'install', 'missing'
+    data, why = installed
+    if data == item.data:
+        if trigger == 'refused':
+            return 'keep', ('identical to the rebuild, so a rebuild cannot fix the refusal; '
+                            'see the kernel log for the enclave\'s status')
+        return 'keep', 'identical to the rebuild'
+    if trigger == 'force':
+        return 'replace', 'replacing on --force-rebuild'
+    if trigger == 'refused':
+        return 'replace', 'the enclave refused the installed file this boot'
+    if data is not None and digest(data) in ours:
+        return 'replace', 'this tool installed it, and the factory data now builds a different file'
+    return 'leave', ((f'it is {why}' if data is None else 'it differs from the rebuild')
+                     + ', and this tool did not install it; '
+                     'run aurora-touchid-setup --force-rebuild to replace it (a rollback copy is kept)')
+
+
+def apply(item, target, state):
+    """Make `target` exactly the built record; returns the rollback copy."""
+    parent = target.parent
+    parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    if not stat.S_ISDIR(parent.lstat().st_mode):
+        raise ValueError(f'unsafe firmware directory: {parent}')
+    rollback = None
+    old = read_installed(target)
+    if old is not None and old[0] is not None:
+        rollback = keep_evidence(state / 'rollback', target.name, old[0])
+    elif old is not None:
+        quarantine(target, state, old[1])
+    atomic_write(target, item.data)
+    if read_installed(target) != (item.data, 0o600):
+        raise ValueError(f'{target} did not read back')
+    return rollback
+
+
+def publish(target, name, search):
+    """Link `target` into the kernel's firmware search path when the files
+    live elsewhere (NixOS keeps that path on /run)."""
+    if search is None or search == target.parent.parent:
+        return None
+    link = search / name
+    link.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    if link.is_symlink() and os.readlink(link) == str(target):
+        return link
+    if link.exists() and not link.is_symlink():
+        log(f'{link} is a file this tool did not place; leaving it')
+        return None
+    temporary = link.with_name(f'.{link.name}.link')
+    temporary.unlink(missing_ok=True)
+    temporary.symlink_to(target)
+    os.replace(temporary, link)
+    return link
+
+
+def driver_state(devices=DIAG):
+    """The SEP driver's view of the sensor, from its diag attributes."""
+    for diag in sorted(devices.glob('*.sep/diag')):
+        state = {}
+        for name in ('touchid', 'sensor_attach', 'restore'):
+            try:
+                state[name] = (diag / name).read_text().strip()
+            except OSError:
+                pass
+        return state
+    return {}
+
+
+def next_steps(result, sep_bio, devices):
+    changed = any(item['action'] in ('install', 'replace') for item in result['files'])
+    steps = []
+    if result['status'] == 'failed':
+        steps.append('Touch ID cannot be set up from this Mac\'s factory data; see the reasons above. '
+                     'Password login is unaffected.')
+        return steps
+    if changed:
+        attach = driver_state(devices).get('sensor_attach')
+        if not sep_bio.exists():
+            steps.append('Touch ID starts with these files at the next boot (or when aurora-sep.service starts).')
+        elif attach == 'attached':
+            steps.append('The sensor attached this boot with the earlier file; the driver uses the new '
+                         'one from its next sensor bring-up. Reboot for a clean start.')
+        else:
+            steps.append('The driver loads the new file at its next sensor bring-up: its own retry '
+                         'about 10 s after Touch ID starts, or the next enrolment or verify. If '
+                         'aurora-sep-ready still reports the sensor not attached, reboot.')
+    if not changed and driver_state(devices).get('restore') == 'restored':
+        steps.append('Nothing to do: the files are in place and the enrolled fingerprints are restored.')
+        return steps
+    user = os.environ.get('SUDO_USER') or 'USER'
+    steps.append(f'Enrol a finger with: fprintd-enroll -f right-index-finger {user} '
+                 '(the last word is the user name), or use the desktop\'s fingerprint settings.')
+    return steps
+
+
+def boot_id():
     try:
-        prepare(lambda offset, length: os.pread(fd, length, offset), DEVICE, STATE, RUN,
-                Path(firmware or '/usr/lib/firmware'), firmware_name(DT), EXTRACTOR, live_identity(DT))
+        return BOOT_ID.read_text().strip()
+    except OSError:
+        return None
+
+
+def setup(read, device, extractor, tree, firmware, state, run, *, check=False, trigger='user',
+          search=None, sep_bio=Path('/dev/sep-bio'), devices=DIAG):
+    """Set up (or, with `check`, only report) this Mac's Touch ID files."""
+    result = {'tool': 'aurora-touchid-setup', 'version': 1,
+              'time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+              'boot_id': boot_id(), 'mode': 'check' if check else 'apply',
+              'trigger': trigger, 'firmware_dir': str(firmware), 'files': []}
+    names = sensor_names(tree)
+    result['sensor'] = names is not None
+    if names is None:
+        result['status'] = 'no-sensor'
+        log('this Mac has no Touch ID sensor in its device tree; nothing to do')
+        if not check:
+            private_directory(state)
+            record(state, result, [])
+        return result
+    identity = live_identity(tree)
+    result['identity_known'] = None not in identity
+    lock = None
+    if not check:
+        private_directory(state)
+        lock = os.open(state / '.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        ours = installed_by_us(state) if state.is_dir() else set()
+        wanted = build(read, device, extractor, identity, names, None if check else state)
+        for item in wanted:
+            target = firmware / item.name
+            installed = read_installed(target)
+            action, reason = decide(item, installed, ours, trigger)
+            entry = {'role': item.role, 'name': item.name, 'path': str(target),
+                     'source': item.source, 'action': action, 'reason': reason,
+                     'sha256': digest(item.data) if item.data is not None else None,
+                     'installed_sha256': digest(installed[0])
+                     if installed is not None and installed[0] is not None else None}
+            if not check and action in ('install', 'replace'):
+                rollback = apply(item, target, state)
+                entry['rollback'] = str(rollback) if rollback else None
+                entry['installed_sha256'] = entry['sha256']
+            if not check and action != 'fail':
+                linked = publish(target, item.name, search)
+                if linked:
+                    entry['published'] = str(linked)
+            result['files'].append(entry)
+            verb = {'keep': 'in place', 'install': 'would install' if check else 'installed',
+                    'replace': 'would replace' if check else 'replaced',
+                    'leave': 'left as it is', 'fail': 'CANNOT BUILD'}[action]
+            log(f'{item.role} {target}: {verb} ({reason})')
+        actions = {item['action'] for item in result['files']}
+        if 'fail' in actions:
+            result['status'] = 'failed'
+        elif actions & {'install', 'replace'}:
+            result['status'] = 'would-change' if check else 'changed'
+        elif 'leave' in actions:
+            result['status'] = 'left'
+        else:
+            result['status'] = 'ok'
+        result['next_steps'] = next_steps(result, sep_bio, devices)
+        if not check:
+            record(state, result, [item['path'] for item in result['files']])
+        return result
     finally:
-        os.close(fd)
+        if lock is not None:
+            os.close(lock)
+
+
+def record(state, result, paths):
+    """Keep the result, the files the boot condition checks and the history."""
+    line = json.dumps(result, sort_keys=True)
+    atomic_write(state / RESULT, (json.dumps(result, indent=2, sort_keys=True) + '\n').encode())
+    atomic_write(state / FILES, ''.join(f'{path}\n' for path in paths).encode())
+    found = read_installed(state / HISTORY)
+    lines = found[0].decode('utf-8', 'replace').splitlines() \
+        if isinstance(found, tuple) and found[0] else []
+    atomic_write(state / HISTORY, ('\n'.join(lines[-(KEEP_HISTORY - 1):] + [line]) + '\n').encode())
+
+
+def automatic(run, state):
+    """The service's trigger: 'refused' once per boot when aurora-sep-ready saw
+    the enclave refuse a file, else 'missing'; None when this boot's
+    automatic rebuild already ran."""
+    if not (run / REFUSED).exists():
+        return 'missing'
+    if (run / AUTO_DONE).exists():
+        return None
+    private_directory(run)
+    atomic_write(run / AUTO_DONE, f'{boot_id()}\n'.encode())
+    return 'refused'
+
+
+def firmware_dirs():
+    """(where the files are kept, the kernel's search path when that differs)."""
+    try:
+        search = FIRMWARE_PATH.read_text().strip()
+    except OSError:
+        search = ''
+    kept = os.environ.get('AURORA_TOUCHID_FIRMWARE_DIR')
+    if kept:
+        return Path(kept), Path(search) if search else None
+    return Path(search or '/usr/lib/firmware'), None
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog='aurora-touchid-setup',
+        description="Set up this Mac's Touch ID calibration from its own factory data.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--check', action='store_true', help='report what would be done; write nothing')
+    mode.add_argument('--force-rebuild', action='store_true',
+                      help='rebuild and replace files that differ, even ones this tool did not install')
+    mode.add_argument('--auto', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--json', action='store_true', help='print the result as JSON')
+    args = parser.parse_args(argv)
+    if os.geteuid() != 0:
+        log('this reads the boot container and writes firmware files; run it as root (sudo)')
+        return 2
+    trigger = 'force' if args.force_rebuild else 'user'
+    if args.auto:
+        trigger = automatic(RUN, STATE)
+        if trigger is None:
+            log('the automatic rebuild already ran this boot; not running it again '
+                '(run aurora-touchid-setup by hand to retry)')
+            return 0
+        if trigger == 'refused':
+            log('the enclave refused the installed Touch ID file this boot; rebuilding it once')
+    firmware, search = firmware_dirs()
+    try:
+        if not stat.S_ISBLK(DEVICE.stat().st_mode):
+            raise ValueError(f'{DEVICE} is not a block device')
+        fd = os.open(DEVICE, os.O_RDONLY | os.O_CLOEXEC)
+        try:
+            result = setup(lambda offset, length: os.pread(fd, length, offset), DEVICE, EXTRACTOR,
+                           DT, firmware, STATE, RUN, check=args.check, trigger=trigger, search=search)
+        finally:
+            os.close(fd)
+    except (OSError, ValueError) as error:
+        result = {'tool': 'aurora-touchid-setup', 'version': 1, 'status': 'failed',
+                  'trigger': trigger, 'mode': 'check' if args.check else 'apply',
+                  'error': str(error), 'files': []}
+        log(f'cannot set up Touch ID: {error}')
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        for step in result.get('next_steps', []):
+            log(f'next: {step}')
+    if result['status'] == 'failed':
+        return 2
+    if args.check and result['status'] in ('would-change', 'left'):
+        return 1
+    return 0
 
 
 if __name__ == '__main__':
-    try:
-        main()
-    except (OSError, ValueError, subprocess.CalledProcessError) as error:
-        # Some models have no reader. SEP trusted keys must still start.
-        print(f'aurora-sep: fingerprint calibration unavailable: {error}', flush=True)
-        sys.exit(0)
+    sys.exit(main())

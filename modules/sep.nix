@@ -29,7 +29,7 @@ in {
       systemd.services.aurora-sep = {
         description = "Aurora SEP trusted keys and biometric services";
         after = [ "local-fs.target" "aurora-vendor-firmware.service" ];
-        wants = [ "aurora-vendor-firmware.service" "aurora-sep-ready.service" ];
+        wants = [ "aurora-vendor-firmware.service" "aurora-sep-ready.service" "aurora-touchid-setup.service" ];
         unitConfig = {
           RequiresMountsFor = "/var/lib";
           ConditionPathExists = "/dev/disk/by-partlabel/iBootSystemContainer";
@@ -39,11 +39,32 @@ in {
           Type = "oneshot";
           RemainAfterExit = true;
           ExecCondition = "${pkgs.runtimeShell} -c 'modinfo -F filename apple_sep 2>/dev/null | grep -Eq \"[.]ko([.](gz|xz|zst))?$\"'";
-          ExecStartPre = "${pkgs.aurora-sep}/libexec/aurora/prepare-sep-calibration";
+          # Links the Touch ID files kept in /var/lib into the firmware path
+          # on /run; it builds nothing.
+          ExecStartPre = "-${pkgs.aurora-sep}/libexec/aurora/touchid-publish";
           ExecStart = "${pkgs.aurora-sep}/libexec/aurora-sep-load";
           StateDirectory = "aurora-sep";
           StateDirectoryMode = "0700";
           TimeoutStartSec = 180;
+        };
+      };
+      systemd.services.aurora-touchid-setup = {
+        description = "Set up the Touch ID calibration when it is missing or refused";
+        documentation = [ "file://${pkgs.aurora-sep}/share/doc/aurora-sep/README.md" ];
+        after = [ "local-fs.target" "aurora-vendor-firmware.service" ];
+        before = [ "aurora-sep-ready.service" "fprintd.service" ];
+        unitConfig = {
+          RequiresMountsFor = "/var/lib";
+          ConditionPathExists = "/dev/disk/by-partlabel/iBootSystemContainer";
+        };
+        serviceConfig = {
+          Type = "oneshot";
+          # Runs only when a Touch ID file is missing, when the enclave refused
+          # one this boot (aurora-sep-ready starts this unit then), or on the
+          # first boot after installation. Every other boot skips it here.
+          ExecCondition = "${pkgs.aurora-sep}/libexec/aurora/touchid-setup-needed";
+          ExecStart = "${pkgs.aurora-sep}/bin/aurora-touchid-setup --auto";
+          TimeoutStartSec = 300;
         };
       };
       systemd.services.aurora-sep-ready = {

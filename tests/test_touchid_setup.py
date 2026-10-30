@@ -1,4 +1,4 @@
-"""The calibration helper, on synthetic boot containers and records only."""
+"""aurora-touchid-setup, on synthetic boot containers, records and device trees only."""
 import contextlib
 import hashlib
 import importlib.machinery
@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import struct
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -24,8 +25,7 @@ def load(name, module):
     return loaded
 
 
-helper = load('prepare-sep-calibration', 'prepare_sep_calibration')
-calibration_ready = load('calibration-ready', 'calibration_ready')
+helper = load('aurora-touchid-setup', 'aurora_touchid_setup')
 
 
 # ---------------------------------------------------------------- DER records
@@ -90,6 +90,8 @@ OTHER_ECID = 0x0011223344556678
 SENSOR = '00003356-0123456789ABCDEF0123456789ABCDEF'
 CALIBRATION = im4p(b'CALB' + bytes(300))
 OTHER = im4p(b'CALB' + bytes(299) + b'\x01')
+ROOT_KEY = im4p(b'MSRK' + bytes(100), b'MSRk')
+ROOT_KEY_FACTORY = img4(ROOT_KEY, im4m({b'MANP': {b'srvn': octets(b'\x01')}}))
 FACTORY = img4(CALIBRATION, im4m({b'MANP': {b'srvn': octets(b'\x01')},
                                   b'FSC2': {b'DGST': octets(hashlib.sha384(CALIBRATION).digest())}}))
 TRUST = b'trust bundle ' + bytes(64)
@@ -100,7 +102,7 @@ def seal(payload=CALIBRATION, serial=SERIAL, extra=None):
     objects = {b'MANP': {b'SrNm': octets(serial), b'BORD': integer(0x26)},
                b'FSC2': {b'DGST': octets(hashlib.sha384(payload).digest()),
                          b'clas': octets(b'\x00' * 4)},
-               b'MSRk': {b'DGST': octets(bytes(48))}}
+               b'MSRk': {b'DGST': octets(hashlib.sha384(ROOT_KEY).digest())}}
     for name, props in (extra or {}).items():
         objects.setdefault(name, {}).update(props)
     return im4m(objects)
@@ -113,7 +115,7 @@ def sealed(payload=CALIBRATION, manifest=None, trust=TRUST):
 def records(**changes):
     out = {
         f'FSC2-{SENSOR}': FACTORY,
-        f'MSRk-{SENSOR}': b'root key',
+        f'MSRk-{SENSOR}': ROOT_KEY_FACTORY,
         f'seal-{CHIP:08X}-{ECID:016X}': seal(),
         f'trustobject-{hashlib.sha256(TRUST).hexdigest().upper()}': TRUST,
         f'trustobject-{hashlib.sha256(OLD_TRUST).hexdigest().upper()}': OLD_TRUST,
@@ -139,6 +141,7 @@ FSCL_RECORDS = [
         + der(0x30, text(b'secb'))),
 ]
 EXPECTED = sealed()
+EXPECTED_ROOT_KEY = sealed(ROOT_KEY, manifest=seal())
 
 
 # ---------------------------------------------------------------- APFS images
@@ -441,7 +444,57 @@ class IdentityTests(unittest.TestCase):
             self.assertEqual(helper.live_identity(tree), (None, None, SERIAL))
 
 
-class PrepareTests(unittest.TestCase):
+def device_tree(root, names=b'apple/mesacal-j713.bin\0', serial=SERIAL, sensor=True):
+    """A device tree with the SEP's local policy, the serial number and,
+    with `sensor`, a fingerprint node naming `names` (None: no property)."""
+    tree = root / 'dt'
+    sep = tree / 'soc' / 'sep@3aa600000'
+    sep.mkdir(parents=True)
+    (sep / 'compatible').write_bytes(b'apple,sep\0')
+    (sep / 'local-policy-manifest').write_bytes(
+        im4m({b'MANP': {b'CHIP': integer(CHIP), b'ECID': integer(ECID)}}))
+    if serial is not None:
+        (tree / 'serial-number').write_bytes(serial + b'\0')
+    if sensor:
+        node = tree / 'spi' / 'fingerprint@0'
+        node.mkdir(parents=True)
+        (node / 'compatible').write_bytes(b'apple,mesa-fingerprint\0')
+        if names is not None:
+            (node / 'firmware-name').write_bytes(names)
+    return tree
+
+
+class SensorNameTests(unittest.TestCase):
+    def names(self, value, sensor=True):
+        with tempfile.TemporaryDirectory() as directory:
+            return helper.sensor_names(device_tree(Path(directory), value, sensor=sensor))
+
+    def test_names_are_read_as_the_driver_reads_them(self):
+        self.assertEqual(self.names(b'apple/mesacal-j700.bin\0'),
+                         ['apple/mesacal-j700.bin', 'apple/msrk-j700.bin'])
+        self.assertEqual(self.names(b'apple/mesacal-j616s.bin\0apple/msrk-j616s.bin\0'),
+                         ['apple/mesacal-j616s.bin', 'apple/msrk-j616s.bin'])
+        self.assertEqual(self.names(None), ['apple/mesa_calibration.bin', 'apple/msrk-j700.bin'])
+        self.assertIsNone(self.names(b'apple/mesacal-j700.bin\0', sensor=False))
+
+    def test_unsafe_names_are_refused(self):
+        for value in (b'apple/../../escape.bin\0', b'apple/mesacal-j616s.bin\0/etc/shadow\0',
+                      b'firmware.bin\0'):
+            with self.subTest(value), self.assertRaises(ValueError):
+                self.names(value)
+
+    def test_conflicting_nodes_are_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tree = device_tree(Path(directory))
+            second = tree / 'spi2' / 'fingerprint@0'
+            second.mkdir(parents=True)
+            (second / 'compatible').write_bytes(b'apple,mesa-fingerprint\0')
+            (second / 'firmware-name').write_bytes(b'apple/other.bin\0')
+            with self.assertRaises(ValueError):
+                helper.sensor_names(tree)
+
+
+class SetupTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -449,87 +502,176 @@ class PrepareTests(unittest.TestCase):
         self.state, self.run = self.root / 'state', self.root / 'run'
         self.firmware = self.root / 'firmware'
         self.target = self.firmware / 'apple' / 'mesacal-j713.bin'
+        self.root_key = self.firmware / 'apple' / 'msrk-j700.bin'
         self.carved = self.root / 'carved.bin'
         self.extractor = self.root / 'extract'
-        self.extractor.write_text('#!/bin/sh\n[ -f "$CARVED" ] || exit 1\ncp "$CARVED" "$3" && chmod 600 "$3"\n')
+        self.extractor.write_text('#!/bin/sh\n[ -f "$CARVED" ] || { echo "error: nothing" >&2; exit 1; }\n'
+                                  'cp "$CARVED" "$3" && chmod 600 "$3"\n')
         self.extractor.chmod(0o755)
         os.environ['CARVED'] = str(self.carved)
         self.addCleanup(os.environ.pop, 'CARVED', None)
         self.image = apfs(records())
+        self.tree = device_tree(self.root)
 
-    def prepare(self, identity=IDENTITY):
-        with contextlib.redirect_stdout(io.StringIO()) as out:
-            ready = helper.prepare(reader(self.image), self.root / 'device', self.state, self.run,
-                                   self.firmware, 'apple/mesacal-j713.bin', self.extractor, identity)
+    def setup(self, **options):
+        options.setdefault('sep_bio', self.root / 'no-sep-bio')
+        options.setdefault('devices', self.root / 'no-devices')
+        with contextlib.redirect_stderr(io.StringIO()) as out:
+            result = helper.setup(reader(self.image), self.root / 'device', self.extractor,
+                                  self.tree, self.firmware, self.state, self.run, **options)
         self.output = out.getvalue()
-        self.assertEqual(ready, (self.run / helper.READY).exists())
-        return ready
+        return result
 
-    def install(self, data, mode=0o600):
-        self.target.parent.mkdir(parents=True, exist_ok=True)
-        self.target.write_bytes(data)
-        self.target.chmod(mode)
+    def install(self, path, data, mode=0o600):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        path.chmod(mode)
 
-    def evidence(self, kind):
-        directory = self.state / kind
+    def actions(self, result):
+        return {item['role']: item['action'] for item in result['files']}
+
+    def rollback(self):
+        directory = self.state / 'rollback'
         return sorted(p.read_bytes() for p in directory.iterdir()) if directory.exists() else []
 
-    def assert_ready_for(self, data):
-        self.assertEqual(self.target.read_bytes(), data)
+    def test_missing_files_are_built_and_installed(self):
+        result = self.setup()
+        self.assertEqual(result['status'], 'changed')
+        self.assertEqual(self.actions(result), {'calibration': 'install', 'root key': 'install'})
+        self.assertEqual(self.target.read_bytes(), EXPECTED)
+        self.assertEqual(self.root_key.read_bytes(), EXPECTED_ROOT_KEY)
         self.assertEqual(self.target.stat().st_mode & 0o777, 0o600)
-        marker = json.loads((self.run / helper.READY).read_text())
-        self.assertEqual(marker['sha256'], hashlib.sha256(data).hexdigest())
-        self.assertTrue(calibration_ready.ready(str(self.run / helper.READY)))
+        self.assertEqual((self.state / helper.FILES).read_text().split(),
+                         [str(self.target), str(self.root_key)])
+        recorded = json.loads((self.state / helper.RESULT).read_text())
+        self.assertEqual(recorded['files'][0]['sha256'], hashlib.sha256(EXPECTED).hexdigest())
+        self.assertEqual(len((self.state / helper.HISTORY).read_text().splitlines()), 1)
+        self.assertEqual(self.rollback(), [])
 
-    def test_the_rebuilt_record_is_installed_and_marked_ready(self):
-        self.assertTrue(self.prepare())
-        self.assert_ready_for(EXPECTED)
-        self.assertEqual(self.evidence('rollback'), [])
+    def test_check_writes_nothing(self):
+        result = self.setup(check=True)
+        self.assertEqual(result['status'], 'would-change')
+        self.assertEqual(self.actions(result), {'calibration': 'install', 'root key': 'install'})
+        self.assertFalse(self.firmware.exists())
+        self.assertFalse(self.state.exists())
 
-    def test_an_identical_record_is_kept_and_its_mode_secured(self):
-        self.install(EXPECTED, 0o644)
-        before = self.target.stat().st_ino
-        self.assertTrue(self.prepare())
-        self.assert_ready_for(EXPECTED)
-        self.assertEqual(self.target.stat().st_ino, before)
+    def test_identical_files_are_kept_untouched(self):
+        self.install(self.target, EXPECTED, 0o644)
+        self.install(self.root_key, EXPECTED_ROOT_KEY)
+        before = self.target.stat()
+        result = self.setup()
+        self.assertEqual(result['status'], 'ok')
+        after = self.target.stat()
+        self.assertEqual((after.st_ino, after.st_mtime_ns, after.st_mode),
+                         (before.st_ino, before.st_mtime_ns, before.st_mode))
+        self.assertEqual(self.setup(check=True)['status'], 'ok')
 
-    def test_each_start_reads_the_current_records(self):
-        self.prepare()
+    def test_a_file_this_tool_did_not_install_is_left(self):
+        foreign = sealed(trust=OLD_TRUST)
+        self.install(self.target, foreign)
+        self.install(self.root_key, EXPECTED_ROOT_KEY)
+        result = self.setup()
+        self.assertEqual(self.actions(result)['calibration'], 'leave')
+        self.assertEqual(result['status'], 'left')
+        self.assertEqual(self.target.read_bytes(), foreign)
+        self.assertIn('--force-rebuild', self.output)
+
+    def test_force_rebuild_and_a_refusal_replace_it_with_a_rollback_copy(self):
+        for trigger in ('force', 'refused'):
+            with self.subTest(trigger):
+                foreign = sealed(trust=OLD_TRUST) + trigger.encode()
+                self.install(self.target, foreign)
+                result = self.setup(trigger=trigger)
+                self.assertEqual(self.actions(result)['calibration'], 'replace')
+                self.assertEqual(self.target.read_bytes(), EXPECTED)
+                self.assertIn(foreign, self.rollback())
+                self.assertEqual(Path(result['files'][0]['rollback']).read_bytes(), foreign)
+
+    def test_a_refused_file_identical_to_the_rebuild_is_kept_and_explained(self):
+        self.install(self.target, EXPECTED)
+        result = self.setup(trigger='refused')
+        self.assertEqual(self.actions(result)['calibration'], 'keep')
+        self.assertIn('cannot fix the refusal', result['files'][0]['reason'])
+
+    def test_its_own_install_follows_changed_factory_data(self):
+        self.setup()
         self.image = apfs(records(**{f'FSC2-{SENSOR}': img4(OTHER, im4m({b'MANP': {}})),
                                      f'seal-{CHIP:08X}-{ECID:016X}': seal(payload=OTHER)}))
-        self.assertTrue(self.prepare())
-        self.assert_ready_for(sealed(OTHER))
-        self.assertEqual(self.evidence('rollback'), [EXPECTED])
+        result = self.setup()
+        self.assertEqual(self.actions(result)['calibration'], 'replace')
+        self.assertEqual(self.target.read_bytes(), sealed(OTHER))
+        self.assertIn(EXPECTED, self.rollback())
 
-    def test_a_new_trust_bundle_replaces_the_installed_record(self):
-        self.install(sealed(trust=OLD_TRUST))
-        self.assertTrue(self.prepare())
-        self.assert_ready_for(EXPECTED)
-        self.assertEqual(self.evidence('rollback'), [sealed(trust=OLD_TRUST)])
-
-    def test_a_damaged_or_open_record_is_replaced_never_with_the_bare_image(self):
-        for name, data, mode in [('damaged header', b'\x31' + EXPECTED[1:], 0o600),
-                                 ('world readable', sealed(trust=OLD_TRUST), 0o644),
-                                 ('bare image', FACTORY, 0o600)]:
+    def test_the_old_helpers_record_and_cache_count_as_ours(self):
+        for name in ('installed.sha256', 'mesa-calibration.bin'):
             with self.subTest(name):
-                self.install(data, mode)
-                self.assertTrue(self.prepare())
-                self.assert_ready_for(EXPECTED)
-                self.assertNotEqual(self.target.read_bytes(), FACTORY)
+                old = b'what prepare-sep-calibration installed ' + name.encode()
+                self.install(self.target, old)
+                helper.private_directory(self.state)
+                legacy = self.state / name
+                self.install(legacy, (hashlib.sha256(old).hexdigest() + '\n').encode()
+                             if name.endswith('.sha256') else old)
+                self.assertEqual(self.actions(self.setup())['calibration'], 'replace')
+                self.assertEqual(self.target.read_bytes(), EXPECTED)
+                legacy.unlink()
+                (self.state / helper.RESULT).unlink()
 
-    def test_a_link_at_the_target_is_quarantined_not_followed(self):
+    def test_the_bare_image_is_never_installed(self):
+        self.image = bytes(len(self.image))
+        self.carved.write_bytes(FACTORY)
+        result = self.setup()
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(self.actions(result), {'calibration': 'fail'})
+        self.assertIn('the boot container is not APFS', result['files'][0]['reason'])
+        self.assertFalse(self.target.exists())
+
+    def test_an_fscl_record_is_installed_as_carved(self):
+        self.image = apfs({'HmCA-0': b'unrelated'})
+        for fscl in FSCL_RECORDS:
+            with self.subTest(len(fscl)):
+                self.carved.write_bytes(fscl)
+                self.target.unlink(missing_ok=True)
+                result = self.setup()
+                self.assertEqual(self.actions(result), {'calibration': 'install'})
+                self.assertEqual(self.target.read_bytes(), fscl)
+                self.assertEqual(result['files'][0]['source'], 'carved from the iBoot System Container')
+
+    def test_no_carvable_record_fails_without_writing(self):
+        self.image = apfs({'HmCA-0': b'unrelated'})
+        result = self.setup()
+        self.assertEqual(result['status'], 'failed')
+        self.assertIn('the extractor found no calibration (error: nothing)', result['files'][0]['reason'])
+        self.assertFalse(self.target.exists())
+
+    def test_a_mac_without_a_reader_records_that_once(self):
+        self.tree = device_tree(self.root / 'sensorless', sensor=False)
+        result = self.setup()
+        self.assertEqual(result['status'], 'no-sensor')
+        self.assertEqual((self.state / helper.FILES).read_text(), '')
+        self.assertFalse(self.firmware.exists())
+
+    def test_unknown_identity_fails_and_keeps_the_installed_file(self):
+        self.tree = device_tree(self.root / 'noserial', serial=None)
+        self.install(self.target, EXPECTED)
+        result = self.setup(trigger='refused')
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(self.target.read_bytes(), EXPECTED)
+
+    def test_a_link_at_the_target_is_not_followed(self):
         outside = self.root / 'outside'
         outside.write_bytes(b'keep')
         self.target.parent.mkdir(parents=True)
         self.target.symlink_to(outside)
-        self.assertTrue(self.prepare())
-        self.assert_ready_for(EXPECTED)
+        self.assertEqual(self.actions(self.setup())['calibration'], 'leave')
+        self.assertTrue(self.target.is_symlink())
+        self.assertEqual(self.actions(self.setup(trigger='force'))['calibration'], 'replace')
+        self.assertFalse(self.target.is_symlink())
+        self.assertEqual(self.target.read_bytes(), EXPECTED)
         self.assertEqual(outside.read_bytes(), b'keep')
-        self.assertEqual(self.evidence('rollback') + self.evidence('quarantine'), [])
 
-    def test_a_failed_replacement_leaves_the_old_record_and_no_readiness(self):
+    def test_a_failed_replacement_leaves_the_old_file(self):
         old = sealed(trust=OLD_TRUST)
-        self.install(old)
+        self.install(self.target, old)
         real = helper.atomic_write
 
         def fail_on_target(path, data, mode=0o600):
@@ -539,93 +681,144 @@ class PrepareTests(unittest.TestCase):
 
         with patch.object(helper, 'atomic_write', side_effect=fail_on_target):
             with self.assertRaises(OSError):
-                self.prepare()
+                self.setup(trigger='force')
         self.assertEqual(self.target.read_bytes(), old)
-        self.assertEqual(self.evidence('rollback'), [old])
-        self.assertFalse((self.run / helper.READY).exists())
-
-    def test_refusal_quarantines_another_macs_record_and_stays_unready(self):
-        foreign = sealed(manifest=seal(serial=b'OTHERSERIAL'))
-        self.install(foreign)
-        self.assertFalse(self.prepare(identity=(CHIP, OTHER_ECID, SERIAL)))
-        self.assertFalse(self.target.exists())
-        self.assertEqual(self.evidence('quarantine'), [foreign])
-        self.assertIn('refresh', self.output)
-
-    def test_unknown_identity_leaves_a_plausible_record_but_unready(self):
-        self.install(EXPECTED)
-        self.assertFalse(self.prepare(identity=(CHIP, ECID, None)))
-        self.assertEqual(self.target.read_bytes(), EXPECTED)
-        self.assertEqual(self.evidence('quarantine'), [])
-
-    def test_an_unreadable_container_quarantines_a_bare_image(self):
-        self.image = bytes(len(self.image))
-        self.carved.write_bytes(FACTORY)
-        self.install(FACTORY)
-        self.assertFalse(self.prepare())
-        self.assertFalse(self.target.exists())
-        self.assertEqual(self.evidence('quarantine'), [FACTORY])
-        self.assertIn('the boot container is not APFS', self.output)
-
-    def test_readiness_is_cleared_before_each_attempt(self):
-        self.assertTrue(self.prepare())
-        self.image = apfs(records(**{'trustobject-current': b'not a trust bundle'}))
-        self.assertFalse(self.prepare())
-        self.assertFalse((self.run / helper.READY).exists())
-
-    def test_readiness_follows_the_installed_bytes(self):
-        self.prepare()
-        marker = str(self.run / helper.READY)
-        self.target.write_bytes(sealed(trust=OLD_TRUST))
-        self.assertFalse(calibration_ready.ready(marker))
-        self.target.write_bytes(EXPECTED)
-        self.target.chmod(0o644)
-        with self.assertRaises(OSError):
-            calibration_ready.ready(marker)
-
-    def test_an_fscl_record_is_installed_as_it_is(self):
-        self.image = apfs({'HmCA-0': b'unrelated'})
-        for fscl in FSCL_RECORDS:
-            with self.subTest(len(fscl)):
-                self.carved.write_bytes(fscl)
-                self.assertTrue(self.prepare())
-                self.assert_ready_for(fscl)
-
-    def test_an_installed_fscl_record_is_never_quarantined(self):
-        for fscl in FSCL_RECORDS:
-            self.assertIsNone(helper.installed_problem(fscl, SERIAL))
-        with self.assertRaises(helper.Refused):
-            helper.fscl_record(comb(img4(im4p(b'CALB', b'FSC2'), im4m({})), TRUST))
-
-    def test_a_sensorless_mac_installs_nothing(self):
-        self.image = apfs({'HmCA-0': b'unrelated'})
-        with self.assertRaises(helper.subprocess.CalledProcessError):
-            self.prepare()
-        self.assertFalse(self.target.exists())
-        self.assertFalse((self.run / helper.READY).exists())
+        self.assertEqual(self.rollback(), [old])
 
     def test_state_and_firmware_links_are_refused(self):
         elsewhere = self.root / 'elsewhere'
         elsewhere.mkdir()
         self.state.symlink_to(elsewhere, target_is_directory=True)
         with self.assertRaises(ValueError):
-            self.prepare()
+            self.setup()
         self.state.unlink()
         self.firmware.mkdir()
         (self.firmware / 'apple').symlink_to(elsewhere, target_is_directory=True)
         with self.assertRaises(ValueError):
-            self.prepare()
+            self.setup()
         self.assertEqual(list(elsewhere.iterdir()), [])
 
-    def test_firmware_name_comes_from_the_device_tree(self):
-        sensor = self.root / 'dt' / 'spi' / 'fingerprint@0'
-        sensor.mkdir(parents=True)
-        (sensor / 'compatible').write_bytes(b'apple,mesa-fingerprint\0')
-        (sensor / 'firmware-name').write_bytes(b'apple/mesacal-j713.bin\0')
-        self.assertEqual(helper.firmware_name(self.root / 'dt'), 'apple/mesacal-j713.bin')
-        (sensor / 'firmware-name').write_bytes(b'apple/../../escape.bin\0')
-        with self.assertRaises(ValueError):
-            helper.firmware_name(self.root / 'dt')
+    def test_files_kept_elsewhere_are_linked_into_the_search_path(self):
+        search = self.root / 'run-firmware'
+        result = self.setup(search=search)
+        link = search / 'apple' / 'mesacal-j713.bin'
+        self.assertEqual(os.readlink(link), str(self.target))
+        self.assertEqual(result['files'][0]['published'], str(link))
+        self.setup(search=search)
+        self.assertEqual(link.read_bytes(), EXPECTED)
+
+    def test_next_steps_follow_the_driver(self):
+        devices = self.root / 'devices'
+        diag = devices / '3aa600000.sep' / 'diag'
+        diag.mkdir(parents=True)
+        (diag / 'sensor_attach').write_text('not-ready\n')
+        sep_bio = self.root / 'sep-bio'
+        sep_bio.touch()
+        result = self.setup(sep_bio=sep_bio, devices=devices)
+        self.assertIn('next sensor bring-up', ' '.join(result['next_steps']))
+        (diag / 'sensor_attach').write_text('attached\n')
+        (diag / 'restore').write_text('restored\n')
+        result = self.setup(sep_bio=sep_bio, devices=devices)
+        self.assertEqual(result['next_steps'], [
+            'Nothing to do: the files are in place and the enrolled fingerprints are restored.'])
+
+
+class TriggerTests(unittest.TestCase):
+    NEEDED = PACKAGE / 'touchid-setup-needed'
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.run, self.files = self.root / 'run', self.root / 'touchid-files'
+        self.run.mkdir()
+
+    def needed(self):
+        return subprocess.run(['sh', str(self.NEEDED)], env={
+            **os.environ, 'AURORA_SEP_RUN': str(self.run),
+            'AURORA_TOUCHID_FILES': str(self.files)}).returncode == 0
+
+    def test_the_boot_condition_only_checks_that_files_exist(self):
+        self.assertTrue(self.needed())  # never ran on this Mac
+        present = self.root / 'mesacal.bin'
+        present.write_bytes(b'x')
+        self.files.write_text(f'{present}\n')
+        self.assertFalse(self.needed())
+        self.files.write_text('')  # a Mac without a reader
+        self.assertFalse(self.needed())
+        self.files.write_text(f'{present}\n{self.root / "msrk.bin"}\n')
+        self.assertTrue(self.needed())
+
+    def test_a_refusal_runs_it_once_per_boot(self):
+        self.files.write_text('')
+        (self.run / helper.REFUSED).write_text('sensor: LOAD_CALIBRATION refused with status 0x1c\n')
+        self.assertTrue(self.needed())
+        state = self.root / 'state'
+        self.assertEqual(helper.automatic(self.run, state), 'refused')
+        self.assertFalse(self.needed())
+        self.assertIsNone(helper.automatic(self.run, state))
+
+    def test_without_a_refusal_the_trigger_is_a_missing_file(self):
+        self.assertEqual(helper.automatic(self.run, self.root / 'state'), 'missing')
+        self.assertFalse((self.run / helper.AUTO_DONE).exists())
+
+
+class ReadyRepairTests(unittest.TestCase):
+    """aurora-sep-ready starts the rebuild only when the sensor did not attach
+    and the kernel log shows a refusal, and only once per boot."""
+    READY = PACKAGE / 'aurora-sep-ready'
+    REFUSAL = 'apple_sep 282600000.sep: sensor: LOAD_CALIBRATION refused with status 0x1c'
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.bin, self.run = self.root / 'bin', self.root / 'run'
+        self.bin.mkdir()
+        self.diag = self.root / 'devices' / '282600000.sep' / 'diag'
+        self.diag.mkdir(parents=True)
+        self.calls = self.root / 'calls'
+        for tool in ('journalctl', 'systemctl', 'authselect'):
+            (self.bin / tool).write_text(f'#!/bin/sh\necho "{tool} $*" >>"{self.calls}"\n'
+                                         + ('cat "$KMSG"\n' if tool == 'journalctl' else ''))
+            (self.bin / tool).chmod(0o755)
+        self.kmsg = self.root / 'kmsg'
+
+    def ready(self, attach, kmsg=''):
+        for name, value in {'touchid': 'ready', 'sensor_attach': attach,
+                            'restore': 'restored', 'matching': 'usable', 'sensor': 'online'}.items():
+            (self.diag / name).write_text(value + '\n')
+        self.kmsg.write_text(kmsg)
+        done = subprocess.run(['sh', str(self.READY)], capture_output=True, text=True, env={
+            **os.environ, 'PATH': f'{self.bin}:{os.environ["PATH"]}', 'KMSG': str(self.kmsg),
+            'AURORA_SEP_DEV': '/dev/null', 'AURORA_SEP_SYSFS': str(self.root / 'devices'),
+            'AURORA_SEP_READY_WAIT': '0', 'AURORA_SEP_RUN': str(self.run)})
+        calls = self.calls.read_text() if self.calls.exists() else ''
+        self.calls.unlink(missing_ok=True)
+        return done.returncode, calls, done.stderr
+
+    def test_an_attached_sensor_never_reads_the_log(self):
+        status, calls, _ = self.ready('attached', self.REFUSAL)
+        self.assertEqual(status, 0)
+        self.assertNotIn('journalctl', calls)
+
+    def test_a_refusal_starts_the_rebuild_once(self):
+        status, calls, err = self.ready('not-ready', self.REFUSAL + '\n')
+        self.assertEqual(status, 1)
+        self.assertIn('systemctl start --no-block aurora-touchid-setup.service', calls)
+        self.assertIn('LOAD_CALIBRATION refused', (self.run / 'calibration-refused').read_text())
+        self.assertIn('A rebuild of the Touch ID file was started', err)
+        (self.run / 'touchid-auto-rebuild').write_text('boot\n')
+        status, calls, err = self.ready('not-ready', self.REFUSAL + '\n')
+        self.assertNotIn('systemctl', calls)
+        self.assertIn('already ran this boot', err)
+
+    def test_an_attach_failure_without_a_refusal_starts_nothing(self):
+        status, calls, _ = self.ready('not-ready', 'apple_sep: sensor: the power cycle failed\n')
+        self.assertEqual(status, 1)
+        self.assertIn('journalctl', calls)
+        self.assertNotIn('systemctl', calls)
+        self.assertFalse((self.run / 'calibration-refused').exists())
 
 
 if __name__ == '__main__':
