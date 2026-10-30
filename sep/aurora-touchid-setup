@@ -710,6 +710,7 @@ DEFAULT_CALIBRATION = 'apple/mesa_calibration.bin'
 # The driver's root-key name when the board names only the calibration.
 DEFAULT_ROOT_KEY = 'apple/msrk-j700.bin'
 FIRMWARE_PATH = Path('/sys/module/firmware_class/parameters/path')
+DEFAULT_FIRMWARE = '/usr/lib/firmware'
 DIAG = Path('/sys/bus/platform/devices')
 BOOT_ID = Path('/proc/sys/kernel/random/boot_id')
 REFUSED = 'calibration-refused'    # in RUN: aurora-sep-ready saw a refusal
@@ -726,12 +727,29 @@ def log(message):
     print(f'aurora-touchid-setup: {message}', file=sys.stderr, flush=True)
 
 
+def enabled(node, tree):
+    """Whether `node` and every node above it are enabled, as the kernel
+    decides before it probes a device. The SoC device trees carry a disabled
+    fingerprint node on Macs without a built-in reader (Mac mini, Mac Studio),
+    and the boot loader disables the controller on a J700 sold without one."""
+    while True:
+        status = node / 'status'
+        if status.exists() and status.read_bytes().rstrip(b'\0') not in (b'okay', b'ok'):
+            return False
+        if node == tree or node == node.parent:
+            return True
+        node = node.parent
+
+
 def sensor_names(tree):
     """[calibration, root key] as the sensor's driver names them, from the
-    fingerprint node's firmware-name list; None without a fingerprint node."""
+    fingerprint node's firmware-name list; None without an enabled
+    fingerprint node."""
     found = set()
     for item in tree.rglob('compatible'):
         if b'apple,mesa-fingerprint' not in item.read_bytes().split(b'\0'):
+            continue
+        if not enabled(item.parent, tree):
             continue
         path = item.with_name('firmware-name')
         value = path.read_bytes() if path.exists() else b''
@@ -1056,15 +1074,18 @@ def automatic(run, state):
 
 
 def firmware_dirs():
-    """(where the files are kept, the kernel's search path when that differs)."""
+    """(where the files are kept, the kernel's search path when that differs).
+
+    The files are kept on persistent storage: /usr/lib/firmware, or
+    AURORA_TOUCHID_FIRMWARE_DIR. The kernel's custom search path is where the
+    boot puts this Mac's vendor firmware package (Arch, NixOS) and is
+    rebuilt on every boot, so it only gets links."""
     try:
         search = FIRMWARE_PATH.read_text().strip()
     except OSError:
         search = ''
-    kept = os.environ.get('AURORA_TOUCHID_FIRMWARE_DIR')
-    if kept:
-        return Path(kept), Path(search) if search else None
-    return Path(search or '/usr/lib/firmware'), None
+    kept = Path(os.environ.get('AURORA_TOUCHID_FIRMWARE_DIR') or DEFAULT_FIRMWARE)
+    return kept, Path(search) if search and Path(search) != kept else None
 
 
 def main(argv=None):

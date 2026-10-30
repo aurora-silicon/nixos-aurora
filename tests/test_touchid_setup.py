@@ -483,6 +483,33 @@ class SensorNameTests(unittest.TestCase):
             with self.subTest(value), self.assertRaises(ValueError):
                 self.names(value)
 
+    def test_a_disabled_node_or_controller_is_no_sensor(self):
+        # Mac mini and Mac Studio keep the SoC's fingerprint node disabled, and
+        # the boot loader disables the controller on a J700 without a reader.
+        for where, value in (('node', b'disabled\0'), ('controller', b'disabled\0'),
+                             ('node', b'fail\0')):
+            with self.subTest(where=where, value=value), tempfile.TemporaryDirectory() as directory:
+                tree = device_tree(Path(directory), b'apple/mesacal-j700.bin\0')
+                node = tree / 'spi' / 'fingerprint@0'
+                ((node if where == 'node' else node.parent) / 'status').write_bytes(value)
+                self.assertIsNone(helper.sensor_names(tree))
+        for value in (b'okay\0', b'ok\0'):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
+                tree = device_tree(Path(directory), b'apple/mesacal-j700.bin\0')
+                (tree / 'spi' / 'fingerprint@0' / 'status').write_bytes(value)
+                (tree / 'spi' / 'status').write_bytes(value)
+                self.assertEqual(helper.sensor_names(tree)[0], 'apple/mesacal-j700.bin')
+
+    def test_a_disabled_second_node_does_not_conflict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tree = device_tree(Path(directory))
+            second = tree / 'spi2' / 'fingerprint@0'
+            second.mkdir(parents=True)
+            (second / 'compatible').write_bytes(b'apple,mesa-fingerprint\0')
+            (second / 'firmware-name').write_bytes(b'apple/other.bin\0')
+            (second / 'status').write_bytes(b'disabled\0')
+            self.assertEqual(helper.sensor_names(tree)[0], 'apple/mesacal-j713.bin')
+
     def test_conflicting_nodes_are_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             tree = device_tree(Path(directory))
@@ -706,6 +733,30 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(result['files'][0]['published'], str(link))
         self.setup(search=search)
         self.assertEqual(link.read_bytes(), EXPECTED)
+
+    def test_files_are_kept_on_persistent_storage(self):
+        # Arch and NixOS point the kernel's search path at the vendor firmware
+        # unpacked on /run each boot: keep the files elsewhere and link them.
+        path = self.root / 'firmware_class.path'
+        cases = (('', None, '/usr/lib/firmware', None),
+                 ('/run/aurora-firmware/vendorfw\n', None, '/usr/lib/firmware',
+                  '/run/aurora-firmware/vendorfw'),
+                 ('/run/aurora-firmware/vendorfw', '/var/lib/aurora-sep/firmware',
+                  '/var/lib/aurora-sep/firmware', '/run/aurora-firmware/vendorfw'),
+                 ('/usr/lib/firmware', None, '/usr/lib/firmware', None))
+        for value, kept, firmware, search in cases:
+            with self.subTest(value=value, kept=kept):
+                path.write_text(value)
+                env = {'AURORA_TOUCHID_FIRMWARE_DIR': kept} if kept else {}
+                with patch.object(helper, 'FIRMWARE_PATH', path), \
+                        patch.dict(os.environ, env, clear=False):
+                    if not kept:
+                        os.environ.pop('AURORA_TOUCHID_FIRMWARE_DIR', None)
+                    self.assertEqual(helper.firmware_dirs(),
+                                     (Path(firmware), Path(search) if search else None))
+        with patch.object(helper, 'FIRMWARE_PATH', self.root / 'absent'):
+            os.environ.pop('AURORA_TOUCHID_FIRMWARE_DIR', None)
+            self.assertEqual(helper.firmware_dirs(), (Path('/usr/lib/firmware'), None))
 
     def test_next_steps_follow_the_driver(self):
         devices = self.root / 'devices'
