@@ -48,6 +48,7 @@
         kernel = pkgs.linux-asahi.kernel;
         mesa = pkgs.mesa;
         speakerguardd = pkgs.speakerguardd;
+        mutter = pkgs.mutter;
         bankstown = pkgs.bankstown-lv2;
         neo-platform = pkgs.aurora-neo-platform-config;
         aurora-bless = pkgs.aurora-bless;
