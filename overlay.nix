@@ -100,18 +100,29 @@ in {
   libfprint = prev.libfprint.overrideAttrs (old: {
     src = source "libfprint";
     version = pins.libfprint.version;
-    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.umockdev ];
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.umockdev final.python3 ];
     nativeInstallCheckInputs = [ final.umockdev (final.python3.withPackages (p: [ p.pygobject3 p.pycairo ])) ];
     patches = (old.patches or [ ]) ++ map stableFile [
       ./sep/libfprint-1.94.100-apple-sep.patch
       ./sep/0002-aurora-report-unusable-captures-as-retries.patch
       ./sep/0003-hide-lid-covered-readers-while-the-lid-is-closed.patch
+      ./sep/0004-aurora-refuse-unbound-enrollment.patch
+      ./sep/0005-aurora-support-v4-and-v5.patch
     ];
     postPatch = (old.postPatch or "") + ''
       install -Dm644 ${stableFile ./sep/apple-sep.h} aurora-uapi/linux/apple-sep.h
+      ${final.python3.interpreter} ${stableFile ./sep/test_interface.py} libfprint/drivers/aurora/aurora.c aurora-uapi/linux/apple-sep.h
     '';
     preConfigure = (old.preConfigure or "") + ''
       export CFLAGS="''${CFLAGS:-} -I$PWD/aurora-uapi"
+    '';
+  });
+  fprintd = prev.fprintd.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ map stableFile [
+      ./sep/0001-preserve-print-on-device-delete-failure.patch
+    ];
+    postPatch = (old.postPatch or "") + ''
+      ${final.python3.interpreter} ${stableFile ./sep/test_account_gate.py} src/device.c
     '';
   });
   aurora-firstboot = final.callPackage ./firstboot.nix { };
