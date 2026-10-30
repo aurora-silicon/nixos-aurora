@@ -48,12 +48,14 @@
         kernel = pkgs.linux-asahi.kernel;
         mesa = pkgs.mesa;
         rusticl = pkgs.aurora-rusticl;
+        lavapipe = pkgs.aurora-lavapipe;
         graphics = pkgs.buildEnv {
           name = "aurora-graphics-interfaces";
-          paths = [ pkgs.mesa pkgs.mesa.dev pkgs.aurora-rusticl ];
+          paths = [ pkgs.mesa pkgs.mesa.dev pkgs.aurora-rusticl pkgs.aurora-lavapipe ];
           pathsToLink = [ "/lib" "/include" "/etc" "/share" ];
           postBuild = ''
             cmp ${pkgs.mesa}/.aurora-mesa-commit ${pkgs.aurora-rusticl}/.aurora-mesa-commit
+            cmp ${pkgs.mesa}/.aurora-mesa-commit ${pkgs.aurora-lavapipe}/.aurora-mesa-commit
             cp ${pkgs.mesa}/.aurora-mesa-commit $out/.aurora-mesa-commit
           '';
         };
@@ -72,6 +74,7 @@
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;
       checks.${system} = {
+      fex-overlay-upgrade = import ./checks/fex-overlay-upgrade.nix { inherit pkgs; };
       flatpak-sandbox = pkgs.runCommand "aurora-flatpak-build-sandbox" {
         requiredSystemFeatures = [ "uid-range" ];
         nativeBuildInputs = [ pkgs.bubblewrap ];
@@ -102,6 +105,13 @@
                 && value.pkgs.mesa.opencl.outPath == value.pkgs.aurora-rusticl.outPath
                 && value.pkgs.mesa.auroraCommit == value.pkgs.aurora-rusticl.auroraCommit
                 && lib.elem value.pkgs.mesa.opencl config.hardware.graphics.extraPackages;
+              "CPU Vulkan is installed from the native Mesa pin" =
+                value.pkgs.mesa.auroraCommit == value.pkgs.aurora-lavapipe.auroraCommit
+                && lib.elem value.pkgs.aurora-lavapipe config.hardware.graphics.extraPackages;
+              "FEX switches stop and remount the immutable layer" =
+                config.systemd.services.aurora-fex-mesa.stopIfChanged
+                && config.systemd.services.aurora-fex-mesa.restartIfChanged
+                && lib.elem config.aurora.fexMesa.package config.systemd.services.aurora-fex-mesa.restartTriggers;
               "Flatpak uses the Aurora repository" = config.services.flatpak.enable
                 && config.aurora.flatpak.enable
                 && config.aurora.flatpak.package.commit == pkgs.aurora-flatpak-gl.commit

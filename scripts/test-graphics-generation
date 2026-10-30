@@ -23,6 +23,9 @@ ldd "$profile/lib/libRusticlOpenCL.so.1.0.0" | tee "$proof/rusticl-ldd.txt"
 ! grep -F 'not found' "$proof/rusticl-ldd.txt"
 OCL_ICD_VENDORS="$profile/etc/OpenCL/vendors" clinfo --list | tee "$proof/clinfo.txt"
 grep -i rusticl "$proof/clinfo.txt"
+VK_DRIVER_FILES="$profile/share/vulkan/icd.d/lvp_icd.aarch64.json" \
+  vulkaninfo --summary > "$proof/lavapipe.txt"
+grep -i llvmpipe "$proof/lavapipe.txt"
 nix-env --profile "$profile" --list-generations > "$proof/generations.txt"
 nix-env --profile "$profile" --rollback
 readlink -f "$profile" > "$proof/rollback.txt"

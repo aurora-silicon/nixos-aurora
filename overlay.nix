@@ -252,6 +252,11 @@ in {
     # Preserve the conventional interface without retaining LLVM in GL's closure.
     passthru = old.passthru // { opencl = final.aurora-rusticl; };
   });
+  aurora-lavapipe = final.callPackage ./lavapipe.nix {
+    mesa = prev.mesa;
+    src = source "mesa-aurora";
+    commit = pins.mesa-aurora.commit;
+  };
   aurora-rusticl = final.callPackage ./rusticl.nix {
     mesa = prev.mesa;
     src = source "mesa-aurora";
