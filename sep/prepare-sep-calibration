@@ -63,19 +63,32 @@ def atomic_write(path, data, mode=0o600):
 
 
 def firmware_name(tree):
+    """The calibration file the sensor's driver loads.
+
+    `firmware-name` is a string list. Most sensors name only the calibration;
+    some (J616s) also name the MSRk record after it. Every entry must be a
+    plain file under apple/. The calibration is the entry whose name starts
+    with "mesa", or the first entry when none does.
+    """
     names = set()
     for item in tree.rglob('compatible'):
         if b'apple,mesa-fingerprint' not in item.read_bytes().split(b'\0'):
             continue
-        name = item.with_name('firmware-name')
-        if name.exists():
-            names.add(name.read_bytes().rstrip(b'\0').decode('ascii'))
+        path = item.with_name('firmware-name')
+        if path.exists():
+            names.add(calibration_entry(path.read_bytes()))
     if len(names) > 1:
         raise ValueError('conflicting fingerprint firmware names')
-    name = next(iter(names), 'apple/mesa_calibration.bin')
-    if not re.fullmatch(r'apple/[A-Za-z0-9_.-]+\.bin', name):
+    return next(iter(names), 'apple/mesa_calibration.bin')
+
+
+def calibration_entry(value):
+    entries = [entry.decode('ascii') for entry in value.split(b'\0') if entry]
+    if not entries or not all(re.fullmatch(r'apple/[A-Za-z0-9_.-]+\.bin', entry)
+                              for entry in entries):
         raise ValueError('unsafe fingerprint firmware name')
-    return name
+    return next((entry for entry in entries if entry.startswith('apple/mesa')),
+                entries[0])
 
 
 def prepare(device, partuuid, state, firmware, name, extractor):
