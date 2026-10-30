@@ -37,6 +37,7 @@ let
     commit = pins.mesa-aurora.commit;
   }).overrideAttrs (old: {
     pname = "aurora-mesa-compiler-tools";
+    outputs = [ "out" ];
     configurePhase = ''
       runHook preConfigure
       meson setup tools --prefix="$out" --libdir=lib --buildtype=release "''${mesonFlags[@]}" \
