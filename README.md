@@ -20,6 +20,8 @@ The owner's first password sign-in at the greeter also becomes the disk password
 
 Image basics: `scripts/build-image` runs `scripts/check-basics.py` on the installed root, reading the system closure through its store links. The build fails unless the image has a generated UTF-8 default locale (`i18n.defaultLocale` in the `LOCALE_ARCHIVE` the system uses), its desktop's terminal (Console or Konsole) with a launcher, GNOME's backgrounds or Plasma's wallpapers, NetworkManager enabled with the desktop's network settings, logind's lid-close suspend left in place, and a GRUB that finds /boot by filesystem UUID on the startup disk with hinted lookups only.
 
+Remote login: every image includes the OpenSSH server, but it is off. No unit starts `sshd` or generates host keys at boot, and the firewall keeps port 22 closed. `sudo systemctl start sshd` starts it without a rebuild (host keys are made on first start); remote clients also need `sudo nixos-firewall-tool open tcp 22`, which lasts until the firewall reloads, or `services.openssh.openFirewall = true;`. `aurora.openssh.startAtBoot = true;` starts the server at every boot.
+
 A future installed configuration imports `nixosModules.default` alongside the pinned Apple Silicon module, uses `overlays.default`, and supplies the target machine's disk and account configuration. The checked image module describes the native installer's ESP + boot + root layout; it is not a configuration to apply to an unrelated existing machine.
 
 

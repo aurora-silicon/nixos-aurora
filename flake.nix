@@ -91,11 +91,20 @@
         kdeRekeyed = kdeWith { aurora.firstboot.passwordHooks = false; };
         kdeGerman = kdeWith { services.xserver.xkb.layout = "de"; };
         kdeGermanFrenchConsole = kdeWith { services.xserver.xkb.layout = "de"; console.keyMap = "fr"; };
+        kdeSshAtBoot = kdeWith { aurora.openssh.startAtBoot = true; };
         # Graphical first boot: each failed expectation is reported by name.
         desktopExpectations = {
           "desktop images boot with the spinner splash" = kde.boot.plymouth.enable && gnome.boot.plymouth.enable
             && kde.boot.plymouth.theme == "spinner" && gnome.boot.plymouth.theme == "spinner";
           "minimal images boot without a splash" = !minimal.boot.plymouth.enable;
+          "every image has an OpenSSH server that starts only on request" = lib.all (c:
+            c.services.openssh.enable && !c.services.openssh.startWhenNeeded
+            && c.systemd.services.sshd.wantedBy == [ ] && c.systemd.services.sshd-keygen.wantedBy == [ ]
+            && lib.elem "sshd-keygen.service" c.systemd.services.sshd.wants
+            && !(lib.elem 22 c.networking.firewall.allowedTCPPorts)) [ kde gnome minimal ];
+          "aurora.openssh.startAtBoot starts the OpenSSH server at boot" =
+            lib.elem "multi-user.target" kdeSshAtBoot.systemd.services.sshd.wantedBy
+            && lib.elem "multi-user.target" kdeSshAtBoot.systemd.services.sshd-keygen.wantedBy;
           "desktop images start graphical.target" = kde.systemd.defaultUnit == "graphical.target"
             && gnome.systemd.defaultUnit == "graphical.target";
           "the splash quits only after first-boot setup" = !(lib.elem "plymouth-quit.service" firstboot.after)
