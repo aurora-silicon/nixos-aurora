@@ -30,6 +30,7 @@ NEEDS = {
     'uboot': ['uboot-aurora'],
     'mesa': ['mesa-aurora'],
     'rusticl': ['mesa-aurora'],
+    'lavapipe': ['mesa-aurora'],
     'graphics': ['mesa-aurora'],
     'fex-mesa': ['mesa-aurora'],
     'flatpak-gl': ['mesa-aurora'],

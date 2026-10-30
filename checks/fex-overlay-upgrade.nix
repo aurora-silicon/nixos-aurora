@@ -2,7 +2,7 @@
 # stand-in layers; the guest Mesa build independently validates the real ELFs.
 { pkgs }:
 let
-  commit = "fixture";
+  commit = pkgs.mesa.auroraCommit;
   layer = name: (pkgs.runCommand "fex-layer-${name}" { passthru = { inherit commit; }; } ''
     mkdir -p $out/usr
     echo ${name} > $out/usr/aurora-layer
@@ -13,10 +13,6 @@ in pkgs.testers.runNixOSTest {
   name = "aurora-fex-overlay-upgrade";
   nodes.machine = { lib, ... }: {
     imports = [ ../modules/fex-mesa.nix ];
-    nixpkgs.overlays = [ (_: prev: {
-      mesa = prev.mesa // { auroraCommit = commit; };
-      aurora-fex-mesa = old;
-    }) ];
     aurora.fexMesa.package = old;
     systemd.tmpfiles.rules = [ "d /var/lib/aurora/fex/rootfs/usr 0755 root root -" ];
     specialisation.new-layer.configuration.aurora.fexMesa.package = lib.mkForce new;
