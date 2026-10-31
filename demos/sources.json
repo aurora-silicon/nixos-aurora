@@ -3,7 +3,6 @@
     "repository": "https://github.com/aurora-silicon/omarchy-ane",
     "commit": "1adf2ee392ef7d3d64a24743d293dbc1670f0e8b",
     "version": "0.1.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/omarchy-ane/tar.gz/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b",
     "archive_root": "omarchy-ane-1adf2ee392ef7d3d64a24743d293dbc1670f0e8b",
     "sha256": "c91630cb3c0579d2c9df49f88b8e0fcf467812587ee71da0fddfeae3bfd77229",
     "local_archive": "libane-1adf2ee392ef7d3d64a24743d293dbc1670f0e8b.tar.gz",
