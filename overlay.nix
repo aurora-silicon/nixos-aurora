@@ -312,11 +312,14 @@ in {
       p.argcomplete p.dbus-python p.python-dbusmock p.pygobject3
     ])) ] ++ builtins.filter (input: input != final.python3) old.nativeBuildInputs;
     buildInputs = old.buildInputs ++ [ final.gtk3 final.umockdev final.libevdev ];
-    nativeCheckInputs = [ final.xvfb-run final.dbus final.pipewire final.wireplumber ];
+    nativeCheckInputs = [ final.xvfb-run final.dbus final.pipewire final.wireplumber final.dejavu_fonts ];
     doCheck = true;
     checkPhase = ''
       runHook preCheck
       export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+      export FONTCONFIG_FILE=${final.makeFontsConf { fontDirectories = [ final.dejavu_fonts ]; }}
+      # Tests run before wrapGAppsHook wraps installed programs.
+      export XDG_DATA_DIRS="''${GSETTINGS_SCHEMAS_PATH:-}:''${XDG_DATA_DIRS:-}"
       export XDG_RUNTIME_DIR=$(mktemp -d)
       trap 'rm -rf "$XDG_RUNTIME_DIR"' EXIT
       xvfb-run -a meson test --print-errorlogs
