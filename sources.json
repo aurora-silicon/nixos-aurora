@@ -109,12 +109,12 @@
   },
   "upower-aurora": {
     "repository": "https://github.com/aurora-silicon/upower",
-    "commit": "a272302411c68953c97018e0901d5cb6a2ae6250",
+    "commit": "ec0b67ff412d97b16629614edc4decbb34d05983",
     "version": "1.91.5",
-    "source_url": "https://codeload.github.com/aurora-silicon/upower/tar.gz/a272302411c68953c97018e0901d5cb6a2ae6250",
-    "archive_root": "upower-a272302411c68953c97018e0901d5cb6a2ae6250",
-    "sha256": "e78f885f7bdd3d8b7f673a2ee12d5e28b3719b491b9c2c48a1c8ee4143d99882",
-    "nix_hash": "sha256-54+IX3vdPYt/Zzou4S1eKLNxm0kbnCxIocjuQUPZmII="
+    "source_url": "https://codeload.github.com/aurora-silicon/upower/tar.gz/ec0b67ff412d97b16629614edc4decbb34d05983",
+    "archive_root": "upower-ec0b67ff412d97b16629614edc4decbb34d05983",
+    "sha256": "6758f97ce858a51919755a206387b7ca8795793fa62ebd8b8e5ae5fe3fbe9784",
+    "nix_hash": "sha256-Z1j5fOhYpRkZdVogY4e3yoeVeT+mLr2Ljlrl/j++l4Q="
   },
   "libfprint": {
     "repository": "https://gitlab.freedesktop.org/libfprint/libfprint",
