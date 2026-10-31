@@ -1,4 +1,4 @@
-{ lib, clangStdenv, gnustep-base, gnustep-make, gnustep-libobjc, python3, src, baseSrc, version }:
+{ lib, clangStdenv, gnustep-base, gnustep-make, gnustep-libobjc, python3, gitMinimal, src, baseSrc, version }:
 let
   # Base 1.29 in nixpkgs lacks NSData URL options and sorted JSON keys.
   # Keep this newer Foundation private to the compiler, with the same source
@@ -37,6 +37,7 @@ clangStdenv.mkDerivation {
   ];
   buildFlags = [ "build/mil-hwxc" ];
   doCheck = true;
+  nativeCheckInputs = [ gitMinimal ];
   checkTarget = "test-h13";
   postCheck = "python3 tests/test_h14_fixture_programs.py build/mil-hwxc";
   installPhase = ''
