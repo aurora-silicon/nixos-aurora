@@ -100,8 +100,8 @@
               "Aurora artwork is installed on every profile" =
                 lib.elem value.pkgs.aurora-logos config.environment.systemPackages;
               "Plasma About uses the immutable Aurora logo" = config.aurora.desktop != "kde"
-                || lib.hasInfix "${value.pkgs.aurora-logos}/share/pixmaps/system-logo-white.png"
-                  config.environment.etc."xdg/kcm-about-distrorc".text;
+                || lib.elem "LogoPath=${value.pkgs.aurora-logos}/share/pixmaps/system-logo-white.png"
+                  (lib.splitString "\n" config.environment.etc."xdg/kcm-about-distrorc".text);
               "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
               "PipeWire and WirePlumber use the pinned audio and UCM profiles" =
                 lib.elem value.pkgs.asahi-audio config.services.pipewire.configPackages
