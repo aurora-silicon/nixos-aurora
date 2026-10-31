@@ -2,8 +2,8 @@
 
 Upstream review: https://github.com/aurora-silicon/speakerguardd/pull/27
 
-All three draft packaging PRs pin the same candidate, `08921af29ca00432824efc6c899a15ff89abb3bd`.
-Source archive SHA-256: `4113e86f2ed19b92dcce366cbc9a1d6bb3e0edb01e944e6164e6193587bc68bf`.
+All three draft packaging PRs pin the same candidate, `d7efb9266747c37bea09aec1c5573fe4a53d4e45`.
+Source archive SHA-256: `fa0dbde72ba43f4bdd9d4ccb238d6b5ee55c03647a0ae47ed90ad3c8593846e5`.
 
 | Distribution | Package version | Native integration |
 | --- | --- | --- |
