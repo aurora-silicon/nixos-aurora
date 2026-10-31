@@ -37,12 +37,12 @@
   },
   "speakerguardd": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "34aeed9085ad0f66cb8f266f997e11dd781470a6",
+    "commit": "ef36a26171483d6d81c25c5247ecdb824512c459",
     "version": "0.1.12",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/34aeed9085ad0f66cb8f266f997e11dd781470a6",
-    "archive_root": "speakerguardd-34aeed9085ad0f66cb8f266f997e11dd781470a6",
-    "sha256": "726c7e7062297fabac79a547d779c643221369f53dff34d332c4a2ef846d7dbb",
-    "nix_hash": "sha256-cmx+cGIpf6useaVH13nGQyITafU9/zTTMsSi74Rtfbs="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/ef36a26171483d6d81c25c5247ecdb824512c459",
+    "archive_root": "speakerguardd-ef36a26171483d6d81c25c5247ecdb824512c459",
+    "sha256": "304fa6dd1f5641a11f24b3ef7e90d35252dc448d8f38920998ec242bab1486bd",
+    "nix_hash": "sha256-ME+m3R9WQaEfJLPvfpDTUlLcRI2POJIJmOwkK6sUhr0="
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",
