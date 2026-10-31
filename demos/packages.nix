@@ -34,6 +34,9 @@ let
     installPhase = ''
       mkdir -p $out/bin $out/share/aurora-models $out/share/licenses/aurora-models
       cp models.json export_rnnoise.py $out/share/aurora-models/
+      sed -i '1{/^#!/d;}' $out/share/aurora-models/export_rnnoise.py
+      install -Dm644 aurora-model-fetch.1 $out/share/man/man1/aurora-model-fetch.1
+      install -Dm644 models-README $out/share/doc/aurora-models/README
       cp LICENSE capture-ns-LICENSE $out/share/licenses/aurora-models/
       substitute aurora-model-fetch $out/bin/aurora-model-fetch \
         --replace-fail '@DATA@' "$out/share/aurora-models"
