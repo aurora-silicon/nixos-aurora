@@ -444,6 +444,11 @@ in {
     checkPhase = "sh tests/run.sh";
     installFlags = [ "PREFIX=$(out)" ];
   };
+  aurora-diag = final.callPackage ./aurora-diag.nix {
+    src = source "aurora-diag";
+    version = pins.aurora-diag.version;
+  };
+
   aurora-bless = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
     cargoBuildFlags = [ "-p" "asahi-bless" ];
     cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "asahi-nvram" ];
