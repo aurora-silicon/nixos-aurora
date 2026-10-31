@@ -48,6 +48,7 @@ NEEDS = {
     'bankstown': ['bankstown'],
     'neo-platform': ['aurora-neo-platform-config'],
     'aurora-bless': ['aurora-bless'],
+    'camera-denoise': ['camera-denoise'],
 }
 
 

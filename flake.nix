@@ -71,6 +71,7 @@
         bankstown = pkgs.bankstown-lv2;
         neo-platform = pkgs.aurora-neo-platform-config;
         aurora-bless = pkgs.aurora-bless;
+        camera-denoise = pkgs.aurora-camera-denoise;
       };
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;
@@ -113,6 +114,10 @@
                 config.systemd.services.aurora-fex-mesa.stopIfChanged
                 && config.systemd.services.aurora-fex-mesa.restartIfChanged
                 && lib.elem config.aurora.fexMesa.package config.systemd.services.aurora-fex-mesa.restartTriggers;
+              "the camera denoise filter starts with every PipeWire session" = config.aurora.cameraDenoise.enable
+                && config.services.pipewire.enable
+                && lib.elem value.pkgs.aurora-camera-denoise config.systemd.packages
+                && lib.elem "pipewire.service" config.systemd.user.services.aurora-camera-denoise.wantedBy;
               "Flatpak uses the Aurora repository" = config.services.flatpak.enable
                 && config.aurora.flatpak.enable
                 && config.aurora.flatpak.package.commit == pkgs.aurora-flatpak-gl.commit

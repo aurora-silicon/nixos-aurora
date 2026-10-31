@@ -402,6 +402,35 @@ in {
     checkPhase = "sh tests/run.sh";
     installFlags = [ "PREFIX=$(out)" ];
   };
+  # The camera denoise filter, a PipeWire user daemon. Backends load from the
+  # package's own lib/aurora-camera-denoise, so a Neural Engine backend has to
+  # be built into this derivation. Settings come from /etc, which
+  # modules/camera-denoise.nix writes.
+  aurora-camera-denoise = final.stdenv.mkDerivation {
+    pname = "aurora-camera-denoise";
+    version = pins.camera-denoise.version;
+    src = source "camera-denoise";
+    nativeBuildInputs = [ final.meson final.ninja final.pkg-config ];
+    buildInputs = [ final.pipewire ];
+    mesonFlags = [
+      "-Ddaemon=enabled"
+      "-Dsysconfdir=/etc"
+      "-Dsystemduserunitdir=${placeholder "out"}/lib/systemd/user"
+    ];
+    doCheck = true;
+    postInstall = ''
+      substituteInPlace $out/lib/systemd/user/aurora-camera-denoise.service \
+        --replace-fail "ExecReload=/bin/kill" "ExecReload=${final.coreutils}/bin/kill"
+    '';
+    passthru.commit = pins.camera-denoise.commit;
+    meta = {
+      description = "PipeWire filter that denoises the built-in camera in low light";
+      homepage = "https://github.com/aurora-silicon/camera-denoise";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-camera-denoise";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
   aurora-bless = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
     cargoBuildFlags = [ "-p" "asahi-bless" ];
     cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "asahi-nvram" ];
