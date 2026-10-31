@@ -119,5 +119,29 @@ class EnginePolicyTests(unittest.TestCase):
                 self.assertFalse(result.stdout)
 
 
+class FetchFailureBoundaryTests(unittest.TestCase):
+    def test_failed_model_fetch_never_starts_a_consumer(self):
+        for name in ('aurora-capture-ns', 'whisper.cpp-aurora'):
+            with self.subTest(consumer=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                marker = root / 'consumer-started'
+                fetcher = root / 'fetch'
+                fetcher.write_text(f'#!{sys.executable}\nimport sys\nsys.exit(7)\n')
+                fetcher.chmod(0o755)
+                consumer = root / 'consumer'
+                consumer.write_text(f'#!{sys.executable}\nfrom pathlib import Path\nPath({str(marker)!r}).touch()\n')
+                consumer.chmod(0o755)
+                wrapper = root / 'wrapper'
+                text = (DATA / name).read_text().replace('@FETCH@', str(fetcher))
+                text = text.replace('@CLI@', str(consumer)).replace('@LAUNCHER@', str(consumer))
+                wrapper.write_text(text)
+                args = ['--engine', 'cpu']
+                args += ['--source', 'alsa_input.example', '--model', 'rnnoise'] if name == 'aurora-capture-ns' else ['-f', 'file.wav']
+                result = subprocess.run([sys.executable, str(wrapper), *args], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('model fetch failed', result.stderr)
+                self.assertNotIn('Traceback', result.stderr)
+                self.assertFalse(marker.exists())
+
 if __name__ == '__main__':
     unittest.main()

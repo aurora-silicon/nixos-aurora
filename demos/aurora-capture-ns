@@ -16,7 +16,10 @@ if '-h' not in rest and '--help' not in rest:
     if not args.model:
         parser.error('--model rnnoise or --model df3 is required')
     if '--print-config' not in rest:
-        model = subprocess.check_output(['@FETCH@', args.model], text=True).strip()
+        try:
+            model = subprocess.check_output(['@FETCH@', args.model], text=True).strip()
+        except (OSError, subprocess.CalledProcessError):
+            parser.exit(1, 'aurora-capture-ns: model fetch failed; no source started\n')
         os.environ['AURORA_RNNOISE_MODEL' if args.model == 'rnnoise' else 'AURORA_DF_MODEL'] = model
     print('engine=cpu (RNNoise/libDF; native ANE model unavailable)', file=sys.stderr)
 os.environ['AURORA_RNNOISE_LIBRARY'] = '@RNNOISE@'

@@ -5,7 +5,70 @@
     "version": "0.1.0",
     "source_url": "https://codeload.github.com/aurora-silicon/omarchy-ane/tar.gz/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b",
     "archive_root": "omarchy-ane-1adf2ee392ef7d3d64a24743d293dbc1670f0e8b",
-    "sha256": "15921bc7d6f248bc2f5fdecb17bb7728d453aa7e19bca383d452bd923b8e5c7a"
+    "sha256": "c91630cb3c0579d2c9df49f88b8e0fcf467812587ee71da0fddfeae3bfd77229",
+    "local_archive": "libane-1adf2ee392ef7d3d64a24743d293dbc1670f0e8b.tar.gz",
+    "source_files": [
+      {
+        "path": "LICENSE",
+        "url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/LICENSE",
+        "sha256": "3856004792878580c69abfdb9057213a6685b587892fdca1e4a6606430e782b7"
+      },
+      {
+        "path": "ane/src/uapi/drm/ane_accel.h",
+        "url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/ane/src/uapi/drm/ane_accel.h",
+        "sha256": "ce6190023299ff533865e97ff9deb452135f4fd62752e28834546fc76cbb5a0c"
+      },
+      {
+        "path": "libane/Makefile",
+        "url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/libane/Makefile",
+        "sha256": "b0985b35bdf334eb5892fb21aae7c6b145908c4015067c2d8a526e909f029feb"
+      },
+      {
+        "path": "libane/ane.c",
+        "url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/libane/ane.c",
+        "sha256": "41ce96fbf46ece34bfeccb532e918a6b03162f2ec9ef01bf1840c0c15ad97de9"
+      },
+      {
+        "path": "libane/ane.h",
+        "url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/libane/ane.h",
+        "sha256": "4f63ebf4f6cef4f1ad55fd0e03678d0c4d38a58790643c693ad0e58170ff7417"
+      },
+      {
+        "path": "libane/ane_bind.h",
+        "url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/libane/ane_bind.h",
+        "sha256": "3b9e3301ffd6d63cddfab06429934db8f7d3d577279eb59ab59858fa3e9bed5e"
+      },
+      {
+        "path": "libane/ane_f16.h",
+        "url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/libane/ane_f16.h",
+        "sha256": "dc0005ae05095c35c865d8c7ac252f5d039deeab2374028aebf60211aa025dd4"
+      },
+      {
+        "path": "libane/ane_fallback.c",
+        "url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/libane/ane_fallback.c",
+        "sha256": "c607b94c779bc789eb79f970efa4f9f26808742ba48d73762cd8734185d2a4f3"
+      },
+      {
+        "path": "libane/ane_m2.c",
+        "url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/libane/ane_m2.c",
+        "sha256": "ad1663e8dbc369df7775eb629dbcdfc9ad6874f1f2d4484628a90cc91f7067b1"
+      },
+      {
+        "path": "libane/ane_m2.h",
+        "url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/libane/ane_m2.h",
+        "sha256": "39d2f4420f1b9e86a7c24ed928c892862f7b93f259606a2aaa38a0562c93fb9f"
+      },
+      {
+        "path": "libane/ane_sha256.c",
+        "url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/libane/ane_sha256.c",
+        "sha256": "693a72a58f1822b5c0fccc0f844f7fd233d0dcbc0318db0c462822a3b9ce86a9"
+      },
+      {
+        "path": "libane/ane_sha256.h",
+        "url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/libane/ane_sha256.h",
+        "sha256": "f7fda7b2c34c54c47d280feb7a622af6b27255d01a295536c304c4b12aeab56b"
+      }
+    ]
   },
   "rnnoise": {
     "repository": "https://github.com/xiph/rnnoise",

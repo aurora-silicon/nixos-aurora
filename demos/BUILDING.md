@@ -41,3 +41,9 @@ No new package is added to an image profile automatically. The existing
 camera package remains in its original packaging PR; this extension only
 makes it opt-in until a public effects source pin is available. No build uses
 a private checkout or downloads an Apple-compiled program.
+
+Libane uses the source-only archive in demos/, with per-file immutable URLs and
+SHA-256 hashes in demos/sources.json. Reproduce it with
+`python3 demos/rebuild-libane-source.py --output /tmp/libane-source.tar.gz`.
+The full upstream archive is not a package input: unrelated compiled fixtures
+and firmware are excluded.

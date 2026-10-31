@@ -2,7 +2,10 @@
 let
   inherit (pkgs) lib;
   pins = builtins.fromJSON (builtins.readFile ./sources.json);
-  source = name: pkgs.fetchurl {
+  source = name: if pins.${name} ? local_archive then
+    let path = ./. + "/${pins.${name}.local_archive}";
+    in assert builtins.hashFile "sha256" path == pins.${name}.sha256; path
+    else pkgs.fetchurl {
     url = pins.${name}.source_url;
     sha256 = pins.${name}.sha256;
     name = "${name}-${pins.${name}.commit}.tar.gz";

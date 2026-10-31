@@ -52,8 +52,8 @@ NEEDS = {
     'aurora-models': [],
     'rnnoise': ['demo-rnnoise'],
     'libdf': ['demo-libdf'],
-    'capture-ns': ['demo-aurora-capture-ns', 'demo-libane', 'demo-rnnoise', 'demo-libdf'],
-    'whisper-cpp-aurora': ['demo-whisper.cpp-aurora', 'demo-libane'],
+    'capture-ns': ['demo-aurora-capture-ns', 'demo-rnnoise', 'demo-libdf'],
+    'whisper-cpp-aurora': ['demo-whisper.cpp-aurora'],
 }
 
 
@@ -66,6 +66,8 @@ def archives():
         name = f'{key}-{pin["commit"]}.tar.gz'
         result[key] = (name, ([f'{mirror}/{name}'] if mirror else []) + [pin['source_url']], pin['sha256'])
     for key, pin in json.loads((ROOT / 'demos/sources.json').read_text()).items():
+        if pin.get('local_archive'):
+            continue
         name = f'{key}-{pin["commit"]}.tar.gz'
         result['demo-' + key] = (name, [pin['source_url']], pin['sha256'])
     bindgen = json.loads((ROOT / 'bindgen/sources.json').read_text())

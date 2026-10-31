@@ -16,7 +16,7 @@ if '-h' in rest or '--help' in rest or not rest:
 # A compiled local encoder bundle is an explicit user choice. No package ships
 # or guesses an Apple program or claims an uncompiled model works on the ANE.
 bundle = os.environ.get('WHISPER_ANE_ENCODER', '')
-ane = bool(bundle and (Path(bundle) / 'package/manifest.json').is_file())
+ane = args.engine in ('auto', 'ane') and bool(bundle and (Path(bundle) / 'package/manifest.json').is_file())
 engine = args.engine
 if engine == 'auto':
     engine = 'ane' if ane else 'gpu'
@@ -40,7 +40,10 @@ if engine in ('cpu', 'ane') and '-ng' not in rest and '--no-gpu' not in rest:
 if engine == 'gpu' and ('-ng' in rest or '--no-gpu' in rest):
     parser.error('--no-gpu conflicts with the selected GPU engine; use --engine cpu')
 if not any(arg in ('-m', '--model') or arg.startswith('--model=') for arg in rest):
-    model = subprocess.check_output(['@FETCH@', 'whisper-tiny.en'], text=True).strip()
+    try:
+        model = subprocess.check_output(['@FETCH@', 'whisper-tiny.en'], text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        parser.exit(1, 'whisper.cpp-aurora: model fetch failed; transcription not started\n')
     rest += ['--model', model]
 print(f'engine={engine}' + (' (native adapter reports any CPU fallback)' if engine == 'ane' else ''), file=sys.stderr)
 os.execv('@CLI@', ['@CLI@', *rest])
