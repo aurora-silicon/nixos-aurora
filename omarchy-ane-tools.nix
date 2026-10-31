@@ -43,6 +43,7 @@ stdenv.mkDerivation {
     install -Dm644 ${./ane/70-omarchy-ane.rules} "$out/lib/udev/rules.d/70-omarchy-ane.rules"
     install -Dm644 ${./ane/omarchy-ane-tools.sysusers} "$out/lib/sysusers.d/omarchy-ane-tools.conf"
     python3 ${./ane/test-firmware.py} "$out/bin/omarchy-ane-firmware-fetch"
+    test ! -d "$out/bin/__pycache__"
     runHook postInstall
   '';
   meta = {
