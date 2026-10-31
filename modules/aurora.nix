@@ -51,7 +51,6 @@
     # Quiet by default: failures still reach the console, and systemd shows
     # status only when a unit fails or stalls.
     boot.consoleLogLevel = lib.mkDefault 3;
-    boot.initrd.verbose = lib.mkDefault false;
     boot.kernelParams = [ "quiet" "rd.udev.log_level=3" "udev.log_level=3" "systemd.show_status=auto" ];
     # Desktop images boot to a splash; first boot asks for the disk password
     # on it, as every later boot does. The spinner theme needs no ACPI BGRT

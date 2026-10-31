@@ -42,7 +42,8 @@ NEEDS = {
     'avd-fw': ['avd-fw'],
     'upower': ['upower-aurora'],
     'speakerguardd': ['speakerguardd'],
-    'mutter': [],
+    'mutter': ['mutter'],
+    'gnome-shell': ['mutter'],
     'speakersafetyd': [],
     'bankstown': ['bankstown'],
     'neo-platform': ['aurora-neo-platform-config'],
@@ -56,7 +57,7 @@ def archives():
     mirror = os.environ.get('AURORA_SOURCE_MIRROR', MIRROR).rstrip('/')
     result = {}
     for key, pin in pins.items():
-        name = f'{key}-{pin["commit"]}.tar.gz'
+        name = pin.get('archive_file', f'{key}-{pin["commit"]}.tar.gz')
         result[key] = (name, ([f'{mirror}/{name}'] if mirror else []) + [pin['source_url']], pin['sha256'])
     bindgen = json.loads((ROOT / 'bindgen/sources.json').read_text())
     name = f'rust-bindgen-{bindgen["version"]}.tar.gz'

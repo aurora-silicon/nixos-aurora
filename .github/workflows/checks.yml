@@ -99,6 +99,12 @@ jobs:
         run: python3 scripts/prefetch-sources.py "$PACKAGE"
       - name: Build the pinned Aurora hardware package
         run: nix build --max-jobs 1 --cores 4 --print-build-logs --json '.#packages.aarch64-linux.${{ matrix.package }}^*' > build.json
+      - name: Check GNOME 51 API installation
+        if: matrix.package == 'mutter'
+        run: nix build --no-link .#checks.aarch64-linux.mutter-51
+      - name: Preserve Mutter build and test log
+        if: always() && matrix.package == 'mutter'
+        run: nix log .#mutter > mutter-tests.log 2>&1 || true
       - name: Exercise graphics generation switch and rollback
         if: matrix.package == 'graphics'
         run: |
@@ -124,6 +130,7 @@ jobs:
           name: nix-${{ matrix.package }}-closure
           path: |
             build.json
+            mutter-tests.log
             closure.json
             graphics-generation/*.txt
             graphics-generation/*.sha256
@@ -142,6 +149,7 @@ jobs:
           name: failed-nix-${{ matrix.package }}-attempt-${{ github.run_attempt }}
           path: |
             build.json
+            mutter-tests.log
             closure.json
             graphics-generation/*.txt
             graphics-generation/*.sha256
