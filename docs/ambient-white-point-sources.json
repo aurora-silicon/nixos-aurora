@@ -1,0 +1,35 @@
+{
+  "gsd_version": "50.1",
+  "gsd_tag_commit": "ec681847221cf44e658363b9d8137b4cbae7b321",
+  "gsd_source": "https://gitlab.gnome.org/GNOME/gnome-settings-daemon",
+  "new_code_license": "GPL-2.0-or-later",
+  "default_enabled": false,
+  "patch_sha256": "d04ad193bc89b40e22d8c6844e819be6b687075f8b13befcca6e75fd628be8f0",
+  "mutter_version": "50.4",
+  "mutter_source_checks": [
+    {
+      "version": "50.4",
+      "file": "src/backends/meta-color-manager.c",
+      "url": "https://raw.githubusercontent.com/GNOME/mutter/50.4/src/backends/meta-color-manager.c",
+      "sha256": "47e367fdb09c641024d2aebee8cddb7a5c2e69ad5cfeebdebb2715a150bff080"
+    },
+    {
+      "version": "50.4",
+      "file": "src/backends/meta-color-device.c",
+      "url": "https://raw.githubusercontent.com/GNOME/mutter/50.4/src/backends/meta-color-device.c",
+      "sha256": "e4b8e58c0f2da2483b7fc3f7ef093854c81d7caadfd82efc048152546d2da582"
+    },
+    {
+      "version": "50.4",
+      "file": "src/backends/meta-monitor-manager.c",
+      "url": "https://raw.githubusercontent.com/GNOME/mutter/50.4/src/backends/meta-monitor-manager.c",
+      "sha256": "cd9d838bd02f76ec584181b29e16e5e5723f322f1cad51e9192509245845c46f"
+    },
+    {
+      "version": "50.4",
+      "file": "data/dbus-interfaces/org.gnome.Mutter.DisplayConfig.xml",
+      "url": "https://raw.githubusercontent.com/GNOME/mutter/50.4/data/dbus-interfaces/org.gnome.Mutter.DisplayConfig.xml",
+      "sha256": "92424584eb6aa89ba8d6215b1d523dc6dcac03102ff29dad3bc21bc9f2407856"
+    }
+  ]
+}

@@ -71,6 +71,7 @@
         flatpak-gl = pkgs.aurora-flatpak-gl;
         speakerguardd = pkgs.speakerguardd;
         mutter = pkgs.mutter;
+        gnome-settings-daemon = pkgs.gnome-settings-daemon;
         speakersafetyd = pkgs.speakersafetyd;
         bankstown = pkgs.bankstown-lv2;
         neo-platform = pkgs.aurora-neo-platform-config;

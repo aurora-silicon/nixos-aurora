@@ -1,0 +1,20 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+set -eu
+schema=org.gnome.settings-daemon.plugins.color
+key=ambient-white-point-enabled
+case ${1:-status} in
+  on) gsettings set "$schema" "$key" true ;;
+  off) gsettings set "$schema" "$key" false ;;
+  status)
+    printf 'Enabled: '
+    gsettings get "$schema" "$key"
+    for property in AmbientWhitePointAvailable AmbientWhitePointActive Temperature; do
+      printf '%s: ' "$property"
+      gdbus call --session --dest org.gnome.SettingsDaemon.Color \
+        --object-path /org/gnome/SettingsDaemon/Color \
+        --method org.freedesktop.DBus.Properties.Get org.gnome.SettingsDaemon.Color "$property" || true
+    done
+    ;;
+  *) echo 'Usage: gnome-ambient-white-point [on|off|status]' >&2; exit 2 ;;
+esac

@@ -356,6 +356,22 @@ in {
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
     '';
   });
+  gnome-settings-daemon = prev.gnome-settings-daemon.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./patches/0001-color-opt-in-ambient-white-point.patch)
+    ];
+    nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.dbus ];
+    doCheck = true;
+    checkPhase = ''
+      runHook preCheck
+      meson test --no-rebuild --print-errorlogs gcm-self-test ambient-policy ambient-service
+      runHook postCheck
+    '';
+    postInstall = (old.postInstall or "") + ''
+      install -Dm644 ${stableFile ./files/gnome-ambient-white-point} \
+        $out/share/doc/gnome-settings-daemon/gnome-ambient-white-point
+    '';
+  });
   # A VRR-capable output defaults to variable refresh rate: the variable
   # variant of the preferred mode becomes the preferred one, which new monitor
   # configurations use. Saved configurations still win. The same patch is in

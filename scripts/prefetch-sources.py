@@ -47,6 +47,7 @@ NEEDS = {
     'upower': ['upower-aurora'],
     'speakerguardd': ['speakerguardd'],
     'mutter': [],
+    'gnome-settings-daemon': [],
     'docker': [],  # nixpkgs' pinned release, with the local engine patch
     'speakersafetyd': [],
     'bankstown': ['bankstown'],
