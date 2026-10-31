@@ -66,7 +66,16 @@ class NixPinTests(unittest.TestCase):
 
     def test_a_release_label_is_dropped_when_aura_moves(self):
         overlay = self.root / 'overlay.nix'
-        self.assertIn('AURA_VERSION_TAG', overlay.read_text())
+        # The planner runs this suite after updating its checkout, where the
+        # live aura pin may already have lost its release label. Use a tagged
+        # fixture so the regression also runs on a proposed source update.
+        overlay.write_text('''{ old, ... }: {
+    makeFlags = [ "RELEASE=1" "CHAINLOADING=1" "BUILTIN_LOGO=aurora" "USE_CLANG=1" ];
+    # This pin carries a release label until aura moves on.
+    env = (old.env or { }) // { AURA_VERSION_TAG = "1.0.0b1"; };
+    postBuild = "";
+}
+''')
         current = (ROOT / 'locks/aura.Cargo.lock').read_text().encode()
         item = self.item('aura', archive_path=self.archive({'rust/Cargo.lock': current}))
         module.update_recipe(self.root, item, TODAY)
@@ -74,6 +83,8 @@ class NixPinTests(unittest.TestCase):
         self.assertNotIn('AURA_VERSION_TAG', text)
         self.assertNotIn('release label', text)
         self.assertIn('"BUILTIN_LOGO=aurora" "USE_CLANG=1" ];\n    postBuild', text)
+        module.update_recipe(self.root, item, TODAY)
+        self.assertEqual(overlay.read_text(), text)
 
     def test_mesa_version_change_edits_the_recipe(self):
         item = self.item('mesa-aurora', version='26.9.0', version_changed=True)
