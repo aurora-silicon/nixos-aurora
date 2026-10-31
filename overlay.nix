@@ -327,6 +327,9 @@ in {
       ./patches/mutter-prefer-variable-refresh-rate.patch
     ];
   });
+  # nixpkgs exposes a symlink join here: overriding its src does not replace
+  # the inner model derivation. Build the pinned models explicitly, then merge
+  # them ahead of the native common UCM definitions.
   alsa-ucm-conf-asahi = let
     models = final.stdenvNoCC.mkDerivation {
       pname = "aurora-ucm-models";
