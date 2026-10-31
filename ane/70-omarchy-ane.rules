@@ -1,0 +1,2 @@
+# Persistent group access; standard systemd/logind ACLs also apply.
+SUBSYSTEM=="accel", KERNEL=="accel[0-9]*", GROUP="accel", MODE="0660"

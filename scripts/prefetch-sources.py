@@ -42,9 +42,12 @@ NEEDS = {
     'libfprint': ['libfprint'],
     'fprintd': [],  # nixpkgs' pinned release, with the local companion patch
     'avd-fw': ['avd-fw'],
+    'omarchy-ane-tools': ['omarchy-ane-tools'],
+    'mil-hwx-compiler': ['mil-hwx-compiler', 'mil-hwx-compiler/gnustep-base'],
     'upower': ['upower-aurora'],
     'speakerguardd': ['speakerguardd'],
     'mutter': [],
+    'docker': [],  # nixpkgs' pinned release, with the local engine patch
     'speakersafetyd': [],
     'bankstown': ['bankstown'],
     'neo-platform': ['aurora-neo-platform-config'],
@@ -59,7 +62,11 @@ def archives():
     result = {}
     for key, pin in pins.items():
         name = f'{key}-{pin["commit"]}.tar.gz'
-        result[key] = (name, ([f'{mirror}/{name}'] if mirror else []) + [pin['source_url']], pin['sha256'])
+        result[key] = (name, ([f'{mirror}/{name}'] if mirror and pin.get('redistribute_source', True) else []) + [pin['source_url']], pin['sha256'])
+    for key, record in pins.items():
+        for dependency, pin in record.get('extra_sources', {}).items():
+            name = f'{dependency}-{pin["commit"]}.tar.gz'
+            result[f'{key}/{dependency}'] = (name, [pin['source_url']], pin['sha256'])
     bindgen = json.loads((ROOT / 'bindgen/sources.json').read_text())
     name = f'rust-bindgen-{bindgen["version"]}.tar.gz'
     result['bindgen'] = (name, ([f'{mirror}/{name}'] if mirror else []) + [bindgen['source_url']],

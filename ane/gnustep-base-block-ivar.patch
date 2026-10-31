@@ -1,0 +1,13 @@
+Backport of GNUstep libs-base commit 4a61eee44f537e5f83f68d447c29a6e5b6e40fdc:
+https://github.com/gnustep/libs-base/commit/4a61eee44f537e5f83f68d447c29a6e5b6e40fdc
+An Objective-C instance variable cannot have __block storage qualification.
+
+--- a/Headers/Foundation/NSBackgroundActivityScheduler.h
++++ b/Headers/Foundation/NSBackgroundActivityScheduler.h
+@@ -77,5 +77,5 @@
+   NSActivityOptions _opts;
+   id _token;
+   NSString *_reason;
+-  BLOCK_SCOPE GSScheduledBlock _block;
++  GSScheduledBlock _block;
+ }

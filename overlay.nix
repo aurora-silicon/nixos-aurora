@@ -1,6 +1,19 @@
 final: prev:
 let
   stableFile = path: final.writeText (builtins.baseNameOf path) (builtins.readFile path);
+  # nixpkgs constructs the CLI and engine with the same builder argument.
+  # Patch only the engine, so the resulting Docker symlinks and wrappers all
+  # refer to the fixed moby derivation, including its exposed .moby output.
+  dockerPolicyBuilder = args: prev.buildGoModule (args // final.lib.optionalAttrs
+    ((args.pname or "") == "moby") {
+      patches = (args.patches or [ ]) ++ [ (stableFile ./patches/docker-query-forwarding-policy.patch) ];
+      doCheck = true;
+      checkPhase = ''
+        runHook preCheck
+        go test -mod=vendor -p=8 ./daemon/libnetwork/iptables -run '^TestSetupDockerForwardingPolicy$' -count=1 -v
+        runHook postCheck
+      '';
+    });
   kernelProvenance = builtins.fromJSON (builtins.readFile ./kernel/provenance.json);
   kernelBase =
     assert final.lib.assertMsg
@@ -75,6 +88,8 @@ let
     compilerTools = mesaCompilerTools;
   };
 in {
+  docker_29 = prev.docker_29.override { buildGoModule = dockerPolicyBuilder; };
+  docker = final.docker_29;
   aurora-logos = final.callPackage ./logos/package.nix { };
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
@@ -142,6 +157,21 @@ in {
   aurora-avd-firmware = final.callPackage ./avd-fw.nix {
     src = source "avd-fw";
     version = pins.avd-fw.version;
+  };
+  # Userspace for the kernel's ANE driver; no firmware, module or overlays.
+  mil-hwx-compiler = final.callPackage ./mil-hwx-compiler.nix {
+    basePatch = stableFile ./ane/gnustep-base-block-ivar.patch;
+    baseSrc = let pin = pins.mil-hwx-compiler.extra_sources.gnustep-base; in final.fetchurl {
+      name = "gnustep-base-${pin.commit}.tar.gz";
+      url = pin.source_url;
+      sha256 = pin.sha256;
+    };
+    src = source "mil-hwx-compiler";
+    version = pins.mil-hwx-compiler.version;
+  };
+  omarchy-ane-tools = final.callPackage ./omarchy-ane-tools.nix {
+    src = source "omarchy-ane-tools";
+    version = pins.omarchy-ane-tools.version;
   };
   upower = prev.upower.overrideAttrs (old: {
     src = source "upower-aurora";
