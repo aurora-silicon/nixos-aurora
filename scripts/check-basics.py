@@ -12,6 +12,7 @@ filesystems the installer writes):
              no partition number in the core, no lookup without a hint
   network    NetworkManager is enabled; desktops ship its settings UI
   lid        logind still suspends on lid close; sleep is not masked
+  GL         factory images leave Mesa driver selection automatic
 
 --system names a NixOS system closure; its software and /etc are read
 from there instead of /usr and /etc.
@@ -82,6 +83,23 @@ def assignments(text):
             key, _, value = line.partition('=')
             values[key.strip()] = value.strip().strip('"\'')
     return values
+
+
+def check_gl_selection(root):
+    """Factory images leave GL selection to Mesa; fallback is per application."""
+    files = [f'{root.etc}/environment', f'{root.etc}/set-environment',
+             f'{root.etc}/pam/environment']
+    for directory in (f'{root.etc}/environment.d', f'{root.usr}/lib/environment.d'):
+        path = root.path(directory)
+        if path.is_dir():
+            files.extend(f'{directory}/{p.name}' for p in sorted(path.glob('*.conf')))
+    for file in files:
+        for line in (root.text(file) or '').splitlines():
+            values = assignments(line)
+            for key in ('MESA_LOADER_DRIVER_OVERRIDE', 'GALLIUM_DRIVER'):
+                if values.get(key):
+                    return f'global {key} in {file}; leave factory GL selection automatic'
+    return None
 
 
 def check_locale(root):
@@ -280,6 +298,7 @@ def main():
     if args.root:
         root = Root(args.root, args.system)
         checks.append(('locale', check_locale(root)))
+        checks.append(('gl-selection', check_gl_selection(root)))
         if args.profile != 'minimal':
             checks.append(('terminal', check_terminal(root, args.profile)))
             checks.append(('wallpaper', check_wallpaper(root, args.profile)))

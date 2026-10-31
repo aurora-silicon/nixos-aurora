@@ -86,6 +86,25 @@ class CheckBasicsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn(expected, result.stdout)
 
+    def test_global_gl_selector_fails(self):
+        self.assert_fails('gnome', lambda root: write(root / 'etc/environment',
+                          'MESA_LOADER_DRIVER_OVERRIDE="zink"\n'), 'global MESA_LOADER_DRIVER_OVERRIDE')
+
+    def test_global_gallium_environment_d_fails(self):
+        self.assert_fails('minimal', lambda root: write(root / 'usr/lib/environment.d/90-gl.conf',
+                          "export GALLIUM_DRIVER='zink'\n"), 'global GALLIUM_DRIVER')
+
+    def test_no_gl_selector_or_empty_value_passes(self):
+        root = self.desktop_root('gnome')
+        write(root / 'etc/environment', '# MESA_LOADER_DRIVER_OVERRIDE=zink\nLANG=en_US.UTF-8\n')
+        write(root / 'etc/environment.d/90-gl.conf', 'GALLIUM_DRIVER=""\n')
+        result = self.check('--profile', 'gnome', '--root', str(root))
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_nixos_session_gl_selector_fails(self):
+        self.assert_fails('gnome', lambda root: write(root / 'etc/set-environment',
+                          'export MESA_LOADER_DRIVER_OVERRIDE=zink\n'), 'global MESA_LOADER_DRIVER_OVERRIDE')
+
     def test_c_locale_fails(self):
         self.assert_fails('gnome', lambda root: write(root / 'etc/locale.conf', 'LANG=C\n'), 'locale: FAIL')
 
