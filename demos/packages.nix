@@ -59,10 +59,15 @@ let
     pname = "aurora-libdf";
     version = pins.libdf.version;
     src = source "libdf";
-    cargoLock = {
-      lockFile = ./df-Cargo.lock;
-      outputHashes."hdf5-0.8.1" = "sha256-arJceSimhb9TTv7uBMIbOmRhjy09R4786sxQXvQfpAA=";
-    };
+    # HDF5 belongs to the unused dataset feature. Import the same lock without
+    # fetching that repository's large C-library submodule for the C API build.
+    cargoDeps = (pkgs.callPackage
+      (pkgs.path + "/pkgs/build-support/rust/import-cargo-lock.nix") {
+        fetchgit = args: pkgs.fetchgit (args // { fetchSubmodules = false; });
+      }) {
+        lockFile = ./df-Cargo.lock;
+        outputHashes."hdf5-0.8.1" = "sha256-arJceSimhb9TTv7uBMIbOmRhjy09R4786sxQXvQfpAA=";
+      };
     postPatch = ''
       cp ${./df-Cargo.lock} Cargo.lock
       substituteInPlace libDF/Cargo.toml \
