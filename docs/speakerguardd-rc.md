@@ -2,8 +2,8 @@
 
 Upstream review: https://github.com/aurora-silicon/speakerguardd/pull/27
 
-All three draft packaging PRs pin the same candidate, `c1de6aa10eb42719fae9a756cfa91e7c24f4c98c`.
-Source archive SHA-256: `b94947128db84109be8b914adf848a6457c23a7f186fd95579a498d358b8fc65`.
+All three draft packaging PRs pin the same candidate, `526790d8db34a823d9ffc6c36b642d0caf4a22ed`.
+Source archive SHA-256: `0748c91b67d783ceebeed46d363560ca690e846593b32009ccc069c304f1b259`.
 
 | Distribution | Package version | Native integration |
 | --- | --- | --- |
@@ -37,3 +37,11 @@ ordinary-listening assertions still fail under the linear transfer contract;
 they remain required checks. A tighter justified transfer bound and an
 independent safety review of this candidate are required before release.
 The native-float grant work in upstream #30 remains a separate stacked PR.
+
+Stage upgrades for activation across an orderly reboot. Fedora uses the
+non-restarting postun macro; the old installed package's scriptlets also
+need checking before a transaction. Arch's recipe has no restart hook.
+For NixOS prepare the next boot generation with `nixos-rebuild boot`, keeping
+the governing generation until reboot. Preserve the independent fallback
+and the current model/record/marker evidence. A generic package update must
+not remove a marker or force a runtime state to appear cold.
