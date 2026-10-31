@@ -36,10 +36,7 @@ jobs:
         name: Select changed derivations from committed Git flakes
         run: python3 scripts/ci-plan.py >> "$GITHUB_OUTPUT"
       - name: Evaluate all profiles and hardware packages
-        run: |
-          nix flake check --no-build
-          nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
-            .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity
+        run: nix flake check --no-build
       - name: Inspect KDE graphical login configuration
         run: |
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.defaultUnit
@@ -50,6 +47,24 @@ jobs:
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.unitConfig.ConditionPathExists
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.blacklistedKernelModules
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.initrd.availableKernelModules
+  configuration-checks:
+    needs: evaluate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
+            extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
+      - name: Build configuration and first-boot checks
+        run: |
+          nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
+            .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity
   fex-overlay:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30

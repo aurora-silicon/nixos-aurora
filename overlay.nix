@@ -302,7 +302,7 @@ in {
     '';
   });
   # API 51 must be paired with the GNOME 51 package set in flake.lock.
-  # Fedora and Arch carry these same two patches on this release archive.
+  # Fedora and Arch carry these same three patches on this release archive.
   mutter = prev.mutter.overrideAttrs (old: {
     version = pins.mutter.version;
     src = source "mutter";
@@ -328,6 +328,7 @@ in {
     patches = (old.patches or [ ]) ++ map stableFile [
       ./patches/mutter-touch-null-focus.patch
       ./patches/mutter-prefer-variable-refresh-rate.patch
+      ./patches/mutter-input-capture-disconnect.patch
     ];
   });
   # nixpkgs exposes a symlink join here: overriding its src does not replace
