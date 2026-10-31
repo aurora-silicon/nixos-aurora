@@ -2,14 +2,14 @@
 
 Upstream review: https://github.com/aurora-silicon/speakerguardd/pull/27
 
-All three draft packaging PRs pin the same candidate, `221c8bfa2ac4aa43a1f9075420a95c1d12bce4b0`.
-Source archive SHA-256: `17b77fa6c0117eb3a546b798b375ae131b461f78e4479f40615bf2d01b7b909d`.
+All three draft packaging PRs pin the same candidate, `c1de6aa10eb42719fae9a756cfa91e7c24f4c98c`.
+Source archive SHA-256: `b94947128db84109be8b914adf848a6457c23a7f186fd95579a498d358b8fc65`.
 
 | Distribution | Package version | Native integration |
 | --- | --- | --- |
-| Fedora | 0.1.13~rc1-1 | RPM, Python retention helper, optional xlim subpackage |
-| Arch Linux ARM | 0.1.13rc1-1 | PKGBUILD, Python retention helper, optional LADSPA plugin |
-| NixOS | 0.1.13-rc.1 | Hash-pinned source and Cargo lock, patched helper interpreter, optional LADSPA plugin |
+| Fedora | 0.1.13~rc2-1 | RPM, Python retention helper, optional xlim subpackage |
+| Arch Linux ARM | 0.1.13rc2-1 | PKGBUILD, Python retention helper, optional LADSPA plugin |
+| NixOS | 0.1.13-rc.2 | Hash-pinned source and Cargo lock, patched helper interpreter, optional LADSPA plugin |
 
 Upstream DT/ALSA profile selection and the refusal of unqualified profiles
 remain effective. V/I profiles are packaged but are not silently qualified or
@@ -28,3 +28,12 @@ Before deployment, upstream acceptance and native package builds must pass.
 Keep the currently governing protection and existing fallback active during any
 separately authorized rollout. This change performs no installation, service
 change, audio test, or hardware access.
+
+The RC2 source reconciles main #17/#20/#29 with RC #27/#28. It retains
+state generation 3, the external `/run/speakerguardd.unlocked` marker,
+fail-closed state writes (C1), and latched V/I starts (C2). Only the J700
+single-model path can use the reviewed evidence start. The two strict
+ordinary-listening assertions still fail under the linear transfer contract;
+they remain required checks. A tighter justified transfer bound and an
+independent safety review of this candidate are required before release.
+The native-float grant work in upstream #30 remains a separate stacked PR.

@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
+  "commit": "2799b51243708d0a551b67d902472319f132c417",
+  "files": {
+    "0004-aurora-refuse-unbound-enrollment.patch": "55793f885982b140beb5fc1b2ade65190a5bc73762369935327155eb7190c6b8",
+    "0005-aurora-support-v4-and-v5.patch": "8024015e227ad9172dd5eec2fbe128e6c32f7621571c49f869386123cc08585d",
+    "apple-sep.h": "f8c03ce145578ce2a28c97c872d4b748f97ab60bf8242445127fc91f0078a8be",
+    "test_interface.py": "73b95e4c39a2fe8c5496cd38545cc67df20c89cc1a88fc3aedf216e997b41da4",
+    "libfprint-1.94.100-apple-sep.patch": "55aef4a2019568a13aea48064ed83858a7ce4902636f8e85e46877ce9d8ef172",
+    "0002-aurora-report-unusable-captures-as-retries.patch": "6a594471084ce5d6e65e3edaccc7f10a62dd3bb1cfc2bcdfa6b3f2357906620a",
+    "0003-hide-lid-covered-readers-while-the-lid-is-closed.patch": "58b3ec841207942bd48819a8e91a8cc7992e5ffae34285b7e9d3617c2750043f"
+  }
+}

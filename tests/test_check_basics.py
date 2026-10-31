@@ -26,6 +26,13 @@ def link(path, target):
     os.symlink(target, path)
 
 
+def logos(usr):
+    for size in (16, 22, 24, 32, 48, 64, 96, 128, 256, 512):
+        for directory, name in (('apps', 'aurora-logo-icon'), ('places', 'start-here')):
+            write(usr / f'share/icons/hicolor/{size}x{size}/{directory}/{name}.png', b'\x89PNG\r\n\x1a\n')
+    write(usr / 'share/pixmaps/system-logo-white.png', b'\x89PNG\r\n\x1a\n')
+
+
 class CheckBasicsTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -45,6 +52,8 @@ class CheckBasicsTests(unittest.TestCase):
         write(root / 'usr/lib/locale/locale-archive', b'\0en_US.utf8\0')
         link(e / 'systemd/system/multi-user.target.wants/NetworkManager.service',
              '/usr/lib/systemd/system/NetworkManager.service')
+        if profile != 'minimal':
+            logos(u)
         if profile == 'gnome':
             write(u / 'bin/kgx', mode=0o755)
             write(u / 'share/applications/org.gnome.Console.desktop')
@@ -86,12 +95,39 @@ class CheckBasicsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn(expected, result.stdout)
 
+    def test_global_gl_selector_fails(self):
+        self.assert_fails('gnome', lambda root: write(root / 'etc/environment',
+                          'MESA_LOADER_DRIVER_OVERRIDE="zink"\n'), 'global MESA_LOADER_DRIVER_OVERRIDE')
+
+    def test_global_gallium_environment_d_fails(self):
+        self.assert_fails('minimal', lambda root: write(root / 'usr/lib/environment.d/90-gl.conf',
+                          "export GALLIUM_DRIVER='zink'\n"), 'global GALLIUM_DRIVER')
+
+    def test_no_gl_selector_or_empty_value_passes(self):
+        root = self.desktop_root('gnome')
+        write(root / 'etc/environment', '# MESA_LOADER_DRIVER_OVERRIDE=zink\nLANG=en_US.UTF-8\n')
+        write(root / 'etc/environment.d/90-gl.conf', 'GALLIUM_DRIVER=""\n')
+        result = self.check('--profile', 'gnome', '--root', str(root))
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_nixos_session_gl_selector_fails(self):
+        self.assert_fails('gnome', lambda root: write(root / 'etc/set-environment',
+                          'export MESA_LOADER_DRIVER_OVERRIDE=zink\n'), 'global MESA_LOADER_DRIVER_OVERRIDE')
+
     def test_c_locale_fails(self):
         self.assert_fails('gnome', lambda root: write(root / 'etc/locale.conf', 'LANG=C\n'), 'locale: FAIL')
 
     def test_ungenerated_locale_fails(self):
         self.assert_fails('minimal', lambda root: write(root / 'usr/lib/locale/locale-archive', b'\0de_DE.utf8\0'),
                           'is not generated')
+
+    def test_missing_launcher_icon_fails(self):
+        self.assert_fails('kde', lambda root: (
+            root / 'usr/share/icons/hicolor/32x32/places/start-here.png').unlink(), 'logos: FAIL')
+
+    def test_corrupt_about_logo_fails(self):
+        self.assert_fails('kde', lambda root: write(
+            root / 'usr/share/pixmaps/system-logo-white.png', b'broken'), 'logos: FAIL')
 
     def test_missing_terminal_fails(self):
         self.assert_fails('kde', lambda root: (root / 'usr/bin/konsole').unlink(), 'terminal: FAIL')
@@ -161,6 +197,11 @@ class CheckBasicsTests(unittest.TestCase):
         write(root / sw.lstrip('/') / 'share/applications/org.gnome.Console.desktop')
         write(root / sw.lstrip('/') / 'bin/gnome-control-center', mode=0o755)
         write(root / sw.lstrip('/') / 'share/backgrounds/gnome/adwaita-l.jxl')
+        # Follow the package link through the system profile inside the root.
+        logo_path = '/nix/store/ffff-aurora-logos/share/icons/hicolor'
+        logos(root / 'nix/store/ffff-aurora-logos')
+        link(root / sw.lstrip('/') / 'share/icons/hicolor', logo_path)
+        link(root / sw.lstrip('/') / 'share/pixmaps', '/nix/store/ffff-aurora-logos/share/pixmaps')
         result = self.check('--profile', 'gnome', '--root', str(root), '--system', system, *self.boot())
         self.assertEqual(result.returncode, 0, result.stdout)
         write(root / etc.lstrip('/') / 'locale.conf', 'LANG=C\n')

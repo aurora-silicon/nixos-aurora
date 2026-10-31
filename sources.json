@@ -28,21 +28,21 @@
   },
   "mesa-aurora": {
     "repository": "https://github.com/aurora-silicon/mesa",
-    "commit": "cf4e08105dfa526b8874318b6a52b3ce948f6297",
+    "commit": "c208afc352e9d4c10ee71c883a369a9079dd7d84",
     "version": "26.3.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/cf4e08105dfa526b8874318b6a52b3ce948f6297",
-    "archive_root": "mesa-cf4e08105dfa526b8874318b6a52b3ce948f6297",
-    "sha256": "b898c15a604a8d7d01467a2fc5b3ad70814d0eb6294228ac9128b946f0a76ddd",
-    "nix_hash": "sha256-uJjBWmBKjX0BRnovxbOtcIFNDrYpQiiskSi5RvCnbd0="
+    "source_url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/c208afc352e9d4c10ee71c883a369a9079dd7d84",
+    "archive_root": "mesa-c208afc352e9d4c10ee71c883a369a9079dd7d84",
+    "sha256": "a8ca816b201673a9e2cf5aeafefdfa1bdffe2e14cd125b3bffd1cfe5040a3b0b",
+    "nix_hash": "sha256-qMqBayAWc6niz1rq/v36G9/+LhTNEls7/9HP5QQKOws="
   },
   "speakerguardd": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "221c8bfa2ac4aa43a1f9075420a95c1d12bce4b0",
-    "version": "0.1.13-rc.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/221c8bfa2ac4aa43a1f9075420a95c1d12bce4b0",
-    "archive_root": "speakerguardd-221c8bfa2ac4aa43a1f9075420a95c1d12bce4b0",
-    "sha256": "17b77fa6c0117eb3a546b798b375ae131b461f78e4479f40615bf2d01b7b909d",
-    "nix_hash": "sha256-F7d/psARfrOlRreYs3WuExtGH3jkR59AYVvy0Bt7kJ0="
+    "commit": "c1de6aa10eb42719fae9a756cfa91e7c24f4c98c",
+    "version": "0.1.13-rc.2",
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/c1de6aa10eb42719fae9a756cfa91e7c24f4c98c",
+    "archive_root": "speakerguardd-c1de6aa10eb42719fae9a756cfa91e7c24f4c98c",
+    "sha256": "b94947128db84109be8b914adf848a6457c23a7f186fd95579a498d358b8fc65",
+    "nix_hash": "sha256-uUlHEo24QQm+i5FK34SKZFfCOn8Yb9lVeaSY01i4/GU="
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",
@@ -109,12 +109,12 @@
   },
   "upower-aurora": {
     "repository": "https://github.com/aurora-silicon/upower",
-    "commit": "00e8cb66b408e2a7e5f1c527accbe0634a12996c",
-    "version": "1.91.4",
-    "source_url": "https://codeload.github.com/aurora-silicon/upower/tar.gz/00e8cb66b408e2a7e5f1c527accbe0634a12996c",
-    "archive_root": "upower-00e8cb66b408e2a7e5f1c527accbe0634a12996c",
-    "sha256": "4b3b15a50f9f92988b4b570a5147ff2cc9ae119a806d56c464b0b2654509c7d3",
-    "nix_hash": "sha256-SzsVpQ+fkpiLS1cKUUf/LMmuEZqAbVbEZLCyZUUJx9M="
+    "commit": "ec0b67ff412d97b16629614edc4decbb34d05983",
+    "version": "1.91.5",
+    "source_url": "https://codeload.github.com/aurora-silicon/upower/tar.gz/ec0b67ff412d97b16629614edc4decbb34d05983",
+    "archive_root": "upower-ec0b67ff412d97b16629614edc4decbb34d05983",
+    "sha256": "6758f97ce858a51919755a206387b7ca8795793fa62ebd8b8e5ae5fe3fbe9784",
+    "nix_hash": "sha256-Z1j5fOhYpRkZdVogY4e3yoeVeT+mLr2Ljlrl/j++l4Q="
   },
   "libfprint": {
     "repository": "https://gitlab.freedesktop.org/libfprint/libfprint",

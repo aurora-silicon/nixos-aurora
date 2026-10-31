@@ -1,13 +1,24 @@
 final: prev:
 let
   stableFile = path: final.writeText (builtins.baseNameOf path) (builtins.readFile path);
+  kernelProvenance = builtins.fromJSON (builtins.readFile ./kernel/provenance.json);
+  kernelBase =
+    assert final.lib.assertMsg
+      (kernelProvenance.kernel_commit == pins."kernel-aurora".commit
+        && kernelProvenance.config_upstream.kernel_commit == kernelProvenance.kernel_commit)
+      "Refresh the canonical ALARM resolved config together with the kernel pin";
+    assert final.lib.assertMsg
+      (builtins.hashFile "sha256" ./kernel/config == kernelProvenance.config_upstream.config_sha256)
+      "The vendored ALARM resolved config does not match its provenance";
+    builtins.readFile ./kernel/config;
+  kernelBaseFile = final.writeText "config" kernelBase;
   # The shared distribution config with NixOS's requirements on top, as the
   # build merges them. NixOS modules read kernel features from this.
   kernelConfig = final.lib.listToAttrs (final.lib.concatMap (line:
     let matched = builtins.match "(CONFIG_[^=]+)=([ym])" line;
     in final.lib.optional (matched != null) {
       name = builtins.elemAt matched 0; value = builtins.elemAt matched 1;
-    }) (final.lib.splitString "\n" (builtins.readFile ./kernel/config + "\n" + builtins.readFile ./kernel/nixos.config)));
+    }) (final.lib.splitString "\n" (kernelBase + "\n" + builtins.readFile ./kernel/nixos.config)));
   kernelLLVM = final.llvmPackages_22;
   # GNOME Initial Setup creates the owner account on GNOME images (its
   # new-user mode). nixpkgs' vendor file skips the account and password pages,
@@ -64,6 +75,7 @@ let
     compilerTools = mesaCompilerTools;
   };
 in {
+  aurora-logos = final.callPackage ./logos/package.nix { };
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [
@@ -101,18 +113,29 @@ in {
   libfprint = prev.libfprint.overrideAttrs (old: {
     src = source "libfprint";
     version = pins.libfprint.version;
-    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.umockdev ];
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.umockdev final.python3 ];
     nativeInstallCheckInputs = [ final.umockdev (final.python3.withPackages (p: [ p.pygobject3 p.pycairo ])) ];
     patches = (old.patches or [ ]) ++ map stableFile [
       ./sep/libfprint-1.94.100-apple-sep.patch
       ./sep/0002-aurora-report-unusable-captures-as-retries.patch
       ./sep/0003-hide-lid-covered-readers-while-the-lid-is-closed.patch
+      ./sep/0004-aurora-refuse-unbound-enrollment.patch
+      ./sep/0005-aurora-support-v4-and-v5.patch
     ];
     postPatch = (old.postPatch or "") + ''
       install -Dm644 ${stableFile ./sep/apple-sep.h} aurora-uapi/linux/apple-sep.h
+      ${final.python3.interpreter} ${stableFile ./sep/test_interface.py} libfprint/drivers/aurora/aurora.c aurora-uapi/linux/apple-sep.h
     '';
     preConfigure = (old.preConfigure or "") + ''
       export CFLAGS="''${CFLAGS:-} -I$PWD/aurora-uapi"
+    '';
+  });
+  fprintd = prev.fprintd.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ map stableFile [
+      ./sep/0001-preserve-print-on-device-delete-failure.patch
+    ];
+    postPatch = (old.postPatch or "") + ''
+      ${final.python3.interpreter} ${stableFile ./sep/test_account_gate.py} src/device.c
     '';
   });
   aurora-firstboot = final.callPackage ./firstboot.nix { };
@@ -123,10 +146,12 @@ in {
   upower = prev.upower.overrideAttrs (old: {
     src = source "upower-aurora";
     version = pins.upower-aurora.version;
+    doCheck = true;
     postConfigure = (old.postConfigure or "") + ''
       meson test --list > aurora-registered-tests.txt
       grep -q test_macsmc_kernel_time_at_zero_rate aurora-registered-tests.txt
       grep -q test_other_supply_ignores_kernel_time aurora-registered-tests.txt
+      grep -q test_macsmc_kernel_time_charge_units aurora-registered-tests.txt
     '';
   });
   aurora-bindgen = final.callPackage ./bindgen { llvmPackages = kernelLLVM; };
@@ -139,7 +164,7 @@ in {
         version = "7.3.0";
         modDirVersion = "7.3.0";
         src = source "kernel-aurora";
-        configfile = stableFile ./kernel/config;
+        configfile = kernelBaseFile;
         config = kernelConfig;
         stdenv = kernelLLVM.stdenv;
         # Keep the native wrapped host compiler for host tools/RPATHs;
@@ -181,7 +206,7 @@ in {
           runHook preConfigure
           mkdir build
           export buildRoot="$PWD/build"
-          cp ${stableFile ./kernel/config} "$buildRoot/.config"
+          cp ${kernelBaseFile} "$buildRoot/.config"
           chmod u+w "$buildRoot/.config"
           bash scripts/kconfig/merge_config.sh -m -O "$buildRoot" \
             "$buildRoot/.config" ${stableFile ./kernel/nixos.config}
@@ -194,7 +219,7 @@ in {
         '';
         postConfigure = ''
           python3 ${stableFile ./kernel/validate-config.py} arch/arm64/configs/asahi.config \
-            ${stableFile ./kernel/common.config} ${stableFile ./kernel/nixos.config} "$buildRoot/.config"
+            ${stableFile ./kernel/nixos.config} "$buildRoot/.config"
           python3 ${stableFile ./kernel/check-required.py} "$buildRoot/.config"
           grep -qx 'CONFIG_RUST=y' "$buildRoot/.config"
           grep -qx 'CONFIG_ARM64_16K_PAGES=y' "$buildRoot/.config"
