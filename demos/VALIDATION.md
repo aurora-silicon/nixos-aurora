@@ -7,8 +7,8 @@ The compiler source is merged main 3837b4cc2f432754970dbff0f61a3397fede7478.
 | Component | Fedora | Arch Linux ARM | NixOS |
 | --- | --- | --- | --- |
 | Model helper | Release 1 built in native ARM VM; release 2 built/linted in ARM64 container on x86 buildbox | Release 2 built natively and installed | Evaluation/build pending |
-| Vulkan Whisper | ARM64 buildbox build running; native VM build queued | Native package built; 5 CTest units and 7 worker tests passed | Evaluation/build pending |
-| Compiler + graph runner/bridge | Build pending after Whisper | Installed file test/compiler phase queued | Evaluation/build pending |
+| Vulkan Whisper | C++/unit checks completed in ARM64 buildbox container; RPM 6 license metadata failed and is fixed in source; rebuild pending | Native package built; 5 CTest units and 7 worker tests passed | Evaluation/build pending |
+| Compiler + graph runner/bridge | Bootstrap reached GNUstep install; missing which dependency fixed; rebuild pending | Installed file test/compiler phase queued | Compiler derivation evaluated; native build pending |
 | Capture/RNNoise/libDF | Two libDF attempts interrupted; source/logs and partial O2 cache preserved | Deferred native phase | Deferred native phase |
 
 Native ARM VM: Fedora 44 aarch64, 4 KiB pages, hosted on the macOS Mac mini M2
@@ -35,3 +35,5 @@ See build-logs/alarm-whisper.log for the native build/check/package tail and
 build-logs/fedora-models-rpmlint.log for the corrected helper lint (0 errors,
 0 warnings, ARM64 container on x86 buildbox). Full raw logs and failed attempts
 are preserved by the task operator; these excerpts contain no private lab input.
+
+The Fedora RPM 6 file-list failure mixed relative and absolute %license paths on one line; the recipes now separate them. Compiler recipes declare which/gzip for GNUstep make install. These corrections still require full package rebuilds. Nix evaluated the scoped model-helper source and compiler derivation with import-from-derivation disabled; the full flake check has not completed.

@@ -177,7 +177,7 @@ let
     pname = "mil-hwx-compiler";
     version = pins.mil-hwx-compiler.version;
     src = source "mil-hwx-compiler";
-    nativeBuildInputs = [ pkgs.clang pkgs.lld pkgs.cmake pkgs.ninja pkgs.gnumake pkgs.pkg-config pkgs.python3 pkgs.makeWrapper ];
+    nativeBuildInputs = [ pkgs.clang pkgs.lld pkgs.cmake pkgs.ninja pkgs.gnumake pkgs.pkg-config pkgs.python3 pkgs.makeWrapper pkgs.which pkgs.gzip ];
     buildInputs = [ pkgs.libffi pkgs.libxml2 pkgs.icu pkgs.openssl pkgs.zlib pkgs.robin-map pkgs.libdrm ];
     env.NIX_CFLAGS_COMPILE = "-I${lib.getDev pkgs.libdrm}/include/libdrm";
     dontConfigure = true;
