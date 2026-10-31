@@ -29,7 +29,7 @@ Native builds pass for Aura, U-Boot, the shared 7.3.0 kernel, Mesa, speakerguard
 
 `modules/platform.nix` wires the J700 guardian through its sense-PCM udev rule, retains feedback protection on other Macs, and enables Bluetooth userspace and the wireless regulatory database. The firmware helper checks this Mac's calibration/radio inputs before admission and defers Bluetooth until the runtime service before BlueZ.
 
-`modules/camera-denoise.nix` runs aurora-camera-denoise, a PipeWire filter that denoises the built-in camera in low light, as a user service started with PipeWire. It only filters on boards listed in its board data. `aurora.cameraDenoise.enable = false;` turns it off, and `aurora.cameraDenoise.settings` writes `/etc/aurora-camera-denoise/denoise.conf`.
+`modules/camera-denoise.nix` runs aurora-camera-denoise, a PipeWire filter that denoises the built-in camera in low light, as an opt-in user service. It is disabled by default; `aurora.cameraDenoise.enable = true;` starts it with PipeWire. It only filters on boards listed in its board data. `aurora.cameraDenoise.enable = false;` turns it off, and `aurora.cameraDenoise.settings` writes `/etc/aurora-camera-denoise/denoise.conf`.
 
 The cache tools are `scripts/export-cache` (an unsigned export of a build's closure), `scripts/sign-cache-metadata.py` (signs narinfo metadata in the publisher's protected job) and `scripts/prepare-cache-publication.py`. No build job holds the signing key. Cache clients verify signed NAR identities independently of their transport URLs. The public key is `keys/cache.pub`; publication and image qualification remain separate operations.
 
@@ -44,3 +44,5 @@ Source tracking, automatic publication, the `channel-testing` and `channel-stabl
 Installed systems follow `channel-testing` (their `flake.lock` pins the installed commit). `sudo aurora-update` takes the newest signed update; every rebuild refreshes the ESP Stage 2 the way `update-m1n1` does on ALARM and Fedora, keeping `m1n1/boot.bin.old`, and never writes Stage 1. Nothing updates unattended. Installs from images before Alpha 10 need a one-time `flake.nix` edit, described in [docs/updates.md](docs/updates.md#moving-an-existing-install-to-the-channel-one-time).
 
 Aurora defaults and the October 2026 Fedora changes are mapped in [the parity table](docs/fedora-parity-20261029.md). The shared module includes the locked-control ALSA restore fix, early sequencer, malcontent signal overrides, host and FEX guest Mesa, and Aurora's Flatpak GL extension for 25.08 and 26.08. Image assembly checks their actual payloads and initrd. The parity table records software verification; physical qualification remains separate.
+
+Optional file transcription and capture demos: [demos/TRY.md](demos/TRY.md).

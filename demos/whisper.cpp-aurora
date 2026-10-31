@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Transcribe a file with an explicit engine and a verified open model."""
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument('--engine', choices=('auto', 'cpu', 'gpu', 'ane'), default='auto')
+args, rest = parser.parse_known_args()
+if '-h' in rest or '--help' in rest or not rest:
+    print('whisper.cpp-aurora [--engine auto|cpu|gpu|ane] -f FILE.wav [-m MODEL]', file=sys.stderr)
+    os.execv('@CLI@', ['@CLI@', '--help'])
+# A compiled local encoder bundle is an explicit user choice. No package ships
+# or guesses an Apple program or claims an uncompiled model works on the ANE.
+bundle = os.environ.get('WHISPER_ANE_ENCODER', '')
+ane = bool(bundle and (Path(bundle) / 'package/manifest.json').is_file())
+engine = args.engine
+if engine == 'auto':
+    engine = 'ane' if ane else 'gpu'
+if engine == 'gpu':
+    try:
+        info = subprocess.run(['@VULKANINFO@', '--summary'], capture_output=True, text=True, timeout=20)
+        gpu = info.returncode == 0 and any(kind in info.stdout for kind in
+            ('PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU', 'PHYSICAL_DEVICE_TYPE_DISCRETE_GPU'))
+    except (OSError, subprocess.TimeoutExpired):
+        gpu = False
+    if not gpu:
+        if args.engine == 'gpu':
+            parser.error('no hardware Vulkan GPU found; use --engine cpu')
+        engine = 'cpu'
+if engine == 'ane' and not ane:
+    parser.error('set WHISPER_ANE_ENCODER to a compiled open encoder bundle first')
+if engine != 'ane':
+    os.environ.pop('WHISPER_ANE_ENCODER', None)
+if engine in ('cpu', 'ane') and '-ng' not in rest and '--no-gpu' not in rest:
+    rest.append('--no-gpu')
+if engine == 'gpu' and ('-ng' in rest or '--no-gpu' in rest):
+    parser.error('--no-gpu conflicts with the selected GPU engine; use --engine cpu')
+if not any(arg in ('-m', '--model') or arg.startswith('--model=') for arg in rest):
+    model = subprocess.check_output(['@FETCH@', 'whisper-tiny.en'], text=True).strip()
+    rest += ['--model', model]
+print(f'engine={engine}' + (' (native adapter reports any CPU fallback)' if engine == 'ane' else ''), file=sys.stderr)
+os.execv('@CLI@', ['@CLI@', *rest])

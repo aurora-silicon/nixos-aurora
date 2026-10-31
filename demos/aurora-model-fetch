@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Fetch one audited open model into the user's cache, then print its path."""
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import urllib.request
+
+DATA = Path('@DATA@')
+
+
+def digest(path):
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def ensure(name, cache, refresh=False):
+    model = json.loads((DATA / 'models.json').read_text())[name]
+    directory = cache / name
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    destination = directory / model['filename']
+    expected = model.get('result_sha256', model['sha256'])
+    with (directory / '.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if destination.exists() and not refresh:
+            if not destination.is_file() or digest(destination) != expected:
+                raise ValueError(f'{destination}: cached SHA-256 mismatch; preserve it and use --refresh to replace')
+            return destination
+        print(f"Fetching {name} ({model['license']}); verifying SHA-256", file=sys.stderr)
+        # Temporary files share the destination filesystem; only verified output
+        # is renamed into place. An interrupted or rejected download is not used.
+        with tempfile.TemporaryDirectory(prefix='.fetch-', dir=directory) as temporary:
+            downloaded = Path(temporary) / 'download'
+            request = urllib.request.Request(model['url'], headers={'User-Agent': 'aurora-model-fetch/1'})
+            with urllib.request.urlopen(request, timeout=60) as response, downloaded.open('wb') as output:
+                size = 0
+                while chunk := response.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > model['max_bytes']:
+                        raise ValueError(f'{name}: download exceeds audited size limit')
+                    output.write(chunk)
+            if digest(downloaded) != model['sha256']:
+                raise ValueError(f'{name}: download SHA-256 mismatch; nothing installed')
+            result = downloaded
+            if model.get('format') == 'rnnoise-c':
+                result = Path(temporary) / 'rnnoise-v011.txt'
+                subprocess.run([sys.executable, str(DATA / 'export_rnnoise.py'),
+                                str(downloaded), str(result)], check=True, stdout=sys.stderr)
+            if digest(result) != expected:
+                raise ValueError(f'{name}: converted SHA-256 mismatch; nothing installed')
+            result.chmod(0o600)
+            os.replace(result, destination)
+    return destination
+
+
+def main():
+    models = json.loads((DATA / 'models.json').read_text())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('model', choices=sorted(models))
+    parser.add_argument('--cache', type=Path, default=Path(os.environ.get(
+        'XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'aurora-models')
+    parser.add_argument('--refresh', action='store_true', help='download and verify again before replacing the cache')
+    args = parser.parse_args()
+    try:
+        print(ensure(args.model, args.cache.expanduser().resolve(), args.refresh))
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        parser.exit(1, f'aurora-model-fetch: {error}\n')
+
+
+if __name__ == '__main__':
+    main()

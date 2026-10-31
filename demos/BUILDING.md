@@ -1,0 +1,43 @@
+# Build the optional demos
+
+Use native aarch64 Linux. Build checks use synthetic buffers only, without
+opening audio or camera devices. The three distributions use demos/sources.json
+for the same immutable archives. Models are not needed by the fetcher package.
+
+Fedora, in a disposable Fedora 44 builder with rpm-build and dnf5-plugins:
+
+```sh
+AURORA_INSTALL_BUILDDEPS=1 AURORA_BUILD_JOBS=6 bash scripts/build-rpm aurora-models
+AURORA_INSTALL_BUILDDEPS=1 AURORA_BUILD_JOBS=6 bash scripts/build-rpm aurora-capture-ns
+AURORA_INSTALL_BUILDDEPS=1 AURORA_BUILD_JOBS=6 bash scripts/build-rpm whisper-cpp-aurora
+```
+
+The capture recipe produces three packages. The helper verifies every archive
+before staging it. Cargo uses the exact integration lock, including Tract
+0.21.4; as with the existing Rust recipes, crate fetching requires network
+access. Source RPMs retain the resolved dependency lock and original sources.
+
+ALARM, as an unprivileged builder with base-devel and sudo pacman access:
+
+```sh
+MAKEFLAGS=-j6 bash scripts/build-package aurora-models
+MAKEFLAGS=-j6 bash scripts/build-package aurora-capture-ns
+MAKEFLAGS=-j6 bash scripts/build-package whisper-cpp-aurora
+```
+
+Each PKGBUILD also works directly in its package directory; shared local
+sources are symlinked to demos/. The build and CI helpers dereference them
+when staging a disposable build directory. The models helper is a runtime
+dependency of Whisper, not a compiler dependency.
+
+Nix in an aarch64-linux builder:
+
+```sh
+nix flake check --no-build
+nix build --max-jobs 1 --cores 6 --print-build-logs .#aurora-models .#rnnoise .#libdf .#capture-ns .#whisper-cpp-aurora
+```
+
+No new package is added to an image profile automatically. The existing
+camera package remains in its original packaging PR; this extension only
+makes it opt-in until a public effects source pin is available. No build uses
+a private checkout or downloads an Apple-compiled program.

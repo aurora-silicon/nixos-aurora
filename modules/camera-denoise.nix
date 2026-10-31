@@ -6,13 +6,13 @@ in {
   options.aurora.cameraDenoise = {
     enable = lib.mkOption {
       type = lib.types.bool;
-      default = true;
+      default = false;
       description = ''
         Run aurora-camera-denoise, a PipeWire filter that denoises the built-in
-        camera in low light, as a user service for every user. It adds a
+        camera in low light, as a user service when explicitly enabled. It adds a
         filtered node next to each built-in camera and only filters on boards
-        with data in its boards.conf (the MacBook Neo and the MacBook Pro M5
-        Pro/Max today), unless `settings.mode` is `on`.
+        with data in its boards.conf (the MacBook Neo and the MacBook Pro
+        J616s today), unless `settings.mode` is `on`.
 
         Backends load from the package's own `lib/aurora-camera-denoise`. The
         CPU backend is built in; a Neural Engine backend has to be built into

@@ -1,0 +1,25 @@
+{
+  "rnnoise": {
+    "url": "https://raw.githubusercontent.com/xiph/rnnoise/6cbfd53eb348a8d394e0757b4025c6ded34eb2b6/src/rnn_data.c",
+    "sha256": "7b90ed18f065a34597d80b4c00e140a7c5eb6380ef8c9c6bf265384c944ae708",
+    "result_sha256": "6b8943dc4a9b6b24425873992a44f29c0577503276456af46a8854774faeb294",
+    "filename": "rnnoise-v011.txt",
+    "format": "rnnoise-c",
+    "license": "BSD-3-Clause",
+    "max_bytes": 1000000
+  },
+  "df3": {
+    "url": "https://raw.githubusercontent.com/Rikorose/DeepFilterNet/d375b2d8309e0935d165700c91da9de862a99c31/models/DeepFilterNet3_onnx.tar.gz",
+    "sha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+    "filename": "DeepFilterNet3_onnx.tar.gz",
+    "license": "MIT OR Apache-2.0 (repository grant)",
+    "max_bytes": 64000000
+  },
+  "whisper-tiny.en": {
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin",
+    "sha256": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+    "filename": "ggml-tiny.en.bin",
+    "license": "MIT",
+    "max_bytes": 77704715
+  }
+}

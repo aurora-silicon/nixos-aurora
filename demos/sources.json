@@ -1,0 +1,42 @@
+{
+  "libane": {
+    "repository": "https://github.com/aurora-silicon/omarchy-ane",
+    "commit": "1adf2ee392ef7d3d64a24743d293dbc1670f0e8b",
+    "version": "0.1.0",
+    "source_url": "https://codeload.github.com/aurora-silicon/omarchy-ane/tar.gz/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b",
+    "archive_root": "omarchy-ane-1adf2ee392ef7d3d64a24743d293dbc1670f0e8b",
+    "sha256": "15921bc7d6f248bc2f5fdecb17bb7728d453aa7e19bca383d452bd923b8e5c7a"
+  },
+  "rnnoise": {
+    "repository": "https://github.com/xiph/rnnoise",
+    "commit": "6cbfd53eb348a8d394e0757b4025c6ded34eb2b6",
+    "version": "0.1.1",
+    "source_url": "https://codeload.github.com/xiph/rnnoise/tar.gz/6cbfd53eb348a8d394e0757b4025c6ded34eb2b6",
+    "archive_root": "rnnoise-6cbfd53eb348a8d394e0757b4025c6ded34eb2b6",
+    "sha256": "5900832175a507e1ee5d4d596ff2c2b3a4eb66c59d2a12d33095c79e673e953d"
+  },
+  "libdf": {
+    "repository": "https://github.com/Rikorose/DeepFilterNet",
+    "commit": "d375b2d8309e0935d165700c91da9de862a99c31",
+    "version": "0.5.7-pre",
+    "source_url": "https://codeload.github.com/Rikorose/DeepFilterNet/tar.gz/d375b2d8309e0935d165700c91da9de862a99c31",
+    "archive_root": "DeepFilterNet-d375b2d8309e0935d165700c91da9de862a99c31",
+    "sha256": "49471f3633a24c097d82f3b0d2dbd83a0c1bac3e2f6f6c9a675ef0020ebe5c51"
+  },
+  "whisper.cpp-aurora": {
+    "repository": "https://github.com/aurora-silicon/whisper.cpp",
+    "commit": "e65f3c4423baae5898e40458d8cb1d192897172e",
+    "version": "1.9.5",
+    "source_url": "https://codeload.github.com/aurora-silicon/whisper.cpp/tar.gz/e65f3c4423baae5898e40458d8cb1d192897172e",
+    "archive_root": "whisper.cpp-e65f3c4423baae5898e40458d8cb1d192897172e",
+    "sha256": "e7e542fcde72b4b5b21732bbcce1e03e8382d659e137358c7a453ca06b163346"
+  },
+  "aurora-capture-ns": {
+    "repository": "https://github.com/aurora-silicon/capture-ns",
+    "commit": "f843fd3d053f716222caa7286a2095a9ffb8e762",
+    "version": "0.1.0",
+    "source_url": "https://codeload.github.com/aurora-silicon/capture-ns/tar.gz/f843fd3d053f716222caa7286a2095a9ffb8e762",
+    "archive_root": "capture-ns-f843fd3d053f716222caa7286a2095a9ffb8e762",
+    "sha256": "6adc53e4364e8ceb09b64bf019dfc855399693114513360fd4db4141d348d45d"
+  }
+}

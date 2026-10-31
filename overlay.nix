@@ -431,6 +431,11 @@ in {
       platforms = [ "aarch64-linux" ];
     };
   };
+  aurora-models = (import ./demos/packages.nix { pkgs = final; }).models;
+  aurora-rnnoise = (import ./demos/packages.nix { pkgs = final; }).rnnoise;
+  aurora-libdf = (import ./demos/packages.nix { pkgs = final; }).libdf;
+  aurora-capture-ns = (import ./demos/packages.nix { pkgs = final; }).capture;
+  whisper-cpp-aurora = (import ./demos/packages.nix { pkgs = final; }).whisper;
   aurora-bless = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
     cargoBuildFlags = [ "-p" "asahi-bless" ];
     cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "asahi-nvram" ];
