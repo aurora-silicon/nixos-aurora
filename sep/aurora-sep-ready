@@ -1,6 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
 #
+# The sensor-present ExecCondition admits interface v4 and v5; both use
+# these diag attributes for readiness and keep the same xART checks.
+#
 # Bring Touch ID up before anyone asks for a fingerprint, and say whether it
 # is ready. The first open of /dev/sep-bio activates it: the driver restores
 # the enrolled fingerprints from the enclave and brings the sensor up before

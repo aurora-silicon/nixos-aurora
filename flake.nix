@@ -40,6 +40,7 @@
         firstboot = pkgs.aurora-firstboot;
         sep = pkgs.aurora-sep;
         libfprint = pkgs.libfprint;
+        fprintd = pkgs.fprintd;
         avd-fw = pkgs.aurora-avd-firmware;
         upower = pkgs.upower;
         bindgen = pkgs.aurora-bindgen;

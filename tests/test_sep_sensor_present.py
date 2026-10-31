@@ -28,10 +28,22 @@ class SensorPresenceTests(unittest.TestCase):
         close.assert_called_once_with(9)
         return result
 
-    def test_only_current_interface_with_attached_reader_is_enabled(self):
-        self.assertTrue(self.probe(4, 1))
-        self.assertFalse(self.probe(4, 0))
-        self.assertFalse(self.probe(3, 1))
+    def test_supported_interfaces_require_a_physical_reader(self):
+        for version in (4, 5):
+            with self.subTest(version=version):
+                self.assertTrue(self.probe(version, 1))
+                for sensor in (0, 2):
+                    self.assertFalse(self.probe(version, sensor))
+        for version in (0, 3, 6, 0xffffffff):
+            self.assertFalse(self.probe(version, 1))
+
+    def test_ioctl_failure_closes_the_device(self):
+        with patch.object(sensor_present.os, 'open', return_value=9), \
+             patch.object(sensor_present.os, 'close') as close, \
+             patch.object(sensor_present.fcntl, 'ioctl', side_effect=OSError):
+            with self.assertRaises(OSError):
+                sensor_present.present('/dev/test-reader')
+        close.assert_called_once_with(9)
 
     def test_missing_device_is_not_advertised(self):
         with patch.object(sensor_present.os, 'open', side_effect=FileNotFoundError):
