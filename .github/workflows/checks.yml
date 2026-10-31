@@ -36,10 +36,7 @@ jobs:
         name: Select changed derivations from committed Git flakes
         run: python3 scripts/ci-plan.py >> "$GITHUB_OUTPUT"
       - name: Evaluate all profiles and hardware packages
-        run: |
-          nix flake check --no-build
-          nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
-            .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity
+        run: nix flake check --no-build
       - name: Inspect KDE graphical login configuration
         run: |
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.defaultUnit
@@ -50,9 +47,31 @@ jobs:
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.unitConfig.ConditionPathExists
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.blacklistedKernelModules
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.initrd.availableKernelModules
+  configuration-checks:
+    needs: evaluate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
+            extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
+      - name: Build configuration and first-boot checks
+        # nixos-test-driver's vhost-device-vsock dependency tests CID_LOCAL.
+        # Load its kernel prerequisite on the runner, outside the Nix sandbox.
+        # Keep the dependency's tests enabled.
+        run: |
+          sudo modprobe vsock_loopback
+          nix build --max-jobs 1 --cores 2 --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
+            .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity
   fex-overlay:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -60,7 +79,9 @@ jobs:
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b
         with:
           extra_nix_config: experimental-features = nix-command flakes
-      - run: nix build --no-link --print-build-logs .#checks.aarch64-linux.fex-overlay-upgrade
+      - name: Enable the NixOS test driver's vsock loopback prerequisite
+        run: sudo modprobe vsock_loopback
+      - run: nix build --max-jobs 1 --cores 2 --no-link --print-build-logs .#checks.aarch64-linux.fex-overlay-upgrade
   hardware:
     needs: evaluate
     if: needs.evaluate.outputs.packages != '[]'
@@ -98,7 +119,15 @@ jobs:
           PACKAGE: ${{ matrix.package }}
         run: python3 scripts/prefetch-sources.py "$PACKAGE"
       - name: Build the pinned Aurora hardware package
-        run: nix build --max-jobs 1 --cores 4 --print-build-logs --json '.#packages.aarch64-linux.${{ matrix.package }}^*' > build.json
+        # Keep compiler/linker concurrency bounded on the ARM CI runners.
+        # This changes scheduling only; all package and dependency checks run.
+        run: nix build --max-jobs 1 --cores 2 --print-build-logs --json '.#packages.aarch64-linux.${{ matrix.package }}^*' > build.json
+      - name: Check GNOME 51 API installation
+        if: matrix.package == 'mutter'
+        run: nix build --no-link .#checks.aarch64-linux.mutter-51
+      - name: Preserve Mutter build and test log
+        if: always() && matrix.package == 'mutter'
+        run: nix log .#mutter > mutter-tests.log 2>&1 || true
       - name: Exercise graphics generation switch and rollback
         if: matrix.package == 'graphics'
         run: |
@@ -124,6 +153,7 @@ jobs:
           name: nix-${{ matrix.package }}-closure
           path: |
             build.json
+            mutter-tests.log
             closure.json
             graphics-generation/*.txt
             graphics-generation/*.sha256
@@ -142,6 +172,7 @@ jobs:
           name: failed-nix-${{ matrix.package }}-attempt-${{ github.run_attempt }}
           path: |
             build.json
+            mutter-tests.log
             closure.json
             graphics-generation/*.txt
             graphics-generation/*.sha256

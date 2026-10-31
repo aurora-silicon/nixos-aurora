@@ -1,7 +1,7 @@
 {
   description = "Aurora NixOS for Apple Silicon";
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/e7439b6b14ad3cc35d05608ebca9bce01a25f5f8";
+    nixpkgs.url = "github:NixOS/nixpkgs/d27eeb635b2c5fe835604bb747f6bfb722ae6e7d";
     apple-silicon.url = "github:nix-community/nixos-apple-silicon/12cd234285d3037cedfab979aa70b75284a59afc";
     apple-silicon.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -67,6 +67,7 @@
         flatpak-gl = pkgs.aurora-flatpak-gl;
         speakerguardd = pkgs.speakerguardd;
         mutter = pkgs.mutter;
+        gnome-shell = pkgs.gnome-shell;
         speakersafetyd = pkgs.speakersafetyd;
         bankstown = pkgs.bankstown-lv2;
         neo-platform = pkgs.aurora-neo-platform-config;
@@ -75,6 +76,11 @@
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;
       checks.${system} = {
+      mutter-51 = assert pkgs.mutter.version == "51.1";
+        assert pkgs.mutter.libmutter_api_version == "51";
+        assert nixpkgs.lib.versions.major pkgs.gnome-shell.version == "51";
+        assert nixpkgs.lib.versionAtLeast pkgs.gsettings-desktop-schemas.version "51";
+        pkgs.mutter.tests.libdirExists;
       fex-overlay-upgrade = import ./checks/fex-overlay-upgrade.nix { inherit pkgs; };
       flatpak-sandbox = pkgs.runCommand "aurora-flatpak-build-sandbox" {
         requiredSystemFeatures = [ "uid-range" ];

@@ -18,7 +18,7 @@ let
   '';
   pins = builtins.fromJSON (builtins.readFile ./sources.json);
   source = name: final.fetchurl {
-    name = "${name}-${pins.${name}.commit}.tar.gz";
+    name = pins.${name}.archive_file or "${name}-${pins.${name}.commit}.tar.gz";
     url = pins.${name}.source_url;
     hash = pins.${name}.nix_hash;
   };
@@ -314,13 +314,35 @@ in {
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
     '';
   });
-  # A VRR-capable output defaults to variable refresh rate: the variable
-  # variant of the preferred mode becomes the preferred one, which new monitor
-  # configurations use. Saved configurations still win. The same patch is in
-  # fedora-aurora's mutter package (fedora-aurora PR 41).
+  # API 51 must be paired with the GNOME 51 package set in flake.lock.
+  # Fedora and Arch carry these same four patches on this release archive.
   mutter = prev.mutter.overrideAttrs (old: {
+    version = pins.mutter.version;
+    src = source "mutter";
+    mesonFlags = builtins.filter (flag: flag != "-Dtests=disabled") old.mesonFlags
+      ++ [ "-Dtests=enabled" ];
+    nativeBuildInputs = [ (final.python3.withPackages (p: [
+      p.argcomplete p.dbus-python p.python-dbusmock p.pygobject3
+    ])) ] ++ builtins.filter (input: input != final.python3) old.nativeBuildInputs;
+    buildInputs = old.buildInputs ++ [ final.gtk3 final.umockdev final.libevdev ];
+    nativeCheckInputs = [ final.xvfb-run final.dbus final.pipewire final.wireplumber final.dejavu_fonts ];
+    doCheck = true;
+    checkPhase = ''
+      runHook preCheck
+      export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+      export FONTCONFIG_FILE=${final.makeFontsConf { fontDirectories = [ final.dejavu_fonts ]; }}
+      # Tests run before wrapGAppsHook wraps installed programs.
+      export XDG_DATA_DIRS="''${GSETTINGS_SCHEMAS_PATH:-}:''${XDG_DATA_DIRS:-}"
+      export XDG_RUNTIME_DIR=$(mktemp -d)
+      trap 'rm -rf "$XDG_RUNTIME_DIR"' EXIT
+      xvfb-run -a meson test --print-errorlogs
+      runHook postCheck
+    '';
     patches = (old.patches or [ ]) ++ map stableFile [
+      ./patches/mutter-touch-null-focus.patch
       ./patches/mutter-prefer-variable-refresh-rate.patch
+      ./patches/mutter-input-capture-disconnect.patch
+      ./patches/mutter-x11-frame-counter-views.patch
     ];
   });
   # nixpkgs exposes a symlink join here: overriding its src does not replace
