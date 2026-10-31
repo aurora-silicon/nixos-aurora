@@ -38,6 +38,7 @@ NEEDS = {
     'libfprint': ['libfprint'],
     'avd-fw': ['avd-fw'],
     'omarchy-ane-tools': ['omarchy-ane-tools'],
+    'mil-hwx-compiler': ['mil-hwx-compiler'],
     'upower': ['upower-aurora'],
     'speakerguardd': ['speakerguardd'],
     'mutter': [],

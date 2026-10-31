@@ -120,6 +120,10 @@ in {
     version = pins.avd-fw.version;
   };
   # Userspace for the kernel's ANE driver; no firmware, module or overlays.
+  mil-hwx-compiler = final.callPackage ./mil-hwx-compiler.nix {
+    src = source "mil-hwx-compiler";
+    version = pins.mil-hwx-compiler.version;
+  };
   omarchy-ane-tools = final.callPackage ./omarchy-ane-tools.nix {
     src = source "omarchy-ane-tools";
     version = pins.omarchy-ane-tools.version;

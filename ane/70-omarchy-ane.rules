@@ -1,0 +1,2 @@
+# ANE access is limited to explicitly enrolled members of accel.
+SUBSYSTEM=="accel", KERNEL=="accel[0-9]*", GROUP="accel", MODE="0660"
