@@ -47,6 +47,7 @@ NEEDS = {
     'upower': ['upower-aurora'],
     'speakerguardd': ['speakerguardd'],
     'mutter': [],
+    'docker': [],  # nixpkgs' pinned release, with the local engine patch
     'speakersafetyd': [],
     'bankstown': ['bankstown'],
     'neo-platform': ['aurora-neo-platform-config'],

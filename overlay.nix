@@ -1,6 +1,19 @@
 final: prev:
 let
   stableFile = path: final.writeText (builtins.baseNameOf path) (builtins.readFile path);
+  # nixpkgs constructs the CLI and engine with the same builder argument.
+  # Patch only the engine, so the resulting Docker symlinks and wrappers all
+  # refer to the fixed moby derivation, including its exposed .moby output.
+  dockerPolicyBuilder = args: prev.buildGoModule (args // final.lib.optionalAttrs
+    ((args.pname or "") == "moby") {
+      patches = (args.patches or [ ]) ++ [ (stableFile ./patches/docker-query-forwarding-policy.patch) ];
+      doCheck = true;
+      checkPhase = ''
+        runHook preCheck
+        go test -mod=vendor -p=8 ./daemon/libnetwork/iptables -run '^TestSetupDockerForwardingPolicy$' -count=1 -v
+        runHook postCheck
+      '';
+    });
   kernelProvenance = builtins.fromJSON (builtins.readFile ./kernel/provenance.json);
   kernelBase =
     assert final.lib.assertMsg
@@ -75,6 +88,8 @@ let
     compilerTools = mesaCompilerTools;
   };
 in {
+  docker_29 = prev.docker_29.override { buildGoModule = dockerPolicyBuilder; };
+  docker = final.docker_29;
   aurora-logos = final.callPackage ./logos/package.nix { };
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {

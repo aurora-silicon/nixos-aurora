@@ -1,6 +1,11 @@
 { lib, pkgs, ... }:
 {
   hardware.bluetooth.enable = true;
+  # BlueZ 5.87 includes the empty default-parameter transaction fix.
+  assertions = [ {
+    assertion = lib.versionAtLeast pkgs.bluez.version "5.87";
+    message = "Aurora requires BlueZ >= 5.87 (empty default system config fix).";
+  } ];
   hardware.enableRedistributableFirmware = true;
   hardware.firmware = [ pkgs.aurora-avd-firmware ];
   services.upower.enable = true;
