@@ -1,0 +1,3 @@
+# Apple ANS has one I/O queue. Avoid scheduler dispatch overhead by default.
+# Kept identical in fedora-aurora, alarm-aurora and nixos-aurora.
+ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="nvme*n*", DRIVERS=="nvme-apple", ATTR{queue/scheduler}=="*none*", ATTR{queue/scheduler}="none"
