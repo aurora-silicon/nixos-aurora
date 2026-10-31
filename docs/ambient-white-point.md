@@ -134,7 +134,8 @@ resetting.
 The overlay extends the repository's locked nixpkgs GSD 50.1 derivation and
 retains its existing patches, dependencies and install checks. The current
 nixos-unstable recipe also uses 50.1. The color test suite is enabled, with
-`dbus-daemon` present for its private bus. The flake exposes
+`dbus-daemon` present for its private bus and desktop schemas available to the
+existing Night Light test through `XDG_DATA_DIRS`. The flake exposes
 `packages.aarch64-linux.gnome-settings-daemon` for CI and package review.
 
 ```sh

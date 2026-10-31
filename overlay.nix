@@ -364,6 +364,7 @@ in {
     doCheck = true;
     checkPhase = ''
       runHook preCheck
+      export XDG_DATA_DIRS="${final.gsettings-desktop-schemas}/share/gsettings-schemas/${final.gsettings-desktop-schemas.name}''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
       meson test --no-rebuild --print-errorlogs gcm-self-test ambient-policy ambient-service
       runHook postCheck
     '';
