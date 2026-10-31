@@ -39,6 +39,7 @@ let
         --replace-fail '@DATA@' "$out/share/aurora-models"
       chmod +x $out/bin/aurora-model-fetch
       patchShebangs $out/bin
+      wrapProgram $out/bin/aurora-model-fetch --set-default SSL_CERT_FILE '${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt'
     '';
     meta = { license = lib.licenses.mit; mainProgram = "aurora-model-fetch"; };
   };
