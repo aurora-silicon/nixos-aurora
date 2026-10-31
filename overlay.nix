@@ -37,6 +37,7 @@ let
     commit = pins.mesa-aurora.commit;
   }).overrideAttrs (old: {
     pname = "aurora-mesa-compiler-tools";
+    outputs = [ "out" ];
     configurePhase = ''
       runHook preConfigure
       meson setup tools --prefix="$out" --libdir=lib --buildtype=release "''${mesonFlags[@]}" \
@@ -243,7 +244,15 @@ in {
     version = pins.uboot-aurora.version;
     patches = [ ];
   });
-  mesa = final.callPackage ./mesa.nix {
+  mesa = (final.callPackage ./mesa.nix {
+    mesa = prev.mesa;
+    src = source "mesa-aurora";
+    commit = pins.mesa-aurora.commit;
+  }).overrideAttrs (old: {
+    # Preserve the conventional interface without retaining LLVM in GL's closure.
+    passthru = old.passthru // { opencl = final.aurora-rusticl; };
+  });
+  aurora-rusticl = final.callPackage ./rusticl.nix {
     mesa = prev.mesa;
     src = source "mesa-aurora";
     commit = pins.mesa-aurora.commit;

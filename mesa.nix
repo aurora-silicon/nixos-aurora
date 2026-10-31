@@ -12,7 +12,7 @@
     };
   patches = lib.optionals guest [ (writeText "mesa-hk-tests-bind-size-t.patch"
     (builtins.readFile ./patches/mesa-hk-tests-bind-size-t.patch)) ];
-  outputs = [ "out" ];
+  outputs = [ "out" ] ++ lib.optionals (!guest) [ "dev" ];
   # Guest debug outputs would retain host source paths. Preserve the build
   # IDs the drivers need explicitly, while shipping stripped guest libraries.
   separateDebugInfo = if guest then false else old.separateDebugInfo;
@@ -43,7 +43,7 @@
     "-Dplatforms=x11,wayland" "-Dgallium-drivers=asahi,zink,softpipe"
     "-Dvulkan-drivers=asahi" "-Dvulkan-layers=" "-Dglvnd=enabled"
     "-Degl=enabled" "-Dgbm=enabled" "-Dglx=dri" "-Dgles1=enabled"
-    "-Dgles2=enabled" "-Dvideo-codecs=${if guest then "" else "all"}" "-Dexpat=enabled"
+    "-Dgallium-rusticl=false" "-Dgles2=enabled" "-Dvideo-codecs=${if guest then "" else "all"}" "-Dexpat=enabled"
     "-Dzstd=enabled" "-Dlmsensors=${if guest then "disabled" else "enabled"}" "-Dlibunwind=disabled"
     "-Dvalgrind=disabled" "-Db_ndebug=true" "-Dwrap_mode=nodownload"
   ] ++ lib.optionals guest [ "-Dgallium-rusticl=false"
@@ -81,6 +81,9 @@ assert json.load(sys.stdin)["host"]["c"]["id"] == "clang", "Mesa must use the se
     runHook postCheck
   '';
   postInstall = ''
+    # Assert the installed artifact, including after Meson test regeneration.
+    strings "$out/${if guest then "usr/${if llvmPackages.stdenv.hostPlatform.is64bit then "lib64" else "lib"}" else "lib"}/libvulkan_asahi.so" | \
+      grep -F '(git-${builtins.substring 0 10 commit}), Borealis'
     echo ${commit} > "$out/.aurora-mesa-commit"
   '';
   # Guest libraries run inside a distribution rootfs, so they use its loaders

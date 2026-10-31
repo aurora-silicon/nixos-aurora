@@ -1,7 +1,7 @@
 name: Aurora NixOS checks and builds
 on:
   push:
-    branches: [main]
+    branches: [main, 'ci/**']
   pull_request:
   workflow_dispatch:
     inputs:
@@ -88,6 +88,11 @@ jobs:
         run: python3 scripts/prefetch-sources.py "$PACKAGE"
       - name: Build the pinned Aurora hardware package
         run: nix build --max-jobs 1 --cores 4 --print-build-logs --json '.#packages.aarch64-linux.${{ matrix.package }}^*' > build.json
+      - name: Exercise graphics generation switch and rollback
+        if: matrix.package == 'graphics'
+        run: |
+          git fetch origin main
+          nix shell --inputs-from . nixpkgs#clinfo -c bash scripts/test-graphics-generation "$(git rev-parse origin/main)"
       - name: Record output identity and closure
         run: |
           mapfile -t outputs < <(jq -r '.[].outputs[]' build.json)
@@ -109,6 +114,8 @@ jobs:
           path: |
             build.json
             closure.json
+            graphics-generation/*.txt
+            graphics-generation/*.sha256
             cache/
       # Provenance for the exact artifact bytes; publication verifies it.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -125,5 +132,7 @@ jobs:
           path: |
             build.json
             closure.json
+            graphics-generation/*.txt
+            graphics-generation/*.sha256
           if-no-files-found: ignore
           retention-days: 14

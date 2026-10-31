@@ -82,7 +82,7 @@ class NixPinTests(unittest.TestCase):
 
     def test_mesa_ci_includes_both_runtime_graphics_payloads(self):
         selected = module.ci_inputs(['kernel', 'mesa'])['checks.yml']['packages'].split()
-        self.assertEqual(set(selected), {'kernel', 'mesa', 'fex-mesa', 'flatpak-gl'})
+        self.assertEqual(set(selected), {'kernel', 'mesa', 'fex-mesa', 'flatpak-gl', 'rusticl', 'graphics'})
         self.assertEqual(module.ci_inputs(['aura']), {'checks.yml': {'packages': 'aura'}})
 
     def test_tracked_sources_are_pinned_with_sri_hashes(self):

@@ -59,6 +59,7 @@
     boot.plymouth.enable = lib.mkDefault (config.aurora.desktop != "minimal");
     boot.plymouth.theme = lib.mkDefault "spinner";
     hardware.graphics.enable = true;
+    hardware.graphics.extraPackages = [ pkgs.aurora-rusticl ];
     services.desktopManager.plasma6.enable = config.aurora.desktop == "kde";
     services.displayManager.sddm.enable = config.aurora.desktop == "kde";
     services.desktopManager.gnome.enable = config.aurora.desktop == "gnome";
