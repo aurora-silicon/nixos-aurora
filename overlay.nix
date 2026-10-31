@@ -1,13 +1,23 @@
 final: prev:
 let
   stableFile = path: final.writeText (builtins.baseNameOf path) (builtins.readFile path);
+  kernelProvenance = builtins.fromJSON (builtins.readFile ./kernel/provenance.json);
+  kernelBase =
+    assert final.lib.assertMsg
+      (kernelProvenance.kernel_commit == pins."kernel-aurora".commit
+        && kernelProvenance.config_upstream.kernel_commit == kernelProvenance.kernel_commit)
+      "Refresh the canonical ALARM resolved config together with the kernel pin";
+    assert final.lib.assertMsg
+      (builtins.hashFile "sha256" ./kernel/config == kernelProvenance.config_upstream.config_sha256)
+      "The vendored ALARM resolved config does not match its provenance";
+    builtins.readFile ./kernel/config;
   # The shared distribution config with NixOS's requirements on top, as the
   # build merges them. NixOS modules read kernel features from this.
   kernelConfig = final.lib.listToAttrs (final.lib.concatMap (line:
     let matched = builtins.match "(CONFIG_[^=]+)=([ym])" line;
     in final.lib.optional (matched != null) {
       name = builtins.elemAt matched 0; value = builtins.elemAt matched 1;
-    }) (final.lib.splitString "\n" (builtins.readFile ./kernel/config + "\n" + builtins.readFile ./kernel/nixos.config)));
+    }) (final.lib.splitString "\n" (kernelBase + "\n" + builtins.readFile ./kernel/nixos.config)));
   kernelLLVM = final.llvmPackages_22;
   # GNOME Initial Setup creates the owner account on GNOME images (its
   # new-user mode). nixpkgs' vendor file skips the account and password pages,
@@ -184,7 +194,7 @@ in {
           cp ${stableFile ./kernel/config} "$buildRoot/.config"
           chmod u+w "$buildRoot/.config"
           bash scripts/kconfig/merge_config.sh -m -O "$buildRoot" \
-            "$buildRoot/.config" arch/arm64/configs/asahi.config ${stableFile ./kernel/nixos.config}
+            "$buildRoot/.config" ${stableFile ./kernel/nixos.config}
           make "''${makeFlags[@]}" olddefconfig
           runHook postConfigure
           make "''${makeFlags[@]}" prepare
