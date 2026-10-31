@@ -73,6 +73,8 @@ let
       substituteInPlace libDF/Cargo.toml \
         --replace-fail 'capi = ["tract", "default-model", "dep:ndarray", "logging"]' 'capi = ["tract", "dep:ndarray", "logging"]'
     '';
+    env.CARGO_PROFILE_RELEASE_OPT_LEVEL = "2";
+    env.CARGO_PROFILE_RELEASE_LTO = "false";
     buildAndTestSubdir = "libDF";
     buildNoDefaultFeatures = true;
     buildFeatures = [ "capi" ];

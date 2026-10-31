@@ -47,3 +47,7 @@ SHA-256 hashes in demos/sources.json. Reproduce it with
 `python3 demos/rebuild-libane-source.py --output /tmp/libane-source.tar.gz`.
 The full upstream archive is not a package input: unrelated compiled fixtures
 and firmware are excluded.
+
+The libDF C API uses O2 without the upstream workspace's thin LTO. This is the
+same release profile on all three distros; reference-Mac performance still
+needs lead measurement. `CARGO_BUILD_JOBS` can limit Rust build parallelism.

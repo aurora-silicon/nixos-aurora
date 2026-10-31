@@ -62,12 +62,13 @@ pin still predates the effects integration. Do not treat it as the new
 blur/framing demo. Its explicit off command is:
 
 ```sh
-systemctl --user disable --now aurora-camera-denoise.service
+systemctl --user mask --now aurora-camera-denoise.service
 ```
 
-For an older ALARM package that globally enabled it, use
-`systemctl --user mask --now aurora-camera-denoise.service` instead. Preserve
-any intentional previous user selection when upgrading.
+This also overrides global enables left by older Fedora/ALARM packages.
+Unmask the unit before choosing to use the legacy filter again. NixOS users
+should leave `aurora.cameraDenoise.enable = false;` unless explicitly opting in.
+Preserve any intentional previous user selection when upgrading.
 
 Aurora-try and the camera effects update still need public source archives.
 No speculative launcher, model pin or unsupported camera command is installed.
