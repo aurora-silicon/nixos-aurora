@@ -43,8 +43,9 @@ BlueZ monitor. Fedora 44 enables `bluez5-codec-lc3` and ships the SPA BlueZ/LC3
 plugins in `pipewire-libs`. Arch/ALARM uses `pipewire-audio` with `liblc3`.
 Pinned nixpkgs enables BlueZ and LC3 on Linux. The Aurora PipeWire fork already
 contains BAP and LC3 support; no fork patch or source-pin replacement is needed.
-The WirePlumber vendor default includes `bap_sink` and `bap_source`, retaining
-A2DP and HFP roles. It does not restrict the available codecs.
+The upstream PipeWire/WirePlumber defaults already include BAP alongside
+classic audio. Aurora does not replace `bluez5.roles` or restrict codecs: a
+fixed role list could hide broadcast, hearing-aid or future upstream roles.
 
 ## Parity
 
@@ -54,7 +55,7 @@ A2DP and HFP roles. It does not restrict the available codecs.
 | BlueZ BAP/BASS/VCP/CSIP | Stock BlueZ plugins | Stock BlueZ plugins | Stock BlueZ plugins |
 | Runtime BlueZ / ISO | Removable RPM; CLI + editable env file | Removable pacman package; same settings | Native `hardware.bluetooth.settings`, `mkDefault` |
 | PipeWire LC3 payload | `pipewire-libs >= 1.2` | `pipewire-audio >= 1.2` | nixpkgs PipeWire, BlueZ/LC3 enabled on Linux |
-| WirePlumber BAP roles | Vendor config, user/system override | Same | `wireplumber.extraConfig`, `mkDefault` |
+| WirePlumber BAP roles | Upstream defaults; user configuration preserved | Same | Same; native `wireplumber.extraConfig` for user choices |
 | Default selection | All image profiles | All image profiles | All image profiles |
 | Opt out | Empty CLI options or remove package | Same | `aurora.bluetooth.leAudio.enable = false;` |
 | Apply / rollback | Explicit service restart / remove package | Same | Generation switch / previous generation |
@@ -126,13 +127,13 @@ over `KernelExperimental` in `main.conf`; clear the environment option first if
 you want to manage that list in `main.conf`. An explicit `Experimental=false` in
 `main.conf` can disable the runtime profiles.
 
-To remove both BlueZ and WirePlumber defaults, remove just the optional package
+To remove the BlueZ defaults, remove just the optional package
 (`sudo dnf remove aurora-bluetooth-le-audio` or
 `sudo pacman -R aurora-bluetooth-le-audio`), then deliberately reload systemd and
 restart Bluetooth and the user's WirePlumber. No platform metapackage removal
 is required. Existing `main.conf` settings and pairings remain owned by BlueZ.
 
-A system or user WirePlumber fragment with a later filename, e.g.
+A system or user WirePlumber fragment, e.g.
 `90-bluetooth-roles.conf`, can replace the roles:
 
 ```ini
@@ -142,10 +143,10 @@ monitor.bluez.properties = {
 ```
 
 NixOS: set `aurora.bluetooth.leAudio.enable = false;` and rebuild. Alternatively,
-ordinary values of `hardware.bluetooth.settings.General.Experimental`,
-`KernelExperimental`, and
-`services.pipewire.wireplumber.extraConfig."50-aurora-le-audio"."monitor.bluez.properties"."bluez5.roles"`
-override the defaults without `mkForce`. Other modules or user fragments may
+ordinary values of `hardware.bluetooth.settings.General.Experimental` and
+`KernelExperimental` override the defaults without `mkForce`. WirePlumber role
+preferences remain entirely in the user's native `wireplumber.extraConfig` or
+user configuration. Other modules or user fragments may
 still enable LE Audio; opting out removes only Aurora's defaults. Roll back with
 `sudo nixos-rebuild switch --rollback` and explicitly restart Bluetooth if its
 configuration changed.

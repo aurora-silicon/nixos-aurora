@@ -17,11 +17,7 @@ in {
       Experimental = lib.mkDefault true;
       KernelExperimental = lib.mkDefault "6fbaf188-05e0-496a-9885-d6ddfdb4e03e";
     };
-    services.pipewire.wireplumber.extraConfig."50-aurora-le-audio" =
-      lib.mkIf config.services.pipewire.enable {
-        "monitor.bluez.properties"."bluez5.roles" = lib.mkDefault [
-          "a2dp_sink" "a2dp_source" "bap_sink" "bap_source" "hfp_hf" "hfp_ag"
-        ];
-      };
+    # PipeWire already enables BAP and ships LC3; do not replace bluez5.roles.
+    # A fixed list would suppress other upstream roles and future additions.
   };
 }
