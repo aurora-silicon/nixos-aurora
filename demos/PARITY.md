@@ -9,6 +9,7 @@
 | RNNoise `6cbfd53` | `aurora-rnnoise` | `aurora-rnnoise` | `rnnoise` flake output |
 | libDF `d375b2d` | `aurora-libdf` | `aurora-libdf` | `libdf` flake output |
 | Whisper `e65f3c4`, Vulkan + Linux ANE adapter | `whisper-cpp-aurora` | `whisper-cpp-aurora` | `whisper-cpp-aurora` flake output |
+| Compiler `3837b4c`, linked H13 and MobileNet tools | `mil-hwx-compiler` | `mil-hwx-compiler` | `mil-hwx-compiler` flake output |
 | First-run SHA-256 model fetcher | `aurora-models` | `aurora-models` | `aurora-models` flake output |
 | Defaults | Opt-in, no device selection | Opt-in, no device selection | Opt-in, no device selection |
 

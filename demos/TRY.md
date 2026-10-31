@@ -6,9 +6,9 @@ model is requested. Run as your normal user.
 
 | Distro | Packages |
 | --- | --- |
-| Fedora aarch64 | `aurora-models aurora-capture-ns aurora-rnnoise aurora-libdf whisper-cpp-aurora` |
+| Fedora aarch64 | `aurora-models aurora-capture-ns aurora-rnnoise aurora-libdf whisper-cpp-aurora mil-hwx-compiler` |
 | Arch Linux ARM | The same package names; build `aurora-capture-ns` once for all three capture packages. |
-| NixOS aarch64 | Flake outputs `aurora-models`, `capture-ns`, `rnnoise`, `libdf`, `whisper-cpp-aurora`. Add packages to `environment.systemPackages` explicitly. No module enables these demos. |
+| NixOS aarch64 | Flake outputs `aurora-models`, `capture-ns`, `rnnoise`, `libdf`, `whisper-cpp-aurora`, `mil-hwx-compiler`. Add packages to `environment.systemPackages` explicitly. No module enables these demos. |
 
 ## Transcribe a file
 

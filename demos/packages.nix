@@ -30,7 +30,7 @@ let
     version = "0.1.0";
     src = ./.;
     dontBuild = true;
-    nativeBuildInputs = [ pkgs.makeWrapper ];
+    nativeBuildInputs = [ pkgs.makeWrapper pkgs.python3 ];
     installPhase = ''
       mkdir -p $out/bin $out/share/aurora-models $out/share/licenses/aurora-models
       cp models.json export_rnnoise.py $out/share/aurora-models/
