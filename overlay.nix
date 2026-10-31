@@ -64,6 +64,7 @@ let
     compilerTools = mesaCompilerTools;
   };
 in {
+  aurora-logos = final.callPackage ./logos/package.nix { };
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [

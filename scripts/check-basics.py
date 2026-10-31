@@ -279,6 +279,20 @@ def check_boot(args):
     return None
 
 
+def check_logos(root):
+    # Catch an absent or corrupt payload before publishing an image. Resolve
+    # Nix store/profile symlinks inside the finished root, as for other basics.
+    for size in (16, 22, 24, 32, 48, 64, 96, 128, 256, 512):
+        for directory, name in (('apps', 'aurora-logo-icon'), ('places', 'start-here')):
+            path = root.path(f'{root.usr}/share/icons/hicolor/{size}x{size}/{directory}/{name}.png')
+            if not path.is_file() or path.read_bytes()[:8] != b'\x89PNG\r\n\x1a\n':
+                return f'missing or invalid Aurora icon: {name} ({size}px)'
+    path = root.path(f'{root.usr}/share/pixmaps/system-logo-white.png')
+    if not path.is_file() or path.read_bytes()[:8] != b'\x89PNG\r\n\x1a\n':
+        return 'missing or invalid Aurora About logo'
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--profile', required=True, choices=['kde', 'gnome', 'minimal'])
@@ -302,6 +316,7 @@ def main():
         if args.profile != 'minimal':
             checks.append(('terminal', check_terminal(root, args.profile)))
             checks.append(('wallpaper', check_wallpaper(root, args.profile)))
+            checks.append(('logos', check_logos(root)))
         checks.append(('network', check_network(root, args.profile)))
         checks.append(('lid', check_lid(root)))
     if args.esp:
