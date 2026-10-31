@@ -75,6 +75,10 @@
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;
       checks.${system} = {
+      bluetooth-le-audio = import ./checks/bluetooth-le-audio.nix {
+        inherit nixpkgs pkgs;
+        configurations = self.nixosConfigurations;
+      };
       fex-overlay-upgrade = import ./checks/fex-overlay-upgrade.nix { inherit pkgs; };
       flatpak-sandbox = pkgs.runCommand "aurora-flatpak-build-sandbox" {
         requiredSystemFeatures = [ "uid-range" ];
