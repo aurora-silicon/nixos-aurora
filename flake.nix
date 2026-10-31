@@ -37,6 +37,7 @@
         aurora-minimal = makeSystem "minimal";
       };
       packages.${system} = {
+        aurora-diag = pkgs.aurora-diag;
         logos = pkgs.aurora-logos;
         firstboot = pkgs.aurora-firstboot;
         docker = pkgs.docker;
