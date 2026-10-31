@@ -51,8 +51,9 @@ all installed Mutter subpackages, then restart GDM and verify again.
 
 ## NixOS integration
 
-The locked nixpkgs input moves to `d028cdf84d65808470ff4d2e1863f393443d32e8`, the
-merge of [nixpkgs' GNOME 51 update](https://github.com/NixOS/nixpkgs/pull/559510).
+The locked nixpkgs input moves to `d27eeb635b2c5fe835604bb747f6bfb722ae6e7d`,
+the GNOME 51 staging-next revision checked on 2026-10-31. It includes
+[nixpkgs' GNOME 51 update](https://github.com/NixOS/nixpkgs/pull/559510).
 This keeps Shell 51.0, schemas 51 and the Mutter 51 ABI coherent. The overlay
 pins Mutter to 51.1 using the archive hash above and enables the unprivileged
 upstream suites. `mutter` and `gnome-shell` are explicit flake outputs so CI

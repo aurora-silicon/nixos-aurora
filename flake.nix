@@ -1,7 +1,7 @@
 {
   description = "Aurora NixOS for Apple Silicon";
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/d028cdf84d65808470ff4d2e1863f393443d32e8";
+    nixpkgs.url = "github:NixOS/nixpkgs/d27eeb635b2c5fe835604bb747f6bfb722ae6e7d";
     apple-silicon.url = "github:nix-community/nixos-apple-silicon/12cd234285d3037cedfab979aa70b75284a59afc";
     apple-silicon.inputs.nixpkgs.follows = "nixpkgs";
   };
