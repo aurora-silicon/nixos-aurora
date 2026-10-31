@@ -120,3 +120,9 @@ with `scripts/fetch-sources.py PACKAGE --output SOURCES`. ALARM source exports
 must use `makepkg --source`, which omits remote archives, rather than
 `--allsource`. Nix publishes runtime outputs/closures, never these source
 fetcher outputs. Owner-fetched firmware remains outside all distributable builds.
+
+
+The private Fedora/ALARM GNUstep Base pin carries upstream fix
+[4a61eee44f53](https://github.com/gnustep/libs-base/commit/4a61eee44f537e5f83f68d447c29a6e5b6e40fdc),
+which removes an invalid `__block` instance-variable qualifier. NixOS uses its
+existing nixpkgs GNUstep package instead of building that pinned private source.
