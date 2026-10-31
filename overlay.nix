@@ -134,10 +134,12 @@ in {
   upower = prev.upower.overrideAttrs (old: {
     src = source "upower-aurora";
     version = pins.upower-aurora.version;
+    doCheck = true;
     postConfigure = (old.postConfigure or "") + ''
       meson test --list > aurora-registered-tests.txt
       grep -q test_macsmc_kernel_time_at_zero_rate aurora-registered-tests.txt
       grep -q test_other_supply_ignores_kernel_time aurora-registered-tests.txt
+      grep -q test_macsmc_kernel_time_charge_units aurora-registered-tests.txt
     '';
   });
   aurora-bindgen = final.callPackage ./bindgen { llvmPackages = kernelLLVM; };
