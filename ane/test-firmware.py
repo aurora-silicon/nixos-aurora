@@ -20,8 +20,15 @@ with tempfile.TemporaryDirectory() as work:
     f.verify = lambda data, size, sha: None
     _, name, size, sha = f.FETCH['apple,t8112'][:4]
     staged = root / 'var/lib/aurora/ane-firmware' / name
-    staged.parent.mkdir(parents=True)
-    staged.write_bytes(b'test placeholder')
+    # Exercise the real destination/atomic-install code with synthetic input;
+    # these replacements ensure that no network or Apple payload is involved.
+    (dt / 'chosen').mkdir()
+    (dt / 'chosen/asahi,os-fw-version').write_bytes(b'13.5\0')
+    f.fetch_member = lambda url, member: b'test placeholder'
+    f.im4p_payload = lambda blob: blob
+    assert f.main(['--root', str(root)]) == 0
+    assert staged.read_bytes() == b'test placeholder'
+    assert not (root / 'usr/lib/firmware').exists()
     assert f.VENDOR == 'run/aurora-firmware/vendorfw'
     with contextlib.redirect_stderr(io.StringIO()):
         assert f.main(['--root', str(root), '--check']) == 1
