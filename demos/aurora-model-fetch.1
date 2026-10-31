@@ -1,0 +1,31 @@
+.\" SPDX-License-Identifier: MIT
+.TH AURORA-MODEL-FETCH 1 "November 2026" "Aurora demos"
+.SH NAME
+aurora-model-fetch \- fetch and verify an open demo model
+.SH SYNOPSIS
+.B aurora-model-fetch
+.RI [ --cache " DIR" ]
+.RB [ --refresh ]
+.I MODEL
+.SH DESCRIPTION
+Fetch rnnoise, df3 or whisper-tiny.en on explicit request. Print the verified
+local path. Downloads use immutable URLs and SHA-256 identities from the
+installed model manifest. RNNoise serialization has a separate output hash.
+.SH OPTIONS
+.TP
+.BI --cache " DIR"
+Use DIR instead of the XDG cache location.
+.TP
+.B --refresh
+Download and verify before atomically replacing an existing cached model.
+.TP
+.B --help
+Print usage.
+.SH FILES
+The default cache is $XDG_CACHE_HOME/aurora-models, or ~/.cache/aurora-models.
+.SH EXIT STATUS
+Zero means a verified model path was printed. A nonzero status leaves the
+previous cache intact. Corrupt cached data requires an explicit refresh.
+.SH NOTES
+Installation downloads no weights and starts no service. See the installed
+manifest for each model's source and licence. No microphone or speaker is used.

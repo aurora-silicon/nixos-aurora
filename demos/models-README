@@ -1,0 +1,15 @@
+Aurora model fetcher
+
+Run aurora-model-fetch rnnoise, aurora-model-fetch df3, or
+aurora-model-fetch whisper-tiny.en. The command prints the verified local path.
+Use --cache DIR to select a cache; use --refresh to replace corrupt cached data
+only after a new download verifies. See aurora-model-fetch(1) for details.
+
+Installation starts no service and downloads no weights. The installed
+models.json records the immutable source, licence and SHA-256 identity for
+each model. RNNoise source weights are BSD-3-Clause, DF3 relies on the
+DeepFilterNet repository's MIT/Apache-2.0 grant, and Whisper tiny.en is MIT.
+
+The serializer is invoked explicitly with the fetcher's Python interpreter.
+It is installed as data without an executable shebang; its upstream source
+and licence notice are preserved in the source package.

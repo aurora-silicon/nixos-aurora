@@ -1,0 +1,5 @@
+--- a/libDF/Cargo.toml
++++ b/libDF/Cargo.toml
+@@ -85,1 +85,1 @@
+-capi = ["tract", "default-model", "dep:ndarray", "logging"]
++capi = ["tract", "dep:ndarray", "logging"]

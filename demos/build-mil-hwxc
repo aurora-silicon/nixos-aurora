@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Arguments: compiler source, dependency source parent, isolated runtime prefix.
+# Sources must already be unpacked and checksum verified by the package manager.
+set -eo pipefail
+compiler=$(realpath "$1")
+deps=$(realpath "$2")
+prefix=$(realpath -m "$3")
+jobs=${AURORA_BUILD_JOBS:-6}
+export CC=clang CXX=clang++ OBJC=clang OBJCXX=clang++
+cmake -S "$deps/libobjc2-a1faad66cee79f29c4ca268b004111edc33a2ae2" -B objc-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DTESTS=OFF -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build objc-build -j "$jobs"
+cmake --install objc-build
+export PATH="$prefix/bin:$PATH" LD_LIBRARY_PATH="$prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export PKG_CONFIG_PATH="$prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+export CPPFLAGS="-I$prefix/include" LDFLAGS="-L$prefix/lib -Wl,-rpath,$prefix/lib -fuse-ld=lld"
+(cd "$deps/tools-make-d0349cc83a23367acdc53df364f73504c281b26c"; ./configure --prefix="$prefix" --with-layout=fhs --with-library-combo=ng-gnu-gnu --with-runtime-abi=gnustep-2.0 --enable-objc-arc --enable-native-objc-exceptions; make -j "$jobs"; make install)
+export GNUSTEP_CONFIG_FILE="$prefix/etc/GNUstep/GNUstep.conf"
+. "$prefix/share/GNUstep/Makefiles/GNUstep.sh"
+(cd "$deps/libs-base-3d7013e144b153abcd6c088dc8d6c64ebd43bc4b"; ./configure --prefix="$prefix" --disable-tls --disable-xslt --disable-zeroconf --disable-libdispatch --disable-nsurlsession; make -j "$jobs"; make install)
+make -C "$compiler" build/mil-hwxc GNUSTEP_PREFIX="$prefix" GNUSTEP_CONFIG="$prefix/bin/gnustep-config" CXX=clang++
+"$compiler/build/mil-hwxc" --help
+python3 "$compiler/tests/test_h13_linked_cli.py" "$compiler/build/mil-hwxc"
+
+python3 "$compiler/tools/h13_run_linux.py" --help
