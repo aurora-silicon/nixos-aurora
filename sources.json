@@ -154,6 +154,16 @@
     "version": "0.3.1",
     "tag": "v0.3.1",
     "nix_hash": "sha256-Re3crQPWiqzLeNYicRuR8USoj535UnhOjGTJvR6wN5A=",
-    "redistribute_source": false
+    "redistribute_source": false,
+    "extra_sources": {
+      "gnustep-base": {
+        "repository": "https://github.com/gnustep/libs-base",
+        "commit": "3d7013e144b153abcd6c088dc8d6c64ebd43bc4b",
+        "source_url": "https://codeload.github.com/gnustep/libs-base/tar.gz/3d7013e144b153abcd6c088dc8d6c64ebd43bc4b",
+        "archive_root": "libs-base-3d7013e144b153abcd6c088dc8d6c64ebd43bc4b",
+        "sha256": "2c6b39a703e755ca6947cee41db1527fe95f5ab5f24b55fc02593fb0e3ca6520",
+        "version": "1.31.1"
+      }
+    }
   }
 }

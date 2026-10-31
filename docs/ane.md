@@ -19,7 +19,8 @@ private `libobjc2` and GNUstep Base libraries from the exact commits in upstream
 bootstrap script, using verified archives and no build-time downloads. These
 MIT/LGPL-2.1-or-later libraries live under `lib/mil-hwx-compiler`, with their
 licenses, and do not replace or provide the system's GNUstep ABI. NixOS uses
-nixpkgs' libobjc2/GNUstep derivations as runtime dependencies. No macOS frameworks
+nixpkgs' libobjc2/make and a compiler-private Base 1.31.1 derivation from the
+same source pin and upstream fix as runtime dependencies. No macOS frameworks
 or compiled Apple model examples are installed. The compiler's H13 software
 suite runs in every recipe; no device is needed.
 
@@ -124,5 +125,6 @@ fetcher outputs. Owner-fetched firmware remains outside all distributable builds
 
 The private Fedora/ALARM GNUstep Base pin carries upstream fix
 [4a61eee44f53](https://github.com/gnustep/libs-base/commit/4a61eee44f537e5f83f68d447c29a6e5b6e40fdc),
-which removes an invalid `__block` instance-variable qualifier. NixOS uses its
-existing nixpkgs GNUstep package instead of building that pinned private source.
+which removes an invalid `__block` instance-variable qualifier. NixOS uses the same Base pin/fix in a compiler-private derivation with
+nixpkgs' libobjc2/make. Base 1.29 lacks required compiler APIs; the system
+GNUstep package is not overridden.
