@@ -1,6 +1,12 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, utils, ... }:
 let
   layout = config.aurora.imageLayout;
+  # The device units root= can name for this image, as aurora-initrd-root
+  # --root-device-units prints them for dracut and mkinitcpio.
+  rootDeviceUnits = [
+    "${utils.escapeSystemdPath "/dev/disk/by-uuid/${layout.rootUUID}"}.device"
+    "${utils.escapeSystemdPath "/dev/disk/by-label/AURORA_ROOT"}.device"
+  ];
   layoutFile = pkgs.writeText "aurora-image-layout" ''
     format=1
     root_uuid=${layout.rootUUID}
@@ -73,30 +79,33 @@ in {
         Environment = "AURORA_IMAGE_LAYOUT=${layoutFile}";
       };
     };
-    boot.initrd.systemd.units."sysroot.mount" = {
+    # sysroot.mount keeps the root device fileSystems names. When
+    # aurora-initrd-root opens an encrypted root it points sysroot at
+    # /dev/mapper/root itself (a runtime drop-in and a daemon-reload), as on
+    # Fedora and ALARM. A root left plaintext (encryption declined at install,
+    # or a layout the service leaves alone) mounts as it is; a static
+    # What=/dev/mapper/root would wait for a mapper that never appears.
+    boot.initrd.systemd.units = {
+      "sysroot.mount" = {
+        overrideStrategy = "asDropin";
+        text = ''
+          [Unit]
+          Requires=aurora-initrd-root.service
+          After=aurora-initrd-root.service
+        '';
+      };
+    } // lib.genAttrs ([ "dev-mapper-root.device" ] ++ rootDeviceUnits) (_: {
       overrideStrategy = "asDropin";
-      # The first conversion replaces the plaintext device while the initrd
-      # is running. Queue sysroot against the mapper from the outset so its
-      # original device job cannot expire during the conversion.
-      text = ''
-        [Unit]
-        Requires=aurora-initrd-root.service
-        After=aurora-initrd-root.service
-
-        [Mount]
-        What=/dev/mapper/root
-      '';
-    };
-    boot.initrd.systemd.units."dev-mapper-root.device" = {
-      overrideStrategy = "asDropin";
-      # The first-boot LUKS conversion can take longer than systemd's default
-      # device-job timeout. Keep waiting for the mapper while the conversion
-      # service runs; its own failures are reported by that service.
+      # The first-boot LUKS conversion replaces the plaintext device while the
+      # initrd runs and can outlast systemd's default device-job timeout. The
+      # root device returns as the opened mapper (same Btrfs UUID); keep
+      # waiting while the conversion service runs, which reports its own
+      # failures.
       text = ''
         [Unit]
         JobRunningTimeoutSec=infinity
       '';
-    };
+    });
     # The shared aurora-firstboot.service, declared here because the package
     # carries no unit files. On desktop images the desktop's own setup creates
     # the owner (Plasma Setup on KDE, GNOME Initial Setup on GNOME), whose
