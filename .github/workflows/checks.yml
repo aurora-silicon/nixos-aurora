@@ -62,12 +62,16 @@ jobs:
             extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
             extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
       - name: Build configuration and first-boot checks
+        # nixos-test-driver's vhost-device-vsock dependency tests CID_LOCAL.
+        # Load its kernel prerequisite on the runner, outside the Nix sandbox.
+        # Keep the dependency's tests enabled.
         run: |
+          sudo modprobe vsock_loopback
           nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
             .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity
   fex-overlay:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -75,6 +79,8 @@ jobs:
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b
         with:
           extra_nix_config: experimental-features = nix-command flakes
+      - name: Enable the NixOS test driver's vsock loopback prerequisite
+        run: sudo modprobe vsock_loopback
       - run: nix build --no-link --print-build-logs .#checks.aarch64-linux.fex-overlay-upgrade
   hardware:
     needs: evaluate
