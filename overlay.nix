@@ -11,6 +11,7 @@ let
       (builtins.hashFile "sha256" ./kernel/config == kernelProvenance.config_upstream.config_sha256)
       "The vendored ALARM resolved config does not match its provenance";
     builtins.readFile ./kernel/config;
+  kernelBaseFile = final.writeText "config" kernelBase;
   # The shared distribution config with NixOS's requirements on top, as the
   # build merges them. NixOS modules read kernel features from this.
   kernelConfig = final.lib.listToAttrs (final.lib.concatMap (line:
@@ -149,7 +150,7 @@ in {
         version = "7.3.0";
         modDirVersion = "7.3.0";
         src = source "kernel-aurora";
-        configfile = stableFile ./kernel/config;
+        configfile = kernelBaseFile;
         config = kernelConfig;
         stdenv = kernelLLVM.stdenv;
         # Keep the native wrapped host compiler for host tools/RPATHs;
@@ -191,7 +192,7 @@ in {
           runHook preConfigure
           mkdir build
           export buildRoot="$PWD/build"
-          cp ${stableFile ./kernel/config} "$buildRoot/.config"
+          cp ${kernelBaseFile} "$buildRoot/.config"
           chmod u+w "$buildRoot/.config"
           bash scripts/kconfig/merge_config.sh -m -O "$buildRoot" \
             "$buildRoot/.config" ${stableFile ./kernel/nixos.config}
