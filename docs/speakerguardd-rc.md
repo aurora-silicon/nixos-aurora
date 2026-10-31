@@ -2,8 +2,8 @@
 
 Upstream review: https://github.com/aurora-silicon/speakerguardd/pull/27
 
-All three draft packaging PRs pin the same candidate, `526790d8db34a823d9ffc6c36b642d0caf4a22ed`.
-Source archive SHA-256: `0748c91b67d783ceebeed46d363560ca690e846593b32009ccc069c304f1b259`.
+All three draft packaging PRs pin the same candidate, `ca1a989823def1632af4cc37ee62326fce6beda5`.
+Source archive SHA-256: `3edfd2256a89ec759b0fc6ef6980f78c132fdcda69d55e4f1d807589f78ed2a0`.
 
 | Distribution | Package version | Native integration |
 | --- | --- | --- |
@@ -45,3 +45,13 @@ For NixOS prepare the next boot generation with `nixos-rebuild boot`, keeping
 the governing generation until reboot. Preserve the independent fallback
 and the current model/record/marker evidence. A generic package update must
 not remove a marker or force a runtime state to appear cold.
+
+The previous pin `526790d` failed three tests in native distro CI (Fedora
+41194590811, Arch 41194590761, Nix 41194590907), including the retained
+unknown-start safety oracle. This pin restores the legacy model's own
+conservative drain peak and preserves overflow rejection. The original
+oracle and its 1e-8 comparison remain unchanged. The public archive matches
+the final controller validation input byte for byte. The listening fixes
+remain a separate follow-up; native package acceptance must still
+pass before release. Keep these source-only drafts unmerged and do not
+install rc.2 on M1 Pro, M2 or J616s. No deployment is part of this change.
