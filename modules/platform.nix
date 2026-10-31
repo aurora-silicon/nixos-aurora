@@ -11,7 +11,17 @@
   services.upower.enable = true;
   hardware.wirelessRegulatoryDatabase = true;
   systemd.packages = [ pkgs.speakerguardd ];
-  services.udev.packages = [ pkgs.speakerguardd ];
+  services.udev.packages = [
+    pkgs.speakerguardd
+    # Keep the firmware's product name unchanged in ID_MODEL (hostnamed's
+    # hardware model): udev turns parentheses into underscores in $attr{}.
+    (pkgs.writeTextFile {
+      name = "aurora-dmi-id-rules";
+      destination = "/lib/udev/rules.d/61-aurora-dmi-id.rules";
+      text = builtins.replaceStrings [ "@sed@" ] [ "${pkgs.gnused}/bin/sed" ]
+        (builtins.readFile ./61-aurora-dmi-id.rules);
+    })
+  ];
   # The sense-PCM udev rule starts the feed-forward guardian only on J700.
   systemd.services.speakersafetyd.serviceConfig = {
     ExecCondition = "${pkgs.speakerguardd}/libexec/speakerguardd/use-feedback-guard";
