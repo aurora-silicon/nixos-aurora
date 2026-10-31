@@ -134,7 +134,7 @@ let
     version = pins."whisper.cpp-aurora".version;
     src = source "whisper.cpp-aurora";
     nativeBuildInputs = [ pkgs.cmake pkgs.ninja pkgs.shaderc pkgs.python3 pkgs.makeWrapper ];
-    buildInputs = [ pkgs.vulkan-headers pkgs.vulkan-loader ];
+    buildInputs = [ pkgs.vulkan-headers pkgs.vulkan-loader pkgs.spirv-headers ];
     cmakeFlags = [
       "-DBUILD_SHARED_LIBS=OFF" "-DGGML_NATIVE=OFF" "-DGGML_VULKAN=ON"
       "-DWHISPER_ANE=ON" "-DWHISPER_SDL2=OFF" "-DWHISPER_COREML=OFF"
