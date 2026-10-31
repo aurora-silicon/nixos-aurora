@@ -49,6 +49,7 @@ NEEDS = {
     'neo-platform': ['aurora-neo-platform-config'],
     'aurora-bless': ['aurora-bless'],
     'camera-denoise': ['camera-denoise'],
+    'mil-hwx-compiler': ['demo-libobjc2', 'demo-tools-make', 'demo-libs-base'],
     'aurora-models': [],
     'rnnoise': ['demo-rnnoise'],
     'libdf': ['demo-libdf'],

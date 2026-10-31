@@ -25,3 +25,5 @@ Do not substitute Apple-compiled programs for missing open encoder bundles.
 
 The effects backend and aurora-try pin are pending public source availability.
 Do not install a private checkout to fill that gap in this packaging review.
+
+The compiler pin is merged main 3837b4cc2f432754970dbff0f61a3397fede7478, never the old PR head. Follow the exact compiler generation and M1 Pro-only runner commands in TRY.md. Package-level runner/relocation validation is pending; do not treat the upstream 10,000-pass result as validation of these packages. Aurora-try camera/mic/OCR/classify/captions are merged per lead, but public sources are still unavailable to this task. No worker audio playback or microphone recording was performed.

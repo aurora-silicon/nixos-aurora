@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Keep the ARC runtime isolated from the distro's legacy Objective-C runtime.
+export GNUSTEP_CONFIG_FILE=@RUNTIME@/etc/GNUstep/GNUstep.conf
+export GNUSTEP_SYSTEM_ROOT=@RUNTIME@
+export LD_LIBRARY_PATH=@RUNTIME@/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+exec @COMPILER@ "$@"

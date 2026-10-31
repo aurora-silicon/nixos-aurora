@@ -431,6 +431,7 @@ in {
       platforms = [ "aarch64-linux" ];
     };
   };
+  mil-hwx-compiler = (import ./demos/packages.nix { pkgs = final; }).compiler;
   aurora-models = (import ./demos/packages.nix { pkgs = final; }).models;
   aurora-rnnoise = (import ./demos/packages.nix { pkgs = final; }).rnnoise;
   aurora-libdf = (import ./demos/packages.nix { pkgs = final; }).libdf;

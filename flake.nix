@@ -72,6 +72,7 @@
         neo-platform = pkgs.aurora-neo-platform-config;
         aurora-bless = pkgs.aurora-bless;
         camera-denoise = pkgs.aurora-camera-denoise;
+        mil-hwx-compiler = pkgs.mil-hwx-compiler;
         aurora-models = pkgs.aurora-models;
         rnnoise = pkgs.aurora-rnnoise;
         libdf = pkgs.aurora-libdf;

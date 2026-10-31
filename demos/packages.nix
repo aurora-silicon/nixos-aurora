@@ -164,4 +164,39 @@ let
     '';
     meta = { license = lib.licenses.mit; platforms = [ "aarch64-linux" ]; mainProgram = "whisper.cpp-aurora"; };
   };
-in { inherit models rnnoise libdf capture whisper; }
+  compiler = pkgs.stdenv.mkDerivation {
+    pname = "mil-hwx-compiler";
+    version = pins.mil-hwx-compiler.version;
+    src = source "mil-hwx-compiler";
+    nativeBuildInputs = [ pkgs.clang pkgs.lld pkgs.cmake pkgs.ninja pkgs.gnumake pkgs.pkg-config pkgs.python3 pkgs.makeWrapper ];
+    buildInputs = [ pkgs.libffi pkgs.libxml2 pkgs.icu pkgs.openssl pkgs.zlib pkgs.robin-map pkgs.libdrm ];
+    dontConfigure = true;
+    buildPhase = ''
+      for archive in ${source "libobjc2"} ${source "tools-make"} ${source "libs-base"} ${source "libane"}; do
+        tar -xzf "$archive"
+      done
+      bash ${./build-mil-hwxc} "$PWD" "$PWD" "$out/lib/mil-hwx-compiler/runtime"
+      make -C omarchy-ane-${pins.libane.commit}/libane -j6 CFLAGS="-O2 -fPIC"
+      cc -O2 -Iomarchy-ane-${pins.libane.commit}/libane tools/h13-mobilenet/anechain.c omarchy-ane-${pins.libane.commit}/libane/libane.a -ldrm -o tools/h13-mobilenet/anechain
+    '';
+    installPhase = ''
+      mkdir -p $out/bin $out/libexec/mil-hwx-compiler $out/share/mil-hwx-compiler/tools $out/share/licenses/mil-hwx-compiler
+      cp build/mil-hwxc $out/libexec/mil-hwx-compiler/
+      cp -r tools/h13-mobilenet tools/h13-conv-bench $out/share/mil-hwx-compiler/tools/
+      cp LICENSE $out/share/licenses/mil-hwx-compiler/compiler-MIT
+      cp libobjc2-${pins.libobjc2.commit}/COPYING $out/share/licenses/mil-hwx-compiler/libobjc2-MIT
+      cp libs-base-${pins.libs-base.commit}/COPYING.LIB $out/share/licenses/mil-hwx-compiler/GNUstep-LGPL
+      cp tools-make-${pins.tools-make.commit}/COPYING $out/share/licenses/mil-hwx-compiler/GNUstep-GPL
+      cp omarchy-ane-${pins.libane.commit}/LICENSE $out/share/licenses/mil-hwx-compiler/libane-MIT
+      substitute ${./mil-hwxc} $out/bin/mil-hwxc \
+        --replace-fail '@RUNTIME@' "$out/lib/mil-hwx-compiler/runtime" \
+        --replace-fail '@COMPILER@' "$out/libexec/mil-hwx-compiler/mil-hwxc"
+      chmod +x $out/bin/mil-hwxc
+      patchShebangs $out/bin $out/share/mil-hwx-compiler/tools
+      wrapProgram $out/bin/mil-hwxc --prefix PATH : '${lib.makeBinPath [ (pkgs.python3.withPackages (p: [ p.numpy ])) ]}'
+      rm -rf $out/lib/mil-hwx-compiler/runtime/bin $out/lib/mil-hwx-compiler/runtime/include
+      find $out/lib/mil-hwx-compiler/runtime -type f \( -name '*.a' -o -name '*.la' \) -delete
+    '';
+    meta = { license = [ lib.licenses.mit lib.licenses.lgpl21Plus lib.licenses.gpl3Plus ]; platforms = [ "aarch64-linux" ]; mainProgram = "mil-hwxc"; };
+  };
+in { inherit models rnnoise libdf capture whisper compiler; }

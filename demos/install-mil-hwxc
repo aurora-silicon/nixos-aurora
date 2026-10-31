@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Relocate a private build prefix into the package; no system runtime replacement.
+set -euo pipefail
+compiler=$(realpath "$1"); runtime=$(realpath "$2"); dest=$3; final=$4
+mkdir -p "$dest$final" "$dest/usr/libexec/mil-hwx-compiler" "$dest/usr/share/mil-hwx-compiler/tools"
+cp -a "$runtime/lib" "$runtime/etc" "$runtime/share" "$dest$final/"
+# Static archives and build tools are not needed at runtime.
+find "$dest$final" -type f \( -name '*.a' -o -name '*.la' \) -delete
+rm -rf "$dest$final/lib/pkgconfig" "$dest$final/share/GNUstep/Makefiles"
+find "$dest$final/etc" -type f -exec sed -i "s|$runtime|$final|g" {} +
+cp "$compiler/build/mil-hwxc" "$dest/usr/libexec/mil-hwx-compiler/mil-hwxc"
+cp -a "$compiler/tools/h13-mobilenet" "$compiler/tools/h13-conv-bench" "$dest/usr/share/mil-hwx-compiler/tools/"
+# The runtime lookup comes from the wrapper; strip build-directory runpaths.
+find "$dest$final/lib" "$dest/usr/libexec/mil-hwx-compiler" -type f -exec sh -c 'r=$1; shift; for p do if patchelf --print-rpath "$p" >/dev/null 2>&1; then patchelf --set-rpath "$r" "$p"; fi; done' sh "$final/lib" {} +

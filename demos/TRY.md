@@ -82,3 +82,21 @@ neither groups nor device rules. Logind seat ACLs do not grant headless SSH
 sessions access by themselves; the lead must use the runtime's explicit
 permission setup if testing ANE remotely. Permission failure is reported and
 uses the supported fallback; it is never a presence or idle check.
+
+## Compile a linked MobileNet (CPU host; no camera or microphone)
+
+After installing `mil-hwx-compiler`, on any supported aarch64 machine:
+
+```sh
+MILC=mil-hwxc python3 /usr/share/mil-hwx-compiler/tools/h13-mobilenet/mobilenet.py "$PWD/aurora-mobilenet"
+```
+
+Expect synthetic random weights and compiled H13 linked/per-layer packages under `aurora-mobilenet`. This does not open a device. Off: the process exits; remove that explicit output directory to discard the case. On Nix, use the package's `share/mil-hwx-compiler` store path instead of `/usr/share`.
+
+Morning M1 Pro device command, for the lead after reviewing/installing the built package:
+
+```sh
+python3 /usr/share/mil-hwx-compiler/tools/h13-mobilenet/run_chain.py "$PWD/aurora-mobilenet" 10 --no-perop
+```
+
+Expect JSON timing and CPU-reference comparison on H13; off is Ctrl-C, with no persistent worker or config. This worker has not run that command. The lead reports 10,000 MobileNet passes clean on the M1 Pro and aurora-try classify at 5.2 ms ReLU6 with 0 errors; those are lead-provided results, not package validation here. M2/M4/Neo must not run this H13-only runner.

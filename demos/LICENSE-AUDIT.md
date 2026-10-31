@@ -24,3 +24,5 @@ No complete native capture model is advertised by this revision.
 Source for aurora-try and the camera effects update must be publicly fetchable
 before those pins can be added here. The existing camera package is retained,
 with its original source pin, and changed to opt-in.
+
+Compiler source: https://github.com/aurora-silicon/mil-hwx-compiler/tree/3837b4cc2f432754970dbff0f61a3397fede7478 (MIT). Selected implementation text includes upstream encoding tables, not original oracle binaries, receipts, test model files or Apple frameworks. GNUstep runtime dependencies use public gnustep/libobjc2 (MIT), gnustep/libs-base (LGPL-2.1-or-later; library notices also allow LGPL v2+), gnustep/tools-make (GPL-3.0-or-later tools); immutable commits and archive hashes are recorded in sources.json. Runtime source archives and notices must remain available with distributed binaries. No pretrained MobileNet weights are shipped or fetched by this package; the compiler demo generates random synthetic weights.

@@ -100,5 +100,692 @@
     "source_url": "https://codeload.github.com/aurora-silicon/capture-ns/tar.gz/f843fd3d053f716222caa7286a2095a9ffb8e762",
     "archive_root": "capture-ns-f843fd3d053f716222caa7286a2095a9ffb8e762",
     "sha256": "6adc53e4364e8ceb09b64bf019dfc855399693114513360fd4db4141d348d45d"
+  },
+  "mil-hwx-compiler": {
+    "repository": "https://github.com/aurora-silicon/mil-hwx-compiler",
+    "commit": "3837b4cc2f432754970dbff0f61a3397fede7478",
+    "version": "0.1.0",
+    "local_archive": "mil-hwx-compiler-3837b4cc2f432754970dbff0f61a3397fede7478.tar.gz",
+    "archive_root": "mil-hwx-compiler-3837b4cc2f432754970dbff0f61a3397fede7478",
+    "sha256": "3288b55c2bdb5c61607430044cd43e5c67b4d29cc1869aaabfd4ae20e4f30264",
+    "upstream_archive_sha256": "c8f3c20ce682a8556419fcd95993d0fb8d1b5d0dbdb9a0adcf517fbf4645c141",
+    "source_files": [
+      {
+        "path": "LICENSE",
+        "sha256": "f40de840366c4d3787c0cfbc24e88eab86763d9aeca641957efbd012015e22a6"
+      },
+      {
+        "path": "Makefile",
+        "sha256": "70f48e6675771bb3ee3f7f44482e07a0705b2c3b23b65459e1c72b4dd969467c"
+      },
+      {
+        "path": "include/ANEBenchmarkStats.h",
+        "sha256": "0457a00c3a61043b2ad45eda2dc368e2515b30db21ef40bccbfda05b3a3c5e62"
+      },
+      {
+        "path": "include/ANECompiler.h",
+        "sha256": "937189d3c7956f193e2d5fb4f8020906017f920d1b45662292507879da3e9e86"
+      },
+      {
+        "path": "include/ANEDiagnostic.h",
+        "sha256": "8d342b677101fc931bdff237e56bb37540db3f2634f419b7f22b6dc52ab96d4f"
+      },
+      {
+        "path": "include/ANEPlugin.h",
+        "sha256": "da0b7145c01ae0237dac5a2d6858cf29c740888c47e32223e1704d51916781ea"
+      },
+      {
+        "path": "lib/Driver/ANECompiler.mm",
+        "sha256": "3a60ddd4ff83b55574a7b44121e461da0342611795ca0c0f1a628205c290f636"
+      },
+      {
+        "path": "lib/Driver/ANESpatialCompiler.h",
+        "sha256": "120ca5ed684e228e2df9334e0314d130fbcc141524f41c61b53f52afa35a98e5"
+      },
+      {
+        "path": "lib/Driver/ANESpatialCompiler.mm",
+        "sha256": "8bcb07aa2faa2449a2d57234125e2a2582f28003ed042ae1f24b725f3a8dfba3"
+      },
+      {
+        "path": "lib/Driver/ANEStagedCompiler.h",
+        "sha256": "f31619edad7f731a89c096aa70e65a3e649e0fb5f0f5cad57a6ea1995b4549ff"
+      },
+      {
+        "path": "lib/Driver/ANEStagedCompiler.mm",
+        "sha256": "7a8d03517951f28eb9c80c6e8f0b7bbc7103d1182be1f6847077ab5d77a56ea7"
+      },
+      {
+        "path": "lib/HWX/ANEHWXArtifact.h",
+        "sha256": "cb6167262cef6306afe7956784cef5d75f5bafec4f2d9283593420fce7b216f9"
+      },
+      {
+        "path": "lib/HWX/ANEHWXArtifact.mm",
+        "sha256": "e65565c8517ed35dcb29ba843019fc1516471e2cc093e0d15da902f9d66edc1d"
+      },
+      {
+        "path": "lib/HWX/ANESurfaceRole.h",
+        "sha256": "7b6171a1fd14b5a896b492284b4844e9ee8050b6c363467d55c0a7024e7ddd54"
+      },
+      {
+        "path": "lib/HWX/HWXImage.h",
+        "sha256": "521d78875ef47be0fc501e2cc053cd25f903909c65d0e30fc2d524a286b670ba"
+      },
+      {
+        "path": "lib/HWX/HWXImage.mm",
+        "sha256": "5271e0584aa41d12a6fbe5000de4186df0cd91fec1ff266299b2b685589f85c8"
+      },
+      {
+        "path": "lib/HWX/HWXMachOFormat.h",
+        "sha256": "7e8d8c949404bb6614a6b3720d62bcc8a7be90b7329d70b254d0d5eb666291d0"
+      },
+      {
+        "path": "lib/HWX/HWXObjectWriter.h",
+        "sha256": "95eb16134b3a6052e6aeb6393b973eaa2e5f88735a882b2526074475785bde84"
+      },
+      {
+        "path": "lib/HWX/HWXObjectWriter.mm",
+        "sha256": "0005f171cac1e88c52acb4b9b348f673caf74f37f22414738c573e2c2335c77e"
+      },
+      {
+        "path": "lib/IR/ANEGraphIR.h",
+        "sha256": "120ecdf97b8ee83d962e62c7b75089511b7e3849dc9ba1b5230b371457690e32"
+      },
+      {
+        "path": "lib/IR/ANEGraphIR.mm",
+        "sha256": "2ce3795be7a43ee05fa3be4ce63dd7fc68aacb293443fffe31a835083c2d9de3"
+      },
+      {
+        "path": "lib/IR/ANEGraphVerifier.h",
+        "sha256": "7ba244b6da828f88e5f5ccbe74c4959b44972768948e30cb2e1242deafd3ad4d"
+      },
+      {
+        "path": "lib/IR/ANEGraphVerifier.mm",
+        "sha256": "c37e39bb976d68b2970e523c92de7a754c95c08cf6bcc560b4b7cc30f50402cd"
+      },
+      {
+        "path": "lib/IR/ANEOperationGraph.h",
+        "sha256": "1880d76a1fb230fb145ef343a135374a495d1da281100e919d1f5557196cfebd"
+      },
+      {
+        "path": "lib/IR/ANEOperationGraph.mm",
+        "sha256": "4009f862f3de35d0ae2afab67baf9a0d152fc3898b10aa2d4b345d1a20610791"
+      },
+      {
+        "path": "lib/IR/ANEScheduledGraph.h",
+        "sha256": "f9504e710e3bfb0631bd647314ce40d49c9a2e5aab0f75488230dc874675154b"
+      },
+      {
+        "path": "lib/IR/ANEScheduledGraph.mm",
+        "sha256": "6971edf83799bf5d52048ec36b99c3d84373ff270faba4697d29f77ea0cb6ad3"
+      },
+      {
+        "path": "lib/MIL/MILGraphImporter.h",
+        "sha256": "ddf74642dfa10825d66c1aa4443a3ea934302fc7cb7eaf77359410d41fc0df26"
+      },
+      {
+        "path": "lib/MIL/MILGraphImporter.mm",
+        "sha256": "40b1cf437cfaa58aa636065bc866d45d77dd7c00022759d196d323174b3bddca"
+      },
+      {
+        "path": "lib/MIL/MILLexer.h",
+        "sha256": "d4e2ac6ac80f788e096f718c997a437edca689c26a73557109bf2040495c12b5"
+      },
+      {
+        "path": "lib/MIL/MILLexer.mm",
+        "sha256": "98a6f10d5b6484ccc7d973a0f67b984baabd3a796906441c9f9b7f86841c6a01"
+      },
+      {
+        "path": "lib/MIL/MILParser.h",
+        "sha256": "9ed0c834fde72c5a246e414fe68e80964939d3e03cbddb752794b57a9a0ecd2b"
+      },
+      {
+        "path": "lib/MIL/MILParser.mm",
+        "sha256": "958198463fc76771e48c96ad5ea3aeff879818ab12c072b57ea01d3a37014ea3"
+      },
+      {
+        "path": "lib/MIL/MILPrinter.h",
+        "sha256": "1719c2955838b108f8e74d7172eaab753492904b1622ea251d16022cf87f23da"
+      },
+      {
+        "path": "lib/MIL/MILPrinter.mm",
+        "sha256": "19091af94251b2382407cb576bf08cd49899d3f7aaae38f6ee3bab94246a2072"
+      },
+      {
+        "path": "lib/MIL/MILSyntax.h",
+        "sha256": "0a3d8dfcfa870b4539024825f8cdb69f3fc50f7964baa03854deb4745212e46b"
+      },
+      {
+        "path": "lib/MIL/MILSyntax.mm",
+        "sha256": "3266cd0154d39057fa48ba171c5280d75e90aacbe9dcf6dfc6b5fc6be538d678"
+      },
+      {
+        "path": "lib/MIL/MILToken.h",
+        "sha256": "85209aa5ba13c07cf409c80f3e6ea647a5e298bb209851dac13e14b52a536767"
+      },
+      {
+        "path": "lib/Model/ANEBlobResolver.h",
+        "sha256": "0c91de3d2f70ca83ea8bdbf5345fb7f274bf7897228c20b1eb8b3f2a937a79ae"
+      },
+      {
+        "path": "lib/Model/ANEBlobResolver.mm",
+        "sha256": "a7c2bae88bef4b8e671a155fdde201f78a7ffd80b2498bdf721cb8d2a4004707"
+      },
+      {
+        "path": "lib/Pass/ANEPassManager.h",
+        "sha256": "b870a995e0dcc9cb3fe3ede1d23f952864d7e3c54d26b51d7938b60f91875790"
+      },
+      {
+        "path": "lib/Pass/ANEPassManager.mm",
+        "sha256": "b952d2c35c828c85a4517a00179580307aa5550be913e16f88a5d7e863f6722e"
+      },
+      {
+        "path": "lib/Planning/ANEComposedRegionPlanner.h",
+        "sha256": "2d29d883f6bc1bf89fc9d2eedbafbedda1214f7a101477b6fdd7924ab3d28e0a"
+      },
+      {
+        "path": "lib/Planning/ANEComposedRegionPlanner.mm",
+        "sha256": "46da0f3c6492154d1c6e9474cbd3b25cd236c336e301a3d1985b47a0265ade40"
+      },
+      {
+        "path": "lib/Planning/ANEMemoryPlanner.h",
+        "sha256": "8364e0bf1093e657935831fc826bf416cc8fd488952b826e3cd9fa1bce7e7520"
+      },
+      {
+        "path": "lib/Planning/ANEMemoryPlanner.mm",
+        "sha256": "c265d9337486abaae52db65e4bd119d5780f029a8e25bc3a7a63b614ff4cfab4"
+      },
+      {
+        "path": "lib/Planning/ANEProgramPartition.h",
+        "sha256": "2ffc88cf3cfbef3b8aa7e9ce830a1d756fddfb25af74ef126ec00cb32177e35c"
+      },
+      {
+        "path": "lib/Planning/ANEProgramPartition.mm",
+        "sha256": "64f25b5470a507b862aad7c1d59cf8e774b89f41f7713c8525028a407a543919"
+      },
+      {
+        "path": "lib/Planning/ANETaskScheduler.h",
+        "sha256": "259f4509f5171adafd325dfd2828ea76990a79ea11dc6df2ab3fe0292c889fca"
+      },
+      {
+        "path": "lib/Planning/ANETaskScheduler.mm",
+        "sha256": "b418b3f481c859641b7bb4a851f76bfd19d843a940bdd55964b0e2865a4a75b9"
+      },
+      {
+        "path": "lib/Planning/ANETilePlanner.h",
+        "sha256": "6925cb5122aaa5edfcb6099d1f0794b2b36f5f7d2d1f079df97a6fd4135a9f13"
+      },
+      {
+        "path": "lib/Planning/ANETilePlanner.mm",
+        "sha256": "1a353decf78b96706cb6f1fb148c61ba215f2bdd954ff2424663bbaae5dd8b89"
+      },
+      {
+        "path": "lib/Plugin/ANEPluginRegistry.h",
+        "sha256": "3438c8bb63b2f119c0f3a629f9148938c2a37caca6ebcedd4a4c74083cccacf4"
+      },
+      {
+        "path": "lib/Plugin/ANEPluginRegistry.mm",
+        "sha256": "d9007d3be25413b83094376ac311e148c2a945b5508e0532251ec97711eeb9b3"
+      },
+      {
+        "path": "lib/Runtime/ANEBenchmarkStats.cpp",
+        "sha256": "081c7bf04dd919ba0cd76a3f8a94a5da5e84711d395933bc94530d2131afeb4a"
+      },
+      {
+        "path": "lib/Runtime/ANEExecutableBundle.h",
+        "sha256": "c6455d22f71510b247a37cb88f2411d08e09d109c94680d3f8e07e890234f76a"
+      },
+      {
+        "path": "lib/Runtime/ANEExecutableBundle.mm",
+        "sha256": "67e636ad13c8fbdb76081cbb6a555ccbd537b240467dbd36f06c6189a06bc1ff"
+      },
+      {
+        "path": "lib/Runtime/ANEProvisionedRuntime.h",
+        "sha256": "9053a0641fbee6629dbf4b6939b55dd6c563a159092a8c222193e0892fb718f6"
+      },
+      {
+        "path": "lib/Runtime/ANEProvisionedRuntime.mm",
+        "sha256": "51d702d30d6d1a209ee0cda4b9cb7d08cd28de19ac047a65d85ecc50b74ecd27"
+      },
+      {
+        "path": "lib/Support/ANEDiagnostic.mm",
+        "sha256": "4a54b6141ce082c92fd015bf01b0955dcd9267e89ee0c2d6fdcf98150d198907"
+      },
+      {
+        "path": "lib/Transform/ANEDecomposePass.h",
+        "sha256": "68ab9da5beb8a0274c5750e16d99559e80cc937eff0f88776e1f6f76c1253917"
+      },
+      {
+        "path": "lib/Transform/ANEDecomposePass.mm",
+        "sha256": "e2c4c8dff6c861ee6d91f6c6802492d9b2256ebe950c1cb3c183ae63fae584a3"
+      },
+      {
+        "path": "lib/Transform/ANEFusionPass.h",
+        "sha256": "61958d2fcc9af8ab482186bdd1e0851c9560dc4294ba13756d31d9eff6ed69e7"
+      },
+      {
+        "path": "lib/Transform/ANEFusionPass.mm",
+        "sha256": "ea4a06e99a47ce415122d17afd2f2fa645eed719e5213cf49c04ecd2be019013"
+      },
+      {
+        "path": "lib/Transform/ANEH16GLegalizePass.h",
+        "sha256": "7ed90c36b3474842c74b84beb63060fbbcdf67f85da9fdf7b69bd20463a9a309"
+      },
+      {
+        "path": "lib/Transform/ANEH16GLegalizePass.mm",
+        "sha256": "86a3fe3e2472e6ea9dd339e580c70b1c03300bf59eff226c77b9d9773d8e83b0"
+      },
+      {
+        "path": "lib/Transform/ANENormalizePass.h",
+        "sha256": "18b5431534b4355e4d123a59a592e24c6e4b8cf2d1ee6538c4b602615a048af6"
+      },
+      {
+        "path": "lib/Transform/ANENormalizePass.mm",
+        "sha256": "a6dae4999b27e0b3bee5f741f120a7563991a0694351fcdfd7524388a9e0940f"
+      },
+      {
+        "path": "plugins/H13/ANEH13Compiler.h",
+        "sha256": "4443bad8994fc1ccf0a14bad7491d053d001626caad534430558ed298b0b982f"
+      },
+      {
+        "path": "plugins/H13/ANEH13Compiler.mm",
+        "sha256": "95a77cc7d28f40db570c742727207bfe8717af9e0b23ea9322eca01d9a50e00d"
+      },
+      {
+        "path": "plugins/H13/H13ANEC.cpp",
+        "sha256": "a2b69b41ee0fbc2791c8bee43634c77833bd46641a931f70bcf244d07a3440f9"
+      },
+      {
+        "path": "plugins/H13/H13BatchedMatmulTemplates.inc",
+        "sha256": "5b59852ea32e4511837d34ef2d4223fd46c2eb06074a321f8ddc10a4683c21ce"
+      },
+      {
+        "path": "plugins/H13/H13BooleanTemplates.inc",
+        "sha256": "778919be75a8d49e7ec7859a99a6ace26efec50fd19c09f9691da9f7cc1efeab"
+      },
+      {
+        "path": "plugins/H13/H13ChainTemplates.inc",
+        "sha256": "799a7cfa334c40d0ff587c36f658968855759a4160b5533169c7f3d104a8bff6"
+      },
+      {
+        "path": "plugins/H13/H13ConvTemplates.inc",
+        "sha256": "f4d7f6bc19e9e489fe94f381e588c4e7c794071cc3689d02d39c3b390df4782a"
+      },
+      {
+        "path": "plugins/H13/H13ElementwiseConstants.inc",
+        "sha256": "f7ff014c103f8ca296e9ee06f40710a86e1245eb42f27f575699248543a49c0c"
+      },
+      {
+        "path": "plugins/H13/H13ElementwiseTemplates.inc",
+        "sha256": "de2a006c7350cad9792b9204b0f98fde52b454b1de3dd078c937741d2ef216cf"
+      },
+      {
+        "path": "plugins/H13/H13EncoderUnaryTemplates.inc",
+        "sha256": "bedf66a425f7ed1a443c4beea790bf9c4f77003145f4c83098082764f9680c04"
+      },
+      {
+        "path": "plugins/H13/H13EnvelopeTemplates.inc",
+        "sha256": "f8a047b9a78cba8783ab5ab2482429ce3dc67bb1fdb1a03bbe1c442bf7061327"
+      },
+      {
+        "path": "plugins/H13/H13LinearTemplates.inc",
+        "sha256": "34b23e73837579208731e889ffd17cfcfe5ac858ba25a3e68ed15cf82b58d59b"
+      },
+      {
+        "path": "plugins/H13/H13MatvecTemplates.inc",
+        "sha256": "c51ee3d684403c635b3cb915731613cadf91252056f66f5c62a98d7d974b7de0"
+      },
+      {
+        "path": "plugins/H13/H13NormTemplates.inc",
+        "sha256": "5c187dc40fe1321eadd3cb9d651de8453afe1c77806423ab9ca2795b90ee2035"
+      },
+      {
+        "path": "plugins/H13/H13Program.cpp",
+        "sha256": "410b63ead68d56f45075793f19eb6163af0d8c051a7b51bc90e05910577af02b"
+      },
+      {
+        "path": "plugins/H13/H13Program.h",
+        "sha256": "318a3154811fd19fae5a4446739132c37499b2bcd7b15da749a487eb53023947"
+      },
+      {
+        "path": "plugins/H13/H13SliceTemplates.inc",
+        "sha256": "967789383ef8d816c72e5903a1066172cde047e62f5beefa32143fc5f7ea331e"
+      },
+      {
+        "path": "plugins/H13/H13TileTemplates.inc",
+        "sha256": "676681cc5ac0979b3b6c076dd0fb6ff35d4698053493532e89bc2ed683d726cc"
+      },
+      {
+        "path": "plugins/H13/H13TransposeTemplates.inc",
+        "sha256": "e6760344c511a05043cd8c4e1e05af01116ba83320643a53e61230c07e370ca5"
+      },
+      {
+        "path": "plugins/H14/ANEH14Compiler.h",
+        "sha256": "0fa3db39df238454a9d4c911c2c856455d44d1019b3750ed1474b0f516b4deb9"
+      },
+      {
+        "path": "plugins/H14/ANEH14Compiler.mm",
+        "sha256": "49dd3cbccd9b0e376c46dc17f490775d9ec85b5e14e33dfb1858e79a20d0d539"
+      },
+      {
+        "path": "plugins/H14/H14ChainTemplates.inc",
+        "sha256": "7a65c6166f05de7eac8e39ddd08774c31247594ea6bd207699c77194b37d8878"
+      },
+      {
+        "path": "plugins/H14/H14ConvTemplates.inc",
+        "sha256": "19d0cae663f84800ca88d7c8153b65f65c98d11f2940b2dee707bb56f831f1b6"
+      },
+      {
+        "path": "plugins/H14/H14ElementwiseTemplates.inc",
+        "sha256": "094b81763a90ff7b0c4f70f6813e446b11e3c4a47aedd5d1e4d93882ee1429be"
+      },
+      {
+        "path": "plugins/H14/H14ExpChainTemplates.inc",
+        "sha256": "8302d14779fc398bd73e88bfc41c6e707f7f2665d8f708aa02a848d5527f1c41"
+      },
+      {
+        "path": "plugins/H14/H14MatvecTemplates.inc",
+        "sha256": "e9aab9553afbb4bd363a75f3e7b3c6120e5a679093d70a89a34a66f1599cf3b2"
+      },
+      {
+        "path": "plugins/H14/H14NormTemplates.inc",
+        "sha256": "e5cd39671623c8209036f98db7dddecb2a449fc7f5eef416c13d4c88e4d5e024"
+      },
+      {
+        "path": "plugins/H14/H14Program.cpp",
+        "sha256": "1806be8569f9131c25ae5aa856f26aca794dafaceaa27a1dc3610b25b1e3cd33"
+      },
+      {
+        "path": "plugins/H14/H14Program.h",
+        "sha256": "82b7ac3c61a65b67d65d24558c6ac38d23b453e5ed8b3e2ed85400f67371d9ad"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GALUEncoder.h",
+        "sha256": "219ee57e96a4ed09cf413aa987dc95928cb590ed887396efd794ad2de3fd7b07"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GALUEncoder.mm",
+        "sha256": "d74d8421adbb04a4071c24a8b18f7b0334d2467f7021333ff684f58b6ca0b617"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GBroadcastALUEncoder.h",
+        "sha256": "9ed9b0a4e4e371bc8785e0882c57fc37a7889723eb26568f3446e7e8f5416a58"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GBroadcastALUEncoder.mm",
+        "sha256": "633784491a1b604db91e56ad6d67006585ead7284d34ec7c5b9f2bd12559ac50"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GConstantPacker.h",
+        "sha256": "7223b6c7c1c8b58207471b9df6750be7d34de3e02b2585a145e62fe9077faae4"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GConstantPacker.mm",
+        "sha256": "91a0ebe89cf8953f0aeb3dcba56295889b91b03ce2a01185d1f2fb995fe59a22"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GConvChainEncoder.h",
+        "sha256": "3e2d6666730262b1ed6e41721ebb29330d315f9864bd3bc6cc0868452fdacea4"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GConvChainEncoder.mm",
+        "sha256": "b707de3f593fb9071b3cc8ade9f17731aede923ce7e09ed9d7138a8860d09067"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GConvEncoder.h",
+        "sha256": "63026d10a0b8720a8ab7ab96885f7112e9d0f8c157f12c99592fb05598c2210f"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GConvEncoder.mm",
+        "sha256": "e150eef2b0248075a528bd16afd235f7999ff5c18e2e3c960b0948267e74212a"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GDecodedFormValidator.h",
+        "sha256": "6d6d62519352b9eb7b2b718b40b7e5e48f1d157a48d9aa339e1d1613f84cd1a7"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GDecodedFormValidator.mm",
+        "sha256": "cfab9fdc13508851857e0677b9d3754f1ab7ad94d40259a3f9753b6a58113139"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GDepthwiseEncoder.h",
+        "sha256": "a8fbb607e2ab2c7d956bebd4f3e152dce206d80c0b788399a52e4a08c30c0c6b"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GDepthwiseEncoder.mm",
+        "sha256": "58ee3a76221e642acf228de82f9e7e692850d1b58baffc522b249ae5c0294b40"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GEncodedTask.h",
+        "sha256": "bcdf91d0f79c93d00e63a256a7578a9f1a6dea8b8fa088b28a62af6f69302ece"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GEncodedTask.mm",
+        "sha256": "7a0457a7388bf2dcbc43eaa3b08c5af3444000ff03ce5cc854bd71f7d54e80d3"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GLUTEncoder.h",
+        "sha256": "f521d6e946aed271e776eafec797546f94a255b1a50e63142c6dc321dfe5e453"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GLUTEncoder.mm",
+        "sha256": "370a1dbbc652e1047ecad3dfcea93bd3402a265211ad2fb14cc3d276d8975aa0"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GLUTEncoderData.inc",
+        "sha256": "efba15ff977965adcd46812682ab7249eb5c1ccfeb0ced8ade1de81fc10953f3"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GLayoutConvChainEncoder.h",
+        "sha256": "54ad1e775ccd18c95619208de22f4a2b3ac101fa085a91fa4f519219dedecc37"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GLayoutConvChainEncoder.mm",
+        "sha256": "c1f692bb303a7a2651d2f4f8a32477f3f00b4831827e5fc9cbfeb214b5004aee"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GLayoutEncoder.h",
+        "sha256": "6e614f36e4b9695c8841675354c0508ebb3e94adeaef24bb4ead8670ce1aca9b"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GLayoutEncoder.mm",
+        "sha256": "8818a3b0d46be686c619edc71221e0c786c93d6256931386bcd917d5ea0e4365"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GMatmulEncoder.h",
+        "sha256": "d96946724c0423f0a3108b7f3dcf5c62ea119e9e6b7e4f8f590cadb5cb7e2719"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GMatmulEncoder.mm",
+        "sha256": "4197cc124a0710318480098a319681e13ac07a663486f688f374f0db484dc1c6"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GMatrixRowDivisionEncoder.h",
+        "sha256": "1d95a329c46ecce69afae1da99e4932f06b60c54a0740f90632dc1ccbbd16bcb"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GMatrixRowDivisionEncoder.mm",
+        "sha256": "89c64ed264bd06f4242a470dba5c3e26c0cfa9431da22b56c68536544b93e8cf"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GMixedTaskEncoder.h",
+        "sha256": "20ad551efab32af08d3f89036e75a0516cff72262f6d58dcc96df9084b2ac4ff"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GMixedTaskEncoder.mm",
+        "sha256": "cbdbe629773b494327d7f35c6722dd46563319f4103ded8436e82a42e92e89c7"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GProgramAssembler.h",
+        "sha256": "e91d9b44d2fafaeee67220685ad1f6333f9900db107ef983178c0d6312f296ff"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GProgramAssembler.mm",
+        "sha256": "f0e82e0e61d4890caf8213b214685d1d5209c61a90b1b232ed7b0037431a41ef"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GProgramEncoder.h",
+        "sha256": "472fc4696e896da0e53f125d672d23b005ed37733f532d166293fe09f7ce2019"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GProgramEncoder.mm",
+        "sha256": "23b4d0f70ddcd915a427cc558058c2f3f3939a376df094ce9890835a0af87a5d"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GReduceEncoder.h",
+        "sha256": "74b6d045d494ec4bcc2fc78ae6444a4a66473bd79e291665582d4303eb41cc77"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GReduceEncoder.mm",
+        "sha256": "788b37c30a9c42eb2aa4597f0577c05a8e539d70375446bf4b3f1b29509d54ff"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GReduceEncoderData.inc",
+        "sha256": "5bbf766fbb569bd825596bbe9ecf27d7166e0fa84e809208950840e01c455bb5"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GRegularConvEncoder.h",
+        "sha256": "144cfef3f77b03c6983a6ee55e7a3e1aa9c6fa7b6786d48492a288d5912511ba"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GRegularConvEncoder.mm",
+        "sha256": "b277a62b2383cd3486168529551548011189a0844df0b273eafd17ee7dbef389"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GSRAMChainEncoder.h",
+        "sha256": "867dd57b37cf2425471030efef4a7389f0efe3647d6e5255fc6a175d9afe1d17"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GSRAMChainEncoder.mm",
+        "sha256": "9df3867cf43261588ba1019914f620deb35f14761fffc0a205d8492856e78302"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GTDWriter.h",
+        "sha256": "c255291e913c8b3b3641237b877f0245aa9445e8b97b62182f5160dafe6541c7"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GTDWriter.mm",
+        "sha256": "85aa593c67d933c5bba5c0f0ff96b3b7b6c1070d1f1799010ce385f90ac4ac4a"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GTaskComposer.h",
+        "sha256": "967cfa34cdd5db531724d1af302ad4fb0477630b60db48ab12f20aca065b16df"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GTaskComposer.mm",
+        "sha256": "305adcd597b60a15d1ca2d1d5319cd60498e25a0e4a3ac73790e76c65e73f25b"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GTaskEncoder.h",
+        "sha256": "7e9a6172819422c676ab87c37a47d3b34e365cd4c16a6d6247b4e522d53fe912"
+      },
+      {
+        "path": "plugins/H16G/Encoding/H16GTaskEncoder.mm",
+        "sha256": "c302533bb8a6e557d4184e4be49f8b5aa8c5b1eec7fdb9f9986cb04672da03d0"
+      },
+      {
+        "path": "plugins/H16G/H16GTarget.h",
+        "sha256": "b96f478c7a1f2fe761e6fc8ffa5200c30b65eed0dbbe265dba76d58f72b9ca57"
+      },
+      {
+        "path": "plugins/H16G/H16GTarget.mm",
+        "sha256": "d0ea558d0c070dcb3b23d4f38ec3dae1ea02dfed6347ec08d779bf7175779b6f"
+      },
+      {
+        "path": "plugins/H17/H17ElementwiseTemplates.inc",
+        "sha256": "3320439ece1ab7e4de999964fafc63f9f05b0d86bf9ab33ea7381d45fb31f93c"
+      },
+      {
+        "path": "plugins/H18/H18ElementwiseTemplates.inc",
+        "sha256": "8a2179534ef8c2297ec2a324915e008cd134e3404ff4fba488ca02d7ab69ee95"
+      },
+      {
+        "path": "tests/test_h13_linked_cli.py",
+        "sha256": "27ccca9cb4ce90d809f8735a4606c14b902555ce8071497f71035420f4487d3d"
+      },
+      {
+        "path": "tests/timeouts.py",
+        "sha256": "22e49c27e289874027f40b0c78678ae3ad54e5c1a623e3ca52ac3994a2bd314f"
+      },
+      {
+        "path": "tools/h13-conv-bench/milgen.py",
+        "sha256": "8faa3f8eafed4edaf0e058b0e7d9d862c8a8e1b9df6e3d4d5468ceb9a39315b0"
+      },
+      {
+        "path": "tools/h13-conv-bench/surf.py",
+        "sha256": "43c14c90aba848a27a0d80925a1e1ab42d19fd17a4a80d6c51dbce2fe94bfa4c"
+      },
+      {
+        "path": "tools/h13-mobilenet/anechain.c",
+        "sha256": "78b405e46511c67005127dd7b092fa16a60bfc0f7725c4d0bdfc648b7c3d4e38"
+      },
+      {
+        "path": "tools/h13-mobilenet/chain.py",
+        "sha256": "34b5386a6c270e606215e9b11a9fe448fa3fa4c69fcb06e614782274d5b400eb"
+      },
+      {
+        "path": "tools/h13-mobilenet/coldcheck.py",
+        "sha256": "c366155a700ee409aeb768a2e67d1da82654b2ca776efc48d002775df4f3a58e"
+      },
+      {
+        "path": "tools/h13-mobilenet/mkchain.py",
+        "sha256": "9e99718722cc413aaeae630b62bf2af1a22f39cb3fa4bf7b0ffa878da5194225"
+      },
+      {
+        "path": "tools/h13-mobilenet/mn_eval.py",
+        "sha256": "cefc9236a93d58e8a4510677791d272fb8b82579f4e26a836600b17ca9c8b32d"
+      },
+      {
+        "path": "tools/h13-mobilenet/mn_refs.py",
+        "sha256": "19d349e0682238788c8b54fcc05c338abedf4bd995ce00f73e01aa39cf3478fe"
+      },
+      {
+        "path": "tools/h13-mobilenet/mobilenet.py",
+        "sha256": "d0a076485f25482e6d08fbebda90bddf9a3f6f0ed8a034fbd4f59ed30b61dd4f"
+      },
+      {
+        "path": "tools/h13-mobilenet/prefixes.py",
+        "sha256": "bf16e61076adb74cfe4b6cd4f437e73b4ab0b38a1ff330a3407d4d393d49fac6"
+      },
+      {
+        "path": "tools/h13-mobilenet/run_chain.py",
+        "sha256": "d67270c5e9ff47d1fb66fb9fe6723dc5e72ef276d5bdf92e5203f085aa226ea1"
+      },
+      {
+        "path": "tools/h13-mobilenet/run_prefixes.sh",
+        "sha256": "747e065fa995d0427f0bff4b229274eb31e75a6609277b269ec9f9c2b72f79e2"
+      },
+      {
+        "path": "tools/h13-mobilenet/tflite_weights.py",
+        "sha256": "d233433873fa7acaf74b5ffeb9ec383e9886e654dba5eb9ac202283be46d9835"
+      },
+      {
+        "path": "tools/mil-hwxc.mm",
+        "sha256": "ed1bb7c2d84e880c2074f14bb94f5ad2f6b0dcef410094555b7562f4ef6a281c"
+      }
+    ]
+  },
+  "libobjc2": {
+    "repository": "https://github.com/gnustep/libobjc2",
+    "commit": "a1faad66cee79f29c4ca268b004111edc33a2ae2",
+    "version": "0",
+    "source_url": "https://codeload.github.com/gnustep/libobjc2/tar.gz/a1faad66cee79f29c4ca268b004111edc33a2ae2",
+    "sha256": "695405064778adc40b77ba78e29594dfe0c07107dc3882a3276684f6ca2fe1b1",
+    "archive_root": "libobjc2-a1faad66cee79f29c4ca268b004111edc33a2ae2"
+  },
+  "tools-make": {
+    "repository": "https://github.com/gnustep/tools-make",
+    "commit": "d0349cc83a23367acdc53df364f73504c281b26c",
+    "version": "0",
+    "source_url": "https://codeload.github.com/gnustep/tools-make/tar.gz/d0349cc83a23367acdc53df364f73504c281b26c",
+    "sha256": "687a79b3f1fa00d56085c64906bdbc3634fa891379879960c67f520abfd89fc6",
+    "archive_root": "tools-make-d0349cc83a23367acdc53df364f73504c281b26c"
+  },
+  "libs-base": {
+    "repository": "https://github.com/gnustep/libs-base",
+    "commit": "3d7013e144b153abcd6c088dc8d6c64ebd43bc4b",
+    "version": "0",
+    "source_url": "https://codeload.github.com/gnustep/libs-base/tar.gz/3d7013e144b153abcd6c088dc8d6c64ebd43bc4b",
+    "sha256": "2c6b39a703e755ca6947cee41db1527fe95f5ab5f24b55fc02593fb0e3ca6520",
+    "archive_root": "libs-base-3d7013e144b153abcd6c088dc8d6c64ebd43bc4b"
   }
 }
