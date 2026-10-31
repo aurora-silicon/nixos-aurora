@@ -12,6 +12,7 @@ filesystems the installer writes):
              no partition number in the core, no lookup without a hint
   network    NetworkManager is enabled; desktops ship its settings UI
   lid        logind still suspends on lid close; sleep is not masked
+  GL         factory images leave Mesa driver selection automatic
 
 --system names a NixOS system closure; its software and /etc are read
 from there instead of /usr and /etc.
@@ -82,6 +83,23 @@ def assignments(text):
             key, _, value = line.partition('=')
             values[key.strip()] = value.strip().strip('"\'')
     return values
+
+
+def check_gl_selection(root):
+    """Factory images leave GL selection to Mesa; fallback is per application."""
+    files = [f'{root.etc}/environment', f'{root.etc}/set-environment',
+             f'{root.etc}/pam/environment']
+    for directory in (f'{root.etc}/environment.d', f'{root.usr}/lib/environment.d'):
+        path = root.path(directory)
+        if path.is_dir():
+            files.extend(f'{directory}/{p.name}' for p in sorted(path.glob('*.conf')))
+    for file in files:
+        for line in (root.text(file) or '').splitlines():
+            values = assignments(line)
+            for key in ('MESA_LOADER_DRIVER_OVERRIDE', 'GALLIUM_DRIVER'):
+                if values.get(key):
+                    return f'global {key} in {file}; leave factory GL selection automatic'
+    return None
 
 
 def check_locale(root):
@@ -261,6 +279,20 @@ def check_boot(args):
     return None
 
 
+def check_logos(root):
+    # Catch an absent or corrupt payload before publishing an image. Resolve
+    # Nix store/profile symlinks inside the finished root, as for other basics.
+    for size in (16, 22, 24, 32, 48, 64, 96, 128, 256, 512):
+        for directory, name in (('apps', 'aurora-logo-icon'), ('places', 'start-here')):
+            path = root.path(f'{root.usr}/share/icons/hicolor/{size}x{size}/{directory}/{name}.png')
+            if not path.is_file() or path.read_bytes()[:8] != b'\x89PNG\r\n\x1a\n':
+                return f'missing or invalid Aurora icon: {name} ({size}px)'
+    path = root.path(f'{root.usr}/share/pixmaps/system-logo-white.png')
+    if not path.is_file() or path.read_bytes()[:8] != b'\x89PNG\r\n\x1a\n':
+        return 'missing or invalid Aurora About logo'
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--profile', required=True, choices=['kde', 'gnome', 'minimal'])
@@ -280,9 +312,11 @@ def main():
     if args.root:
         root = Root(args.root, args.system)
         checks.append(('locale', check_locale(root)))
+        checks.append(('gl-selection', check_gl_selection(root)))
         if args.profile != 'minimal':
             checks.append(('terminal', check_terminal(root, args.profile)))
             checks.append(('wallpaper', check_wallpaper(root, args.profile)))
+            checks.append(('logos', check_logos(root)))
         checks.append(('network', check_network(root, args.profile)))
         checks.append(('lid', check_lid(root)))
     if args.esp:

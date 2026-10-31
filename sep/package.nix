@@ -1,7 +1,7 @@
 { stdenvNoCC, lib, makeWrapper, bash, coreutils, keyutils, kmod, python3, util-linux, gnugrep, systemd }:
 stdenvNoCC.mkDerivation {
   pname = "aurora-sep";
-  version = "1.14";
+  version = "1.15";
   src = ./.;
   nativeBuildInputs = [ makeWrapper python3 bash ];
   dontBuild = true;

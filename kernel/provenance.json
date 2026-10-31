@@ -1,13 +1,12 @@
 {
   "kernel_commit": "5d7c3e74019d0a04a22e0c6e5cec5a297e245fd6",
-  "config_source": "kernel/config is the resolved configuration alarm-aurora ships for this kernel (config_upstream). The build copies it, merges kernel/nixos.config with merge_config.sh -m, runs olddefconfig against kernel_commit, then validates arch/arm64/configs/asahi.config, kernel/common.config and kernel/nixos.config strictly and runs kernel/check-required.py.",
+  "config_source": "kernel/config is the canonical resolved ALARM configuration recorded in config_upstream. NixOS merges only kernel/nixos.config, resolves olddefconfig, then strictly validates the matching kernel asahi.config and NixOS policy. The snapshot kernel pin and SHA256 are checked during evaluation; refresh it from ALARM when the kernel pin changes.",
   "shared_fragment_source": "arch/arm64/configs/asahi.config at kernel_commit",
   "config_upstream": {
     "repository": "https://github.com/aurora-silicon/alarm-aurora",
-    "commit": "24c45d61e3d8e730265c3708e26fc5d94913d716",
+    "commit": "493e18fe83be575691f8153df7f602e1afb9d302",
     "config_path": "packages/linux-aurora/config",
-    "config_sha256": "e85863a366965b6129f5386e96f241313ee0b3b8c06ddb7b74b49ed2ff72a3fc",
-    "common_config_path": "packages/linux-aurora/common.config",
-    "common_config_sha256": "ca1d12792107302076cfc3ed102d2dd2574626505c18066f39ef731909ace873"
+    "config_sha256": "0eecd1615eadf03039f945bbe57aa8f94dbb9714605c520f62e4d3d248c54e44",
+    "kernel_commit": "5d7c3e74019d0a04a22e0c6e5cec5a297e245fd6"
   }
 }
