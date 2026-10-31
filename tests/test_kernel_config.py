@@ -85,9 +85,16 @@ class ImageRequirements(unittest.TestCase):
 
 
 class SharedDistributionConfig(unittest.TestCase):
+    def test_shared_fragment_is_merged_before_nixos_policy(self):
+        recipe = (ROOT / "overlay.nix").read_text()
+        configure = recipe.split("# Start from the resolved configuration", 1)[1].split("postConfigure =", 1)[0]
+        self.assertIn('"$buildRoot/.config" arch/arm64/configs/asahi.config ${stableFile ./kernel/nixos.config}', configure)
+        self.assertNotIn("common.config", recipe)
+        self.assertFalse((ROOT / "kernel/common.config").exists())
+
     def test_vendored_files_match_their_recorded_source(self):
         upstream = json.loads((ROOT / "kernel/provenance.json").read_text())["config_upstream"]
-        for name, key in (("config", "config_sha256"), ("common.config", "common_config_sha256")):
+        for name, key in (("config", "config_sha256"),):
             digest = hashlib.sha256((ROOT / "kernel" / name).read_bytes()).hexdigest()
             self.assertEqual(digest, upstream[key], name)
 

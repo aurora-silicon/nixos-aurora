@@ -184,7 +184,7 @@ in {
           cp ${stableFile ./kernel/config} "$buildRoot/.config"
           chmod u+w "$buildRoot/.config"
           bash scripts/kconfig/merge_config.sh -m -O "$buildRoot" \
-            "$buildRoot/.config" ${stableFile ./kernel/nixos.config}
+            "$buildRoot/.config" arch/arm64/configs/asahi.config ${stableFile ./kernel/nixos.config}
           make "''${makeFlags[@]}" olddefconfig
           runHook postConfigure
           make "''${makeFlags[@]}" prepare
@@ -194,7 +194,7 @@ in {
         '';
         postConfigure = ''
           python3 ${stableFile ./kernel/validate-config.py} arch/arm64/configs/asahi.config \
-            ${stableFile ./kernel/common.config} ${stableFile ./kernel/nixos.config} "$buildRoot/.config"
+            ${stableFile ./kernel/nixos.config} "$buildRoot/.config"
           python3 ${stableFile ./kernel/check-required.py} "$buildRoot/.config"
           grep -qx 'CONFIG_RUST=y' "$buildRoot/.config"
           grep -qx 'CONFIG_ARM64_16K_PAGES=y' "$buildRoot/.config"
