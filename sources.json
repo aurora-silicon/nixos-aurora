@@ -142,7 +142,8 @@
     "source_url": "https://codeload.github.com/joshuaswarren/omarchy-ane/tar.gz/68e92712bbffa08f5002dcc542434fe1393f0578",
     "archive_root": "omarchy-ane-68e92712bbffa08f5002dcc542434fe1393f0578",
     "sha256": "09fee8d386728939d4752acb21a3ff99192809bf608f8d1bca6cd426b460aea6",
-    "nix_hash": "sha256-Cf7o04ZyiTnUdSrLIaP/mRkoCb9gj40bymzUJrRgrqY="
+    "nix_hash": "sha256-Cf7o04ZyiTnUdSrLIaP/mRkoCb9gj40bymzUJrRgrqY=",
+    "redistribute_source": false
   },
   "mil-hwx-compiler": {
     "repository": "https://github.com/joshuaswarren/mil-hwx-compiler",
@@ -152,6 +153,7 @@
     "sha256": "45eddcad03d68aaccb78d622711b91f144a88f9df952784e8c64c9bd1eb03790",
     "version": "0.3.1",
     "tag": "v0.3.1",
-    "nix_hash": "sha256-Re3crQPWiqzLeNYicRuR8USoj535UnhOjGTJvR6wN5A="
+    "nix_hash": "sha256-Re3crQPWiqzLeNYicRuR8USoj535UnhOjGTJvR6wN5A=",
+    "redistribute_source": false
   }
 }

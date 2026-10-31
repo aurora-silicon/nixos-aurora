@@ -56,7 +56,7 @@ def archives():
     result = {}
     for key, pin in pins.items():
         name = f'{key}-{pin["commit"]}.tar.gz'
-        result[key] = (name, ([f'{mirror}/{name}'] if mirror else []) + [pin['source_url']], pin['sha256'])
+        result[key] = (name, ([f'{mirror}/{name}'] if mirror and pin.get('redistribute_source', True) else []) + [pin['source_url']], pin['sha256'])
     bindgen = json.loads((ROOT / 'bindgen/sources.json').read_text())
     name = f'rust-bindgen-{bindgen["version"]}.tar.gz'
     result['bindgen'] = (name, ([f'{mirror}/{name}'] if mirror else []) + [bindgen['source_url']],

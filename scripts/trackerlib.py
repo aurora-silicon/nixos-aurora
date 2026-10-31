@@ -537,7 +537,7 @@ def open_pr_command(args, workflows):
     if archives:
         pins = load_pins(ROOT)
         expected = {archive_filename(key, pin['commit'], pin): pin['sha256'] for key, pin in pins.items()
-                    if 'sha256' in pin}
+                    if 'sha256' in pin and pin.get('redistribute_source', True)}
         verified = [path for path in archives if expected.get(path.name) == lib.sha256_file(path)]
         upload_mirror(repository, verified)
     subprocess.run(['git', '-C', str(ROOT), 'push', '--quiet', '--force', 'origin', f'HEAD:refs/heads/{branch}'],
@@ -617,7 +617,7 @@ def mirror_command(args, adapter=None):
     pins = load_pins(ROOT)
     wanted = {}
     for key, pin in sorted(pins.items()):
-        if pin.get('sha256') and pin.get('source_url') and pin.get('commit'):
+        if pin.get('redistribute_source', True) and pin.get('sha256') and pin.get('source_url') and pin.get('commit'):
             wanted[archive_filename(key, pin['commit'], pin)] = pin
     # Archives pinned outside sources.json (adapter.extra_archives()).
     extra = getattr(adapter, 'extra_archives', None)

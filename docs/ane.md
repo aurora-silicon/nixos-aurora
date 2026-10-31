@@ -108,3 +108,15 @@ H14 add SHA-256 is
 The compiler v0.3.1's `tests/test_h14_fixture_programs.py` regenerates it from
 `tests/fixtures/h14/add.mil` and checks this exact hash. All three compiler
 recipes run that software suite, closing the earlier H14 provenance gap.
+
+
+Source redistribution: the full upstream archives include unrelated binary
+research inputs. `redistribute_source = false` excludes both archives from
+Aurora's source mirror. Builders fetch and hash-check upstream directly;
+only the explicit userspace output file lists are distributed. Fedora uses
+NoSource: 0 and publishes `.nosrc.rpm` recipe packages (the GNUstep dependency
+sources remain included). To rebuild one, first fetch the upstream source pin
+with `scripts/fetch-sources.py PACKAGE --output SOURCES`. ALARM source exports
+must use `makepkg --source`, which omits remote archives, rather than
+`--allsource`. Nix publishes runtime outputs/closures, never these source
+fetcher outputs. Owner-fetched firmware remains outside all distributable builds.
