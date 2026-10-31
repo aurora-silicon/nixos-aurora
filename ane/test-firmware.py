@@ -7,6 +7,9 @@ import io
 import sys
 import tempfile
 
+# Validation must not add __pycache__ files to the installed package output.
+sys.dont_write_bytecode = True
+
 spec = spec_from_loader('fetch', SourceFileLoader('fetch', sys.argv[1]))
 f = module_from_spec(spec)
 spec.loader.exec_module(f)
