@@ -43,6 +43,8 @@
         libfprint = pkgs.libfprint;
         fprintd = pkgs.fprintd;
         avd-fw = pkgs.aurora-avd-firmware;
+        omarchy-ane-tools = pkgs.omarchy-ane-tools;
+        mil-hwx-compiler = pkgs.mil-hwx-compiler;
         upower = pkgs.upower;
         bindgen = pkgs.aurora-bindgen;
         aura = pkgs.m1n1;
@@ -76,6 +78,30 @@
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;
       checks.${system} = {
+      ane-packaging = let
+        firmware = pkgs.runCommand "ane-test-firmware" { } ''
+          mkdir -p "$out/lib/firmware/apple/ane"
+          echo 'synthetic packaging test marker; no firmware' > "$out/lib/firmware/apple/ane/test-marker"
+        '';
+        probe = nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules = [ ./modules/ane.nix {
+            nixpkgs.overlays = overlays;
+            aurora.ane.enable = true;
+            aurora.ane.firmwarePackage = firmware;
+          } ];
+        };
+        cfg = probe.config;
+      in assert cfg.users.groups ? accel;
+         assert builtins.elem probe.pkgs.omarchy-ane-tools cfg.services.udev.packages;
+         assert builtins.elem probe.pkgs.mil-hwx-compiler cfg.environment.systemPackages;
+         pkgs.runCommand "ane-firmware-and-udev-check" { } ''
+           test -f ${cfg.hardware.firmware}/lib/firmware/apple/ane/test-marker
+           test ! -f ${cfg.hardware.firmware}/lib/firmware/apple/ane/test-marker.zst
+           grep -F 'GROUP="accel", MODE="0660"' ${pkgs.omarchy-ane-tools}/lib/udev/rules.d/70-omarchy-ane.rules
+           touch $out
+         '';
+
       fex-overlay-upgrade = import ./checks/fex-overlay-upgrade.nix { inherit pkgs; };
       flatpak-sandbox = pkgs.runCommand "aurora-flatpak-build-sandbox" {
         requiredSystemFeatures = [ "uid-range" ];

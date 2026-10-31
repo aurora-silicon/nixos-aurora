@@ -143,6 +143,21 @@ in {
     src = source "avd-fw";
     version = pins.avd-fw.version;
   };
+  # Userspace for the kernel's ANE driver; no firmware, module or overlays.
+  mil-hwx-compiler = final.callPackage ./mil-hwx-compiler.nix {
+    basePatch = stableFile ./ane/gnustep-base-block-ivar.patch;
+    baseSrc = let pin = pins.mil-hwx-compiler.extra_sources.gnustep-base; in final.fetchurl {
+      name = "gnustep-base-${pin.commit}.tar.gz";
+      url = pin.source_url;
+      sha256 = pin.sha256;
+    };
+    src = source "mil-hwx-compiler";
+    version = pins.mil-hwx-compiler.version;
+  };
+  omarchy-ane-tools = final.callPackage ./omarchy-ane-tools.nix {
+    src = source "omarchy-ane-tools";
+    version = pins.omarchy-ane-tools.version;
+  };
   upower = prev.upower.overrideAttrs (old: {
     src = source "upower-aurora";
     version = pins.upower-aurora.version;
