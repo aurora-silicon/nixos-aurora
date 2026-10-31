@@ -72,7 +72,7 @@ let
     '';
     installPhase = ''
       runHook preInstall
-      flatpak build-export --arch=aarch64 --timestamp=1970-01-01T00:00:01Z \
+      flatpak build-export --runtime --files=files --arch=aarch64 --timestamp=1970-01-01T00:00:01Z \
         --subject="Aurora Mesa ${mesaPin.commit} for ${branch}" "$out" build ${branch}
       echo ${mesaPin.commit} > "$out/aurora-mesa-commit.${branch}"
       runHook postInstall

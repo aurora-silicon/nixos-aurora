@@ -9,14 +9,17 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def select(current, previous=None, requested=()):
+def select(current, previous=None, requested=(), changed_paths=()):
     if requested:
         if not set(requested) <= current.keys():
             raise ValueError('Unknown requested hardware output')
         return sorted(set(requested))
     if previous is None:
         return sorted(current)
-    return sorted(name for name, path in current.items() if previous.get(name) != path)
+    selected = {name for name, path in current.items() if previous.get(name) != path}
+    if 'scripts/test-graphics-generation' in changed_paths:
+        selected.add('graphics')
+    return sorted(selected)
 
 
 def derivations(commit):
@@ -34,10 +37,17 @@ def main():
     current = derivations(os.environ['GITHUB_SHA'])
     requested = event.get('inputs', {}).get('packages', '').split()
     previous = None
+    changed_paths = []
     before = event.get('before', '')
-    if not requested and os.environ['GITHUB_EVENT_NAME'] == 'push' and before.strip('0'):
+    if not requested:
+        if (os.environ['GITHUB_EVENT_NAME'] == 'pull_request'
+                or os.environ.get('GITHUB_REF', '').startswith('refs/heads/ci/')
+                or not before.strip('0')):
+            before = subprocess.check_output(['git', 'merge-base', 'HEAD', 'origin/main'], text=True).strip()
         previous = derivations(before)
-    print('packages=' + json.dumps(select(current, previous, requested)))
+        changed_paths = subprocess.check_output([
+            'git', 'diff', '--name-only', before, os.environ['GITHUB_SHA']], text=True).splitlines()
+    print('packages=' + json.dumps(select(current, previous, requested, changed_paths)))
 
 
 if __name__ == '__main__':

@@ -20,5 +20,10 @@ class PlanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             plan.select({'kernel': 'same'}, requested=['unknown'])
 
-    def test_initial_and_pull_request_validation_checks_entire_set(self):
+    def test_selection_without_a_baseline_checks_entire_set(self):
         self.assertEqual(plan.select({'sep': 's', 'kernel': 'k'}), ['kernel', 'sep'])
+
+    def test_generation_proof_changes_rebuild_graphics_with_identical_derivations(self):
+        outputs = {'mesa': 'same-mesa', 'graphics': 'same-graphics'}
+        self.assertEqual(plan.select(outputs, outputs,
+                                     changed_paths=['scripts/test-graphics-generation']), ['graphics'])

@@ -100,9 +100,9 @@ def run_checks(root):
 def ci_inputs(packages):
     packages = set(packages)
     if 'mesa' in packages:
-        # All three recipes consume mesa-aurora directly. A tracker change
+        # All graphics outputs consume the same pin. A tracker change
         # must build the runtime payloads too, even with an explicit matrix.
-        packages.update(('fex-mesa', 'flatpak-gl'))
+        packages.update(('fex-mesa', 'flatpak-gl', 'rusticl', 'graphics'))
     return {'checks.yml': {'packages': ' '.join(sorted(packages))}}
 
 

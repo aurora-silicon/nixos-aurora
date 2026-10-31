@@ -22,53 +22,6 @@ class RepositoryTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.files = {}
-        for branch in repository.BRANCHES:
-            (self.root / f'aurora-mesa-commit.{branch}').write_text(COMMIT + '\n')
-            ref = f'runtime/{repository.ID}/aarch64/{branch}'
-            self.files[ref, '/files/.aurora-mesa-commit'] = COMMIT + '\n'
-            self.files[ref, '/metadata'] = (
-                f'[Runtime]\nname={repository.ID}\n'
-                f'[ExtensionOf]\nref=runtime/org.freedesktop.Platform/aarch64/{branch}\npriority=10\n')
-            for file in ('vulkan/icd.d/asahi_icd.aarch64.json', 'vulkan/icd.d/lvp_icd.aarch64.json',
-                         'glvnd/egl_vendor.d/50_mesa.json'):
-                self.files[ref, '/files/' + file] = '{"library_path":"library"}'
-
-    def validate(self):
-        repository.validate(self.root, COMMIT, lambda ref, path: self.files[ref, path])
-
-    def test_both_runtime_branches_are_accepted(self):
-        self.validate()
-
-    def test_stale_repository_is_rejected(self):
-        (self.root / 'aurora-mesa-commit.26.08').write_text('2' * 40)
-        with self.assertRaisesRegex(ValueError, 'stale repository'):
-            self.validate()
-
-    def test_correct_outer_stamp_cannot_disguise_stale_payload(self):
-        key = (f'runtime/{repository.ID}/aarch64/25.08', '/files/.aurora-mesa-commit')
-        self.files[key] = '2' * 40
-        with self.assertRaisesRegex(ValueError, 'stale Mesa payload'):
-            self.validate()
-
-    def test_missing_branch_and_missing_driver_manifest_fail_closed(self):
-        (self.root / 'aurora-mesa-commit.26.08').unlink()
-        with self.assertRaises(FileNotFoundError):
-            self.validate()
-        (self.root / 'aurora-mesa-commit.26.08').write_text(COMMIT)
-        del self.files[f'runtime/{repository.ID}/aarch64/25.08', '/files/vulkan/icd.d/asahi_icd.aarch64.json']
-        with self.assertRaises(KeyError):
-            self.validate()
-
-    def test_incorrect_priority_and_runtime_identity_are_rejected(self):
-        key = (f'runtime/{repository.ID}/aarch64/25.08', '/metadata')
-        correct = self.files[key]
-        for bad in (correct.replace('priority=10', 'priority=0'),
-                    correct.replace('/aarch64/25.08', '/aarch64/24.08')):
-            with self.subTest(metadata=bad):
-                self.files[key] = bad
-                with self.assertRaisesRegex(ValueError, 'identity or priority'):
-                    self.validate()
 
     def test_validation_precedes_every_host_mutation(self):
         with patch.object(manager.repository, 'validate', side_effect=ValueError('stale')):

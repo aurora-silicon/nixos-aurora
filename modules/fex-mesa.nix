@@ -34,6 +34,10 @@ in {
       before = [ "display-manager.service" ];
       unitConfig.RequiresMountsFor = [ cfg.rootfs ];
       unitConfig.ConditionPathIsDirectory = "${cfg.rootfs}/usr";
+      # Nix never overwrites the mounted store layer. Stop the old unit before
+      # switching, then mount the new immutable path (also on rollback).
+      stopIfChanged = true;
+      restartIfChanged = true;
       restartTriggers = [ cfg.package ];
       serviceConfig = {
         Type = "oneshot";
