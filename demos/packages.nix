@@ -28,7 +28,13 @@ let
   models = pkgs.stdenvNoCC.mkDerivation {
     pname = "aurora-models";
     version = "0.1.0";
-    src = ./.;
+    src = lib.fileset.toSource {
+      root = ./.;
+      fileset = lib.fileset.unions [
+        ./aurora-model-fetch ./models.json ./export_rnnoise.py
+        ./LICENSE ./capture-ns-LICENSE ./aurora-model-fetch.1 ./models-README
+      ];
+    };
     dontBuild = true;
     nativeBuildInputs = [ pkgs.makeWrapper pkgs.python3 ];
     installPhase = ''
