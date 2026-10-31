@@ -32,9 +32,11 @@ across the three recipes. NixOS additionally patches interpreter/store paths
 and the firmware location as described below. All three carry the same sysusers
 entry; NixOS also declares the group through its module.
 
-Enroll only intended users in `accel` (Fedora/ALARM: `sudo usermod -aG accel USER`;
+For persistent access, enroll intended users in `accel` (Fedora/ALARM: `sudo usermod -aG accel USER`;
 NixOS: `users.users.USER.extraGroups = [ "accel" ];`), then log in again.
-Reload udev rules and retrigger the accel device, or reboot, after installation.
+Standard systemd/logind session ACLs also apply; group access works without a
+login session. Reload udev rules and retrigger the accel device, or reboot, after
+installation.
 Run `omarchy-ane-smoke`: it checks 20 add calls and emits one JSON result.
 An unsupported chip or missing driver returns exit 2. Firmware fetching is
 always an explicit owner action; no install hook runs it.

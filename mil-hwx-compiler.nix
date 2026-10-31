@@ -1,4 +1,4 @@
-{ lib, clangStdenv, gnustep-base, gnustep-make, gnustep-libobjc, python3, gitMinimal, src, baseSrc, version }:
+{ lib, clangStdenv, gnustep-base, gnustep-make, gnustep-libobjc, python3, gitMinimal, src, baseSrc, basePatch, version }:
 let
   # Base 1.29 in nixpkgs lacks NSData URL options and sorted JSON keys.
   # Keep this newer Foundation private to the compiler, with the same source
@@ -7,7 +7,7 @@ let
     pname = "mil-hwx-gnustep-base";
     version = "1.31.1";
     src = baseSrc;
-    patches = [ ./ane/gnustep-base-block-ivar.patch ];
+    patches = [ basePatch ];
     # Only the makefile installation adjustment from nixpkgs is needed for
     # this CLI dependency. Its older desktop search-path patch does not apply
     # to 1.31; the compiler never uses GNUstep application/bundle discovery.

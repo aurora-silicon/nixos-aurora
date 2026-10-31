@@ -122,6 +122,7 @@ in {
   };
   # Userspace for the kernel's ANE driver; no firmware, module or overlays.
   mil-hwx-compiler = final.callPackage ./mil-hwx-compiler.nix {
+    basePatch = stableFile ./ane/gnustep-base-block-ivar.patch;
     baseSrc = let pin = pins.mil-hwx-compiler.extra_sources.gnustep-base; in final.fetchurl {
       name = "gnustep-base-${pin.commit}.tar.gz";
       url = pin.source_url;
