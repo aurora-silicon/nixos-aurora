@@ -67,7 +67,7 @@ jobs:
         # Keep the dependency's tests enabled.
         run: |
           sudo modprobe vsock_loopback
-          nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
+          nix build --max-jobs 1 --cores 2 --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
             .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity
   fex-overlay:
     runs-on: ubuntu-24.04-arm
@@ -81,7 +81,7 @@ jobs:
           extra_nix_config: experimental-features = nix-command flakes
       - name: Enable the NixOS test driver's vsock loopback prerequisite
         run: sudo modprobe vsock_loopback
-      - run: nix build --no-link --print-build-logs .#checks.aarch64-linux.fex-overlay-upgrade
+      - run: nix build --max-jobs 1 --cores 2 --no-link --print-build-logs .#checks.aarch64-linux.fex-overlay-upgrade
   hardware:
     needs: evaluate
     if: needs.evaluate.outputs.packages != '[]'
@@ -119,7 +119,9 @@ jobs:
           PACKAGE: ${{ matrix.package }}
         run: python3 scripts/prefetch-sources.py "$PACKAGE"
       - name: Build the pinned Aurora hardware package
-        run: nix build --max-jobs 1 --cores 4 --print-build-logs --json '.#packages.aarch64-linux.${{ matrix.package }}^*' > build.json
+        # Keep compiler/linker concurrency bounded on the ARM CI runners.
+        # This changes scheduling only; all package and dependency checks run.
+        run: nix build --max-jobs 1 --cores 2 --print-build-logs --json '.#packages.aarch64-linux.${{ matrix.package }}^*' > build.json
       - name: Check GNOME 51 API installation
         if: matrix.package == 'mutter'
         run: nix build --no-link .#checks.aarch64-linux.mutter-51
