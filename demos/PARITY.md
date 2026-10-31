@@ -42,3 +42,5 @@ Recommend `TAG+="uaccess"` in the runtime's ANE udev rules rather than automatic
 policy. A headless SSH session does not acquire a logind seat ACL by itself.
 
 Compiler: all three recipes pin merged `3837b4cc2f432754970dbff0f61a3397fede7478`, with linked/linked-l2 and the H13 MobileNet runner. Native compiler package validation remains pending. Aurora-try main now includes camera, mic-denoise, OCR, classify and captions per the lead; the repository still reports private, so these packages await a public source release.
+
+Whisper can discover the compiler package's shared graph runner and private libane bridge. The compiler is an optional ANE runtime dependency; add it explicitly to the Nix environment. A manifest without these runtime files does not select ANE.

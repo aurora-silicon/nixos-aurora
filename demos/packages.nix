@@ -183,8 +183,13 @@ let
       cc -O2 -Iomarchy-ane-${pins.libane.commit}/libane tools/h13-mobilenet/anechain.c omarchy-ane-${pins.libane.commit}/libane/libane.a -ldrm -o tools/h13-mobilenet/anechain
     '';
     installPhase = ''
+      cc -O2 -shared -pthread -fPIC -fno-strict-aliasing -Iomarchy-ane-${pins.libane.commit}/libane ${assert builtins.hashFile "sha256" ./libane_python.c == pins.libane-python-bridge.sha256; ./libane_python.c} omarchy-ane-${pins.libane.commit}/libane/libane.a -ldrm -o tools/libane_python.so
       mkdir -p $out/bin $out/libexec/mil-hwx-compiler $out/share/mil-hwx-compiler/tools $out/share/licenses/mil-hwx-compiler
-      cp build/mil-hwxc $out/libexec/mil-hwx-compiler/
+      python3 -c 'import ctypes; lib = ctypes.CDLL("./tools/libane_python.so"); assert lib.pyane_query_caps'
+      cp ${./libane_python.c} $out/share/licenses/mil-hwx-compiler/libane-python-source-MIT.c
+      cp build/mil-hwxc tools/libane_python.so $out/libexec/mil-hwx-compiler/
+      cp -r research $out/share/mil-hwx-compiler/
+      cp tools/h13_run_linux.py tools/h13_reference.py $out/share/mil-hwx-compiler/tools/
       cp -r tools/h13-mobilenet tools/h13-conv-bench $out/share/mil-hwx-compiler/tools/
       cp LICENSE $out/share/licenses/mil-hwx-compiler/compiler-MIT
       cp libobjc2-${pins.libobjc2.commit}/COPYING $out/share/licenses/mil-hwx-compiler/libobjc2-MIT

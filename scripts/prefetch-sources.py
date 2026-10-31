@@ -67,7 +67,7 @@ def archives():
         name = f'{key}-{pin["commit"]}.tar.gz'
         result[key] = (name, ([f'{mirror}/{name}'] if mirror else []) + [pin['source_url']], pin['sha256'])
     for key, pin in json.loads((ROOT / 'demos/sources.json').read_text()).items():
-        if pin.get('local_archive'):
+        if pin.get('local_archive') or pin.get('local_file'):
             continue
         name = f'{key}-{pin["commit"]}.tar.gz'
         result['demo-' + key] = (name, [pin['source_url']], pin['sha256'])

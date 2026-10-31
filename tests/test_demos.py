@@ -72,7 +72,7 @@ class ModelFetchTests(unittest.TestCase):
 
 
 class EnginePolicyTests(unittest.TestCase):
-    def run_wrapper(self, engine, info, extra=(), bundle=False):
+    def run_wrapper(self, engine, info, extra=(), bundle=False, runtime=False):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             cli = root / 'cli'
@@ -85,6 +85,12 @@ class EnginePolicyTests(unittest.TestCase):
             wrapper.write_text((DATA / 'whisper.cpp-aurora').read_text().replace('@CLI@', str(cli)).replace('@VULKANINFO@', str(vulkan)))
             env = dict(os.environ)
             env.pop('WHISPER_ANE_ENCODER', None)
+            env['WHISPER_ANE_COMPILER'] = str(root / 'runtime')
+            env['WHISPER_ANE_LIB'] = str(root / 'libane_python.so')
+            if runtime:
+                (root / 'runtime/tools').mkdir(parents=True)
+                (root / 'runtime/tools/h13_run_linux.py').touch()
+                (root / 'libane_python.so').touch()
             if bundle:
                 (root / 'open/package').mkdir(parents=True)
                 (root / 'open/package/manifest.json').write_text('{}')
@@ -104,6 +110,18 @@ class EnginePolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('engine=gpu', result.stderr)
         self.assertNotIn('--no-gpu', json.loads(result.stdout)['args'])
+
+    def test_missing_ane_glue_uses_hardware_vulkan(self):
+        result = self.run_wrapper('auto', 'PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU', bundle=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('engine=gpu', result.stderr)
+        self.assertIsNone(json.loads(result.stdout)['bundle'])
+
+    def test_compiled_bundle_with_runtime_prefers_ane(self):
+        result = self.run_wrapper('auto', 'PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU', bundle=True, runtime=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('engine=ane', result.stderr)
+        self.assertIsNotNone(json.loads(result.stdout)['bundle'])
 
     def test_explicit_cpu_overrides_a_bundle(self):
         result = self.run_wrapper('cpu', 'PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU', bundle=True)

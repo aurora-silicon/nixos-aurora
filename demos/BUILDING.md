@@ -53,3 +53,5 @@ same release profile on all three distros; reference-Mac performance still
 needs lead measurement. `CARGO_BUILD_JOBS` can limit Rust build parallelism.
 
 Build `mil-hwx-compiler` with the same distro helper, or `nix build .#mil-hwx-compiler`. The compiler uses isolated modern GNUstep/libobjc2 (the exact three bootstrap revisions in sources.json), never the distro legacy ABI. `rebuild-compiler-source.py` recreates its source-only archive from the pinned public commit and verifies every selected text file. Software build checks exercise linked compilation without a device. Relocated RPM/Arch runtime still needs installed-package smoke validation.
+
+The compiler builds `libane_python.so` from the separately hash-pinned public C bridge and installs the shared H13 graph runner. Whisper discovers this optional package through `mil-hwxc` on PATH. Missing runtime glue makes auto select Vulkan/CPU before starting inference. The ANE worker remains responsible for bundle hashes, shapes, H13 caps and resource ownership.

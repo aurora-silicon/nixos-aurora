@@ -24,9 +24,8 @@ The first run fetches and SHA-256-checks the MIT tiny.en model in
 terminal. This command reads the file; it never opens a microphone or speaker.
 Use `--engine cpu` to compare. `--engine gpu` refuses if no hardware Vulkan
 GPU is found. `--engine ane` requires your explicitly supplied
-`WHISPER_ANE_ENCODER` open compiled bundle and its external compiler/runtime;
-the native worker reports any CPU fallback. Auto prefers that bundle when
-present, otherwise hardware Vulkan, otherwise CPU. Native failure follows
+`WHISPER_ANE_ENCODER` open compiled bundle and the optional `mil-hwx-compiler` package on `PATH`;
+the native worker reports any CPU fallback. Auto prefers that bundle when its packaged graph runner and libane bridge are present, otherwise hardware Vulkan, otherwise CPU. Native failure follows
 libane's upstream CPU fallback policy; it does not retry Vulkan mid-utterance.
 
 Off: let the command finish or press **Ctrl-C**. There is no service or graph
@@ -88,10 +87,20 @@ uses the supported fallback; it is never a presence or idle check.
 After installing `mil-hwx-compiler`, on any supported aarch64 machine:
 
 ```sh
-MILC=mil-hwxc python3 /usr/share/mil-hwx-compiler/tools/h13-mobilenet/mobilenet.py "$PWD/aurora-mobilenet"
+test ! -e "$PWD/aurora-mobilenet" && MILC=mil-hwxc python3 /usr/share/mil-hwx-compiler/tools/h13-mobilenet/mobilenet.py "$PWD/aurora-mobilenet"
 ```
 
-Expect synthetic random weights and compiled H13 linked/per-layer packages under `aurora-mobilenet`. This does not open a device. Off: the process exits; remove that explicit output directory to discard the case. On Nix, use the package's `share/mil-hwx-compiler` store path instead of `/usr/share`.
+Expect synthetic random weights and compiled H13 linked/per-layer packages under `aurora-mobilenet`. Use a fresh output directory: the upstream generator replaces its output. The guard above preserves any existing directory. This does not open a device. Off: the process exits; remove that explicit output directory to discard the case. For Nix, add `pkgs.python3.withPackages (p: [ p.numpy ])` to the explicit demo environment, alongside `mil-hwx-compiler`. Resolve its installed tools once:
+
+```sh
+AURORA_COMPILER_TOOLS="$(dirname "$(dirname "$(readlink -f "$(command -v mil-hwxc)")")")/share/mil-hwx-compiler/tools/h13-mobilenet"
+```
+
+Then the Nix compile command is:
+
+```sh
+test ! -e "$PWD/aurora-mobilenet" && MILC=mil-hwxc python3 "$AURORA_COMPILER_TOOLS/mobilenet.py" "$PWD/aurora-mobilenet"
+```
 
 Morning M1 Pro device command, for the lead after reviewing/installing the built package:
 

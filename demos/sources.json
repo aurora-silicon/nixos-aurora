@@ -107,7 +107,7 @@
     "version": "0.1.0",
     "local_archive": "mil-hwx-compiler-3837b4cc2f432754970dbff0f61a3397fede7478.tar.gz",
     "archive_root": "mil-hwx-compiler-3837b4cc2f432754970dbff0f61a3397fede7478",
-    "sha256": "3288b55c2bdb5c61607430044cd43e5c67b4d29cc1869aaabfd4ae20e4f30264",
+    "sha256": "dc38128117f06727d5c7beb33e2c778e8359bfc8a04f40eb57e2f21a06e282df",
     "upstream_archive_sha256": "c8f3c20ce682a8556419fcd95993d0fb8d1b5d0dbdb9a0adcf517fbf4645c141",
     "source_files": [
       {
@@ -699,6 +699,14 @@
         "sha256": "8a2179534ef8c2297ec2a324915e008cd134e3404ff4fba488ca02d7ab69ee95"
       },
       {
+        "path": "research/h13_td.py",
+        "sha256": "789f5df961cd62d19199539718cbf7b4c4ff6fed93b761358eb4d050f320fb11"
+      },
+      {
+        "path": "research/inspect_anec.py",
+        "sha256": "f62235fe8f802040d33e958ac02190fad756b6d211da853e171d796db3f647a2"
+      },
+      {
         "path": "tests/test_h13_linked_cli.py",
         "sha256": "27ccca9cb4ce90d809f8735a4606c14b902555ce8071497f71035420f4487d3d"
       },
@@ -759,6 +767,14 @@
         "sha256": "d233433873fa7acaf74b5ffeb9ec383e9886e654dba5eb9ac202283be46d9835"
       },
       {
+        "path": "tools/h13_reference.py",
+        "sha256": "de1b0274422ee23a52940ddfa08de9a4a504b63086c9a9dd67530d08275719cf"
+      },
+      {
+        "path": "tools/h13_run_linux.py",
+        "sha256": "bb160432efe4e01b98eff832c754040ac9a2473dfa0f4f7de5e16535d2b1e43c"
+      },
+      {
         "path": "tools/mil-hwxc.mm",
         "sha256": "ed1bb7c2d84e880c2074f14bb94f5ad2f6b0dcef410094555b7562f4ef6a281c"
       }
@@ -787,5 +803,13 @@
     "source_url": "https://codeload.github.com/gnustep/libs-base/tar.gz/3d7013e144b153abcd6c088dc8d6c64ebd43bc4b",
     "sha256": "2c6b39a703e755ca6947cee41db1527fe95f5ab5f24b55fc02593fb0e3ca6520",
     "archive_root": "libs-base-3d7013e144b153abcd6c088dc8d6c64ebd43bc4b"
+  },
+  "libane-python-bridge": {
+    "repository": "https://github.com/aurora-silicon/omarchy-ane",
+    "commit": "1adf2ee392ef7d3d64a24743d293dbc1670f0e8b",
+    "local_file": "libane_python.c",
+    "source_url": "https://raw.githubusercontent.com/aurora-silicon/omarchy-ane/1adf2ee392ef7d3d64a24743d293dbc1670f0e8b/bindings/python/dylib/libane_python.c",
+    "sha256": "c8792e0da6b1fdef74c4ae39f97fdc3a47f6dd509b9b91977cfc520ba5dd1542",
+    "license": "MIT"
   }
 }

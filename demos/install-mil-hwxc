@@ -10,6 +10,10 @@ find "$dest$final" -type f \( -name '*.a' -o -name '*.la' \) -delete
 rm -rf "$dest$final/lib/pkgconfig" "$dest$final/share/GNUstep/Makefiles"
 find "$dest$final/etc" -type f -exec sed -i "s|$runtime|$final|g" {} +
 cp "$compiler/build/mil-hwxc" "$dest/usr/libexec/mil-hwx-compiler/mil-hwxc"
+cp -a "$compiler/research" "$dest/usr/share/mil-hwx-compiler/"
+cp "$compiler/tools/h13_run_linux.py" "$compiler/tools/h13_reference.py" "$dest/usr/share/mil-hwx-compiler/tools/"
 cp -a "$compiler/tools/h13-mobilenet" "$compiler/tools/h13-conv-bench" "$dest/usr/share/mil-hwx-compiler/tools/"
 # The runtime lookup comes from the wrapper; strip build-directory runpaths.
 find "$dest$final/lib" "$dest/usr/libexec/mil-hwx-compiler" -type f -exec sh -c 'r=$1; shift; for p do if patchelf --print-rpath "$p" >/dev/null 2>&1; then patchelf --set-rpath "$r" "$p"; fi; done' sh "$final/lib" {} +
+
+cp "$compiler/tools/libane_python.so" "$dest/usr/libexec/mil-hwx-compiler/"

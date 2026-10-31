@@ -5,6 +5,7 @@ import argparse
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 
 parser = argparse.ArgumentParser(add_help=False)
@@ -16,7 +17,16 @@ if '-h' in rest or '--help' in rest or not rest:
 # A compiled local encoder bundle is an explicit user choice. No package ships
 # or guesses an Apple program or claims an uncompiled model works on the ANE.
 bundle = os.environ.get('WHISPER_ANE_ENCODER', '')
-ane = args.engine in ('auto', 'ane') and bool(bundle and (Path(bundle) / 'package/manifest.json').is_file())
+compiler_cmd = shutil.which('mil-hwxc')
+if compiler_cmd:
+    prefix = Path(compiler_cmd).resolve().parent.parent
+    os.environ.setdefault('WHISPER_ANE_COMPILER', str(prefix / 'share/mil-hwx-compiler'))
+    os.environ.setdefault('WHISPER_ANE_LIB', str(prefix / 'libexec/mil-hwx-compiler/libane_python.so'))
+runner = Path(os.environ.get('WHISPER_ANE_COMPILER', '/nonexistent')) / 'tools/h13_run_linux.py'
+bridge = Path(os.environ.get('WHISPER_ANE_LIB', '/nonexistent'))
+ane = args.engine in ('auto', 'ane') and bool(
+    bundle and (Path(bundle) / 'package/manifest.json').is_file()
+    and runner.is_file() and bridge.is_file())
 engine = args.engine
 if engine == 'auto':
     engine = 'ane' if ane else 'gpu'
@@ -32,7 +42,7 @@ if engine == 'gpu':
             parser.error('no hardware Vulkan GPU found; use --engine cpu')
         engine = 'cpu'
 if engine == 'ane' and not ane:
-    parser.error('set WHISPER_ANE_ENCODER to a compiled open encoder bundle first')
+    parser.error('ANE runtime unavailable: install mil-hwx-compiler and set WHISPER_ANE_ENCODER to a compiled open bundle')
 if engine != 'ane':
     os.environ.pop('WHISPER_ANE_ENCODER', None)
 if engine in ('cpu', 'ane') and '-ng' not in rest and '--no-gpu' not in rest:

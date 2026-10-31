@@ -21,3 +21,5 @@ export GNUSTEP_CONFIG_FILE="$prefix/etc/GNUstep/GNUstep.conf"
 make -C "$compiler" build/mil-hwxc GNUSTEP_PREFIX="$prefix" GNUSTEP_CONFIG="$prefix/bin/gnustep-config" CXX=clang++
 "$compiler/build/mil-hwxc" --help
 python3 "$compiler/tests/test_h13_linked_cli.py" "$compiler/build/mil-hwxc"
+
+python3 "$compiler/tools/h13_run_linux.py" --help
