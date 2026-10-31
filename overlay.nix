@@ -357,22 +357,28 @@ in {
     '';
   });
   speakerguardd = rustPackage "speakerguardd" ./locks/speakerguardd.Cargo.lock {
-    # The binary names its source in -V and the journal. The unit keeps its
-    # own start limit (five attempts in 60 s); only the J700 model is named.
+    # Draft RC: keep the upstream acceptance suite and profile admission.
     env.SPEAKERGUARDD_COMMIT = builtins.substring 0 12 pins.speakerguardd.commit;
-    nativeBuildInputs = [ final.pkg-config ];
-    buildInputs = [ final.alsa-lib ];
+    nativeBuildInputs = [ final.pkg-config final.python3 ];
+    buildInputs = [ final.alsa-lib final.ladspa-header ];
+    postBuild = "make -j8 filter";
+    postCheck = ''
+      python3 tools/test-preserve-recordings.py
+      make -j8 filter-test
+    '';
     postInstall = ''
       mkdir -p $out/share/speakerguardd
       cp -r conf/* $out/share/speakerguardd/
       mkdir -p $out/lib/systemd/system $out/lib/udev/rules.d $out/libexec/speakerguardd
       substitute speakerguardd.service $out/lib/systemd/system/speakerguardd.service \
-        --replace-fail "ExecStart=/usr/bin/speakerguardd -c /usr/share/speakerguardd --wait-for-card 30" \
-          "ExecStart=$out/bin/speakerguardd -c $out/share/speakerguardd -C AppleJ700 --wait-for-card 30"
+        --replace-fail "ExecStart=/usr/bin/speakerguardd" \
+          "ExecStart=$out/bin/speakerguardd -c $out/share/speakerguardd"
       cp 95-speakerguardd.rules $out/lib/udev/rules.d/
       cp ${stableFile ./firmware/use-feedback-guard} $out/libexec/speakerguardd/use-feedback-guard
-      chmod +x $out/libexec/speakerguardd/use-feedback-guard
-      patchShebangs $out/libexec/speakerguardd/use-feedback-guard
+      cp tools/preserve-recordings $out/libexec/speakerguardd/preserve-recordings
+      chmod +x $out/libexec/speakerguardd/{use-feedback-guard,preserve-recordings}
+      patchShebangs $out/libexec/speakerguardd/{use-feedback-guard,preserve-recordings}
+      install -Dm755 filter/speakerguard-xlim.so $out/lib/ladspa/speakerguard-xlim.so
     '';
   };
   bankstown-lv2 = prev.bankstown-lv2.overrideAttrs (old: {

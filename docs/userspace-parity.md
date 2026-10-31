@@ -7,7 +7,7 @@ track the same merged content using each distribution's existing version scheme.
 | --- | --- | --- | --- | --- |
 | aurora-sep | 1-14 | 1-14 | 1.14 | Vendored integration from linux `7cc30f35ecea3e90ceedd44babbde128c1d487a6`, with the already merged Touch ID setup adaptations |
 | aurora-audio / asahi-audio | 4.1-7 | 4.1.aurora2-7 | 4.1-aurora7 | asahi-audio `d957fabbacbe7dd67b39f052b2ff21edea7ee038` |
-| speakerguardd | 0.1.12-1 | 0.1.12-1 | 0.1.12 | speakerguardd main `34aeed9085ad0f66cb8f266f997e11dd781470a6` |
+| speakerguardd (draft RC) | 0.1.13~rc1-1 | 0.1.13rc1-1 | 0.1.13-rc.1 | [RC #27](https://github.com/aurora-silicon/speakerguardd/pull/27), `191de3c9b24ab00d98f545ac546a09cc83af00b6` |
 
 Arch retains `4.1.aurora2` so this remains an upgrade from `4.1.aurora2-4`.
 Nix keeps the upstream audio version in sources.json and adds the Fedora
@@ -28,8 +28,8 @@ The audio pin and merged asahi-audio main
 0.5.16 or later. Nix pins nixpkgs `e7439b6b14ad3cc35d05608ebca9bce01a25f5f8`,
 which supplies WirePlumber 0.5.18.
 
-Fedora already has all three target versions, so its parity change records the
-audit without rebuilding an artificial package release. Arch and Nix only change
-SEP/audio version labels. speakerguardd source, behavior, profiles, service
-settings and protection interlocks are unchanged. No unmerged speaker changes
-are included. The merged libfprint aurora6 updates are outside this change.
+The SEP/audio parity baseline above remains in place. The speaker row now
+prepares the same integrated candidate on all three distributions. It remains
+draft with the upstream release gates effective; it is not a fleet deployment.
+See [the RC packaging status](speakerguardd-rc.md). The merged libfprint aurora6
+updates are outside this change.
