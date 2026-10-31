@@ -1,0 +1,16 @@
+# udev replaces characters it does not allow, such as parentheses, in $attr{}
+# substitutions, so systemd's 60-dmi-id.rules turns a product name like
+# "MacBook Pro (16-inch, M4 Pro, Nov 2024) - Mac16,7" into
+# "MacBook Pro _16-inch, M4 Pro, Nov 2024_ - Mac16,7" in ID_MODEL, which is
+# what systemd-hostnamed reports as the hardware model. Import the firmware
+# string unchanged instead, under the same conditions as 60-dmi-id.rules.
+
+ACTION=="remove", GOTO="aurora_dmi_end"
+SUBSYSTEM!="dmi", GOTO="aurora_dmi_end"
+KERNEL!="id", GOTO="aurora_dmi_end"
+
+ENV{ID_SYSFS_ATTRIBUTE_MODEL}=="product_version", GOTO="aurora_dmi_end"
+ENV{ID_PRODUCT_NAME_IS_RUBBISH}=="1", GOTO="aurora_dmi_end"
+ATTR{product_name}=="?*", IMPORT{program}="@sed@ -n 1s/^/ID_MODEL=/p %S%p/product_name"
+
+LABEL="aurora_dmi_end"
