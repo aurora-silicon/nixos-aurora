@@ -1,6 +1,19 @@
 final: prev:
 let
   stableFile = path: final.writeText (builtins.baseNameOf path) (builtins.readFile path);
+  # nixpkgs constructs the CLI and engine with the same builder argument.
+  # Patch only the engine, so the resulting Docker symlinks and wrappers all
+  # refer to the fixed moby derivation, including its exposed .moby output.
+  dockerPolicyBuilder = args: prev.buildGoModule (args // final.lib.optionalAttrs
+    ((args.pname or "") == "moby") {
+      patches = (args.patches or [ ]) ++ [ (stableFile ./patches/docker-query-forwarding-policy.patch) ];
+      doCheck = true;
+      checkPhase = ''
+        runHook preCheck
+        go test -mod=vendor -p=8 ./daemon/libnetwork/iptables -run '^TestSetupDockerForwardingPolicy$' -count=1 -v
+        runHook postCheck
+      '';
+    });
   # The shared distribution config with NixOS's requirements on top, as the
   # build merges them. NixOS modules read kernel features from this.
   kernelConfig = final.lib.listToAttrs (final.lib.concatMap (line:
@@ -64,6 +77,8 @@ let
     compilerTools = mesaCompilerTools;
   };
 in {
+  docker_29 = prev.docker_29.override { buildGoModule = dockerPolicyBuilder; };
+  docker = final.docker_29;
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [

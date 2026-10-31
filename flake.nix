@@ -38,6 +38,7 @@
       };
       packages.${system} = {
         firstboot = pkgs.aurora-firstboot;
+        docker = pkgs.docker;
         sep = pkgs.aurora-sep;
         libfprint = pkgs.libfprint;
         fprintd = pkgs.fprintd;
@@ -75,6 +76,18 @@
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;
       checks.${system} = {
+      clean-boot = let
+        inherit (nixpkgs) lib;
+        profiles = lib.attrValues self.nixosConfigurations;
+        valid = lib.versionAtLeast pkgs.bluez.version "5.87"
+          && lib.any (patch: lib.hasSuffix "docker-query-forwarding-policy.patch" (toString patch))
+            (pkgs.docker.moby.patches or [ ])
+          && pkgs.docker.moby.doCheck
+          && lib.all (profile: let unit = profile.config.systemd.units."var-swap-swapfile2.swap"; in
+            unit.overrideStrategy == "asDropin"
+            && lib.hasInfix "After=var-swap-swapfile.swap" unit.text) profiles;
+      in assert lib.assertMsg valid "Aurora clean-boot packaging parity failed";
+        pkgs.runCommandNoCC "aurora-clean-boot-defaults" { } "touch $out";
       fex-overlay-upgrade = import ./checks/fex-overlay-upgrade.nix { inherit pkgs; };
       flatpak-sandbox = pkgs.runCommand "aurora-flatpak-build-sandbox" {
         requiredSystemFeatures = [ "uid-range" ];
