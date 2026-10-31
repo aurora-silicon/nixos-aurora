@@ -42,3 +42,8 @@ Source tracking, automatic publication, the `channel-testing` and `channel-stabl
 Installed systems follow `channel-testing` (their `flake.lock` pins the installed commit). `sudo aurora-update` takes the newest signed update; every rebuild refreshes the ESP Stage 2 the way `update-m1n1` does on ALARM and Fedora, keeping `m1n1/boot.bin.old`, and never writes Stage 1. Nothing updates unattended. Installs from images before Alpha 10 need a one-time `flake.nix` edit, described in [docs/updates.md](docs/updates.md#moving-an-existing-install-to-the-channel-one-time).
 
 Aurora defaults and the October 2026 Fedora changes are mapped in [the parity table](docs/fedora-parity-20261029.md). The shared module includes the locked-control ALSA restore fix, early sequencer, malcontent signal overrides, host and FEX guest Mesa, and Aurora's Flatpak GL extension for 25.08 and 26.08. Image assembly checks their actual payloads and initrd. The parity table records software verification; physical qualification remains separate.
+
+Apple ANS storage defaults are packaged with the same driver-scoped udev rule
+on Fedora, ALARM and NixOS Aurora. The candidate `none` scheduler default needs
+matched benchmarks before merge; it leaves controller limits and polling alone.
+See the [scope, benchmark method and rollback notes](storage/README.md).
