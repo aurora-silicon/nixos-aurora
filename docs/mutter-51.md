@@ -11,6 +11,7 @@ The archive and the tag are distinct source identities.
 | Prefer the variable variant of the preferred KMS mode | Keep unchanged; upstream still prefers the fixed variant | [Aurora PR 41](https://github.com/aurora-silicon/fedora-aurora/pull/41) |
 | Reject touch grabs when the focus surface is null | Keep unchanged; the guard is absent in 51.1 | [GNOME MR 5375](https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/5375), commit `13ed6caed4580d6d1ee8812a4d180ea8b5035ddc` |
 | Disable input capture on EIS client disconnect | Add after integration testing exposed an intermittent disconnect hang; closed sessions retain their existing cleanup | Aurora patch based on the existing `/backends/native/input-capture/disconnect` test and public Mutter state-machine code |
+| Associate X11 frame counters only with views painting the window | Add after a repeated two-monitor unminimize test reproduced a missing FrameDrawn timestamp; mirror existing after-paint view filtering | Aurora patch; the unmodified test failed on iteration 3 before the fix and passed 20/20 after it |
 
 The former `51.0-1.fc45.aurora.vrr1` test build is documented in
 [PR 41's hardware result](https://github.com/aurora-silicon/fedora-aurora/pull/41#issuecomment-6487454438).
@@ -18,8 +19,8 @@ That records the same VRR hunk on Fedora's 51.0 package. It proves mode selectio
 including the MSI 280 Hz variable mode; it does not prove VRR activation.
 An exact build tree and original binary identity are not established by that comment.
 
-Fedora's `packages/mutter/f45/mutter.spec` builds 51.1 with API/SONAME 51 and all three patches.
-`51.1-3.fc45.aurora` sorts above Fedora's `51.1-1.fc45` and the former 51.0 test
+Fedora's `packages/mutter/f45/mutter.spec` builds 51.1 with API/SONAME 51 and all four patches.
+`51.1-4.fc45.aurora` sorts above Fedora's `51.1-1.fc45` and the former 51.0 test
 build without an epoch; later upstream versions can still supersede it.
 The minimum schemas, Wayland, protocols, libinput and PipeWire versions follow
 51.1's Meson requirements. The experimental settings schema is packaged too.
@@ -38,7 +39,7 @@ in a Fedora 45 channel requires the Fedora release migration; upgrading a Fedora
 44 GNOME Shell to Mutter 51 alone is not supported.
 
 Arch uses `mutter-aurora` 51.1 and NixOS uses the GNOME 51 package set plus the same
-51.1 release archive. Both must carry the three patches above. GNOME Shell and its
+51.1 release archive. Both must carry the four patches above. GNOME Shell and its
 schemas must agree with API 51; changing only the Mutter source on NixOS's former
 GNOME 50 package set cannot provide a working desktop.
 
