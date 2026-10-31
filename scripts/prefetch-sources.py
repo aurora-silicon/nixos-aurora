@@ -24,6 +24,7 @@ import updatelib as lib  # noqa: E402
 MIRROR = 'https://github.com/aurora-silicon/nixos-aurora/releases/download/source-cache'
 # Flake package -> sources it fetches with fetchurl.
 NEEDS = {
+    'logos': [],  # licensed artwork is vendored in this Git source
     'kernel': ['kernel-aurora', 'bindgen'],
     'bindgen': ['bindgen'],
     'aura': ['aura'],
