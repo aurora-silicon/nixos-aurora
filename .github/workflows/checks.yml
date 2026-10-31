@@ -39,7 +39,7 @@ jobs:
         run: |
           nix flake check --no-build
           nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
-            .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity
+            .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity .#checks.aarch64-linux.bluetooth-le-audio
       - name: Inspect KDE graphical login configuration
         run: |
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.defaultUnit

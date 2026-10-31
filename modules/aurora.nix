@@ -1,6 +1,6 @@
 { config, lib, pkgs, ... }:
 {
-  imports = [ ./firmware.nix ./platform.nix ./audio.nix ./system-fixes.nix
+  imports = [ ./firmware.nix ./platform.nix ./audio.nix ./bluetooth-le-audio.nix ./system-fixes.nix
     ./flatpak.nix ./fex-mesa.nix ./parity.nix
     ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ];
   options.aurora.desktop = lib.mkOption {
