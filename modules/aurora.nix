@@ -55,11 +55,15 @@
     boot.kernelParams = [ "quiet" "rd.udev.log_level=3" "udev.log_level=3" "systemd.show_status=auto" ];
     # Desktop images boot to a splash; first boot asks for the disk password
     # on it, as every later boot does. The Aurora theme draws the logo aura
-    # shows, at the same place, with the spinner below it, so the logo stays
+    # shows, at the same size and place, with the spinner below it and
+    # boot.plymouth.logo (the NixOS logo) at the bottom, so the logo stays
     # still from power-on to the greeter. Plymouth runs in the systemd initrd.
     boot.plymouth.enable = lib.mkDefault (config.aurora.desktop != "minimal");
     boot.plymouth.themePackages = [ pkgs.plymouth-theme-aurora ];
     boot.plymouth.theme = lib.mkDefault "aurora";
+    # The theme draws in device pixels, so the logo matches aura's to the
+    # pixel; Plymouth's own 2x scale on Retina panels would double it.
+    boot.plymouth.extraConfig = lib.mkIf (config.boot.plymouth.theme == "aurora") "DeviceScale=1";
     hardware.graphics.enable = true;
     hardware.graphics.extraPackages = [ pkgs.aurora-rusticl pkgs.aurora-lavapipe ];
     services.desktopManager.plasma6.enable = config.aurora.desktop == "kde";

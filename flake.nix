@@ -224,7 +224,8 @@
         desktopExpectations = {
           "desktop images boot with the Aurora splash" = kde.boot.plymouth.enable && gnome.boot.plymouth.enable
             && kde.boot.plymouth.theme == "aurora" && gnome.boot.plymouth.theme == "aurora"
-            && lib.all (c: lib.any (p: (p.pname or "") == "plymouth-theme-aurora") c.boot.plymouth.themePackages) [ kde gnome ];
+            && lib.all (c: lib.any (p: (p.pname or "") == "plymouth-theme-aurora") c.boot.plymouth.themePackages) [ kde gnome ]
+            && lib.all (c: lib.hasInfix "DeviceScale=1" c.boot.plymouth.extraConfig) [ kde gnome ];
           "minimal images boot without a splash" = !minimal.boot.plymouth.enable;
           "the initrd asks for no TPM drivers, which the shared kernel lacks" = lib.all (c:
             !(lib.elem "tpm-tis" c.boot.initrd.availableKernelModules)
