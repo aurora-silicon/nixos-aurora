@@ -1,0 +1,1189 @@
+diff --git a/src/net.hadess.SensorProxy.xml b/src/net.hadess.SensorProxy.xml
+index 56f0ecff9c..276dcb33aa 100644
+--- a/src/net.hadess.SensorProxy.xml
++++ b/src/net.hadess.SensorProxy.xml
+@@ -126,6 +126,16 @@
+     -->
+     <property name="LightLevel" type="d" access="read"/>
+ 
++    <!--
++        ColorTemperature:
++
++        The correlated colour temperature of the ambient light in kelvin,
++        as reported by the ambient light sensor, or 0 if the sensor does
++        not report one. Like "LightLevel", it is only updated while
++        the light sensor is claimed with ClaimLight().
++    -->
++    <property name="ColorTemperature" type="d" access="read"/>
++
+     <!--
+         HasProximity:
+ 
+diff --git a/src/plugins/nightlight/CMakeLists.txt b/src/plugins/nightlight/CMakeLists.txt
+index 41a5047ea1..cf233b20b5 100644
+--- a/src/plugins/nightlight/CMakeLists.txt
++++ b/src/plugins/nightlight/CMakeLists.txt
+@@ -1,5 +1,6 @@
+ kcoreaddons_add_plugin(nightlight INSTALL_NAMESPACE "kwin/plugins")
+ target_sources(nightlight PRIVATE
++    ambientwhitepoint.cpp
+     nightlightdbusinterface.cpp
+     nightlightmanager.cpp
+     main.cpp
+@@ -34,3 +35,7 @@ target_link_libraries(nightlight
+ 
+ install(FILES nightlightsettings.kcfg DESTINATION ${KDE_INSTALL_KCFGDIR})
+ install(FILES org.kde.KWin.NightLight.xml DESTINATION ${KDE_INSTALL_DBUSINTERFACEDIR})
++
++if(BUILD_TESTING)
++    add_subdirectory(autotests)
++endif()
+diff --git a/src/plugins/nightlight/ambientwhitepoint.cpp b/src/plugins/nightlight/ambientwhitepoint.cpp
+new file mode 100644
+index 0000000000..122e8b71b3
+--- /dev/null
++++ b/src/plugins/nightlight/ambientwhitepoint.cpp
+@@ -0,0 +1,111 @@
++/*
++    KWin - the KDE window manager
++    This file is part of the KDE project.
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++#include "ambientwhitepoint.h"
++
++#include <algorithm>
++#include <cmath>
++
++namespace KWin
++{
++
++static double mired(double kelvin)
++{
++    return 1e6 / kelvin;
++}
++
++// Starting constants: follow half of the ambient shift in mired, never warmer
++// than 5000 K and never cooler than the native white, fade out between 50 and
++// 5 lux where the screen dominates the room and the colour reading gets noisy,
++// ignore anything shorter than about half of a 10 s window, and move at
++// 1 mired/s (a full 6500 to 5000 K swing takes about 45 s). Replace them with
++// the measured macOS model when it is available; the test vectors pin the
++// behaviour.
++AmbientPolicy::AmbientPolicy(const AmbientModel &model)
++    : m_model(model)
++    , m_window(std::clamp(int(std::round(model.windowSeconds / tickSeconds)), 1, maxSamples))
++{
++    reset();
++}
++
++double AmbientPolicy::targetMired(const AmbientModel &model, bool valid, double lux, double kelvin)
++{
++    const double neutral = mired(model.neutralK);
++    if (!valid || !std::isfinite(lux) || !std::isfinite(kelvin) || lux < 0
++        || kelvin < model.minValidK || kelvin > model.maxValidK) {
++        return neutral;
++    }
++    if (lux <= model.luxOff) {
++        return neutral;
++    }
++    double fraction = (std::log10(lux) - std::log10(model.luxOff)) / (std::log10(model.luxFull) - std::log10(model.luxOff));
++    fraction = std::clamp(fraction, 0.0, 1.0);
++    const double target = neutral + model.strength * fraction * (mired(kelvin) - neutral);
++    return std::clamp(target, mired(model.coolestK), mired(model.warmestK));
++}
++
++void AmbientPolicy::reset()
++{
++    m_sampleCount = 0;
++    m_nextSample = 0;
++    m_haveTarget = false;
++    m_heldMired = mired(m_model.neutralK);
++    m_currentMired = m_heldMired;
++}
++
++double AmbientPolicy::median() const
++{
++    std::array<double, maxSamples> sorted = m_samples;
++    std::sort(sorted.begin(), sorted.begin() + m_sampleCount);
++    const int n = m_sampleCount;
++    return n % 2 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
++}
++
++double AmbientPolicy::tick(bool releasing, bool valid, double lux, double colorTemperature)
++{
++    const double neutral = mired(m_model.neutralK);
++    double target;
++    double step;
++
++    if (releasing) {
++        m_sampleCount = 0;
++        m_nextSample = 0;
++        m_haveTarget = false;
++        m_heldMired = neutral;
++        target = neutral;
++        step = m_model.releaseMiredPerSecond * tickSeconds;
++    } else {
++        m_samples[m_nextSample] = targetMired(m_model, valid, lux, colorTemperature);
++        m_nextSample = (m_nextSample + 1) % m_window;
++        m_sampleCount = std::min(m_sampleCount + 1, m_window);
++        const double filtered = median();
++
++        // The deadband keeps small wobbles off the screen, but the neutral
++        // point and the warm limit are always reachable.
++        const bool atBound = filtered == neutral || filtered == mired(m_model.warmestK);
++        if (!m_haveTarget || atBound || std::abs(filtered - m_heldMired) >= m_model.deadbandMired) {
++            m_heldMired = filtered;
++            m_haveTarget = true;
++        }
++        target = m_heldMired;
++        step = m_model.rampMiredPerSecond * tickSeconds;
++    }
++
++    m_currentMired += std::clamp(target - m_currentMired, -step, step);
++    return kelvin();
++}
++
++double AmbientPolicy::kelvin() const
++{
++    return 1e6 / m_currentMired;
++}
++
++bool AmbientPolicy::isNeutral() const
++{
++    return std::abs(m_currentMired - mired(m_model.neutralK)) < 1e-9;
++}
++
++} // namespace KWin
+diff --git a/src/plugins/nightlight/ambientwhitepoint.h b/src/plugins/nightlight/ambientwhitepoint.h
+new file mode 100644
+index 0000000000..45a12a1d85
+--- /dev/null
++++ b/src/plugins/nightlight/ambientwhitepoint.h
+@@ -0,0 +1,89 @@
++/*
++    KWin - the KDE window manager
++    This file is part of the KDE project.
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++#pragma once
++
++#include <array>
++
++namespace KWin
++{
++
++/**
++ * Ambient white point policy: maps the ambient light's correlated colour
++ * temperature and illuminance to a display white point, expressed as a
++ * colour temperature for Night Light's channel factors.
++ *
++ * gnome-settings-daemon carries the same model with the same constants and
++ * test vectors, so both desktops behave the same.
++ */
++struct AmbientModel
++{
++    double neutralK = 6500; // display native white, identity output
++    double warmestK = 5000; // never warmer than this
++    double coolestK = 6500; // never cooler than this
++    double strength = 0.5; // fraction of the ambient shift followed, in mired
++    double luxOff = 5; // at or below this, no adaptation
++    double luxFull = 50; // at or above this, full strength
++    double minValidK = 1500; // sensor readings outside are ignored
++    double maxValidK = 20000;
++    double windowSeconds = 10; // median filter window
++    double deadbandMired = 2.5; // ignore target changes smaller than this
++    double rampMiredPerSecond = 1.0; // following ambient changes
++    double releaseMiredPerSecond = 25.0; // returning to neutral when switched off
++};
++
++class AmbientPolicy
++{
++public:
++    static constexpr double tickSeconds = 0.5;
++    static constexpr int maxSamples = 64;
++
++    explicit AmbientPolicy(const AmbientModel &model = AmbientModel());
++
++    /**
++     * Instantaneous target, in mired, for one sensor reading. Invalid input
++     * gives the neutral point.
++     */
++    static double targetMired(const AmbientModel &model, bool valid, double lux, double kelvin);
++
++    /**
++     * Forgets all samples and jumps to neutral.
++     */
++    void reset();
++
++    /**
++     * Advances by one tick. When releasing, returns quickly to neutral and
++     * ignores the sensor. Returns the white point in kelvin.
++     */
++    double tick(bool releasing, bool valid, double lux, double colorTemperature);
++
++    double kelvin() const;
++    bool isNeutral() const;
++
++private:
++    double median() const;
++
++    AmbientModel m_model;
++    std::array<double, maxSamples> m_samples{};
++    int m_sampleCount = 0;
++    int m_nextSample = 0;
++    int m_window = 1;
++    double m_heldMired = 0;
++    double m_currentMired = 0;
++    bool m_haveTarget = false;
++};
++
++/**
++ * Night Light always wins: ambient adaptation can never make the screen
++ * cooler than Night Light asks for. The warmer of the two is used, which
++ * also makes hand-overs continuous.
++ */
++inline int composeTemperature(int nightLight, int ambient)
++{
++    return nightLight < ambient ? nightLight : ambient;
++}
++
++} // namespace KWin
+diff --git a/src/plugins/nightlight/autotests/CMakeLists.txt b/src/plugins/nightlight/autotests/CMakeLists.txt
+new file mode 100644
+index 0000000000..6594e18e41
+--- /dev/null
++++ b/src/plugins/nightlight/autotests/CMakeLists.txt
+@@ -0,0 +1,6 @@
++include(ECMMarkAsTest)
++
++add_executable(nightlightAmbientPolicyTest ambientpolicytest.cpp ../ambientwhitepoint.cpp)
++target_link_libraries(nightlightAmbientPolicyTest Qt::Test)
++add_test(NAME kwin-nightlightAmbientPolicyTest COMMAND nightlightAmbientPolicyTest)
++ecm_mark_as_test(nightlightAmbientPolicyTest)
+diff --git a/src/plugins/nightlight/autotests/ambient-test-vectors.h b/src/plugins/nightlight/autotests/ambient-test-vectors.h
+new file mode 100644
+index 0000000000..6d3b018313
+--- /dev/null
++++ b/src/plugins/nightlight/autotests/ambient-test-vectors.h
+@@ -0,0 +1,131 @@
++/* Generated by ambient_model.py. Do not edit. */
++#pragma once
++
++#include <math.h>
++
++typedef struct { int valid; double lux; double kelvin; double expect_k; } AmbientTargetVector;
++typedef struct { int count; int releasing; int valid; double lux; double kelvin; } AmbientTickRun;
++
++static const AmbientTargetVector ambient_target_vectors[] = {
++    { 1, 600.0, 6500.0, 6500.000000 },
++    { 1, 600.0, 5400.0, 5899.159664 },
++    { 1, 600.0, 5000.0, 5652.173913 },
++    { 1, 600.0, 4929.29, 5606.714853 },
++    { 1, 600.0, 4000.0, 5000.000000 },
++    { 1, 600.0, 2700.0, 5000.000000 },
++    { 1, 600.0, 9000.0, 6500.000000 },
++    { 1, 50.0, 4000.0, 5000.000000 },
++    { 1, 15.8114, 4000.0, 5621.621133 },
++    { 1, 10.0, 4000.0, 5941.108767 },
++    { 1, 5.0, 2700.0, 6500.000000 },
++    { 1, 1.0, 2700.0, 6500.000000 },
++    { 1, 0.0, 2700.0, 6500.000000 },
++    { 0, 600.0, 2700.0, 6500.000000 },
++    { 1, 600.0, 1000.0, 6500.000000 },
++    { 1, 600.0, 25000.0, 6500.000000 },
++    { 1, NAN, 4000.0, 6500.000000 },
++    { 1, 600.0, INFINITY, 6500.000000 },
++    { 1, -1.0, 4000.0, 6500.000000 },
++    { 1, 20000.0, 5800.0, 6130.081301 },
++    { 1, 30.0, 5200.0, 5923.798590 },
++};
++static const AmbientTickRun ambient_tick_runs[] = {
++    { 20, 0, 1, 400.0, 6500.0 },
++    { 120, 0, 1, 300.0, 3000.0 },
++    { 6, 0, 1, 300.0, 9000.0 },
++    { 20, 0, 1, 300.0, 3000.0 },
++    { 60, 0, 1, 300.0, 4800.0 },
++    { 120, 0, 1, 2.0, 3000.0 },
++    { 60, 0, 1, 300.0, 3000.0 },
++    { 40, 0, 0, 0.0, 0.0 },
++    { 60, 0, 1, 300.0, 3000.0 },
++    { 10, 1, 1, 300.0, 3000.0 },
++};
++static const double ambient_tick_expect_k[] = {
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6478.943434,
++    6458.022851, 6437.236940, 6416.584403, 6396.063961, 6375.674350, 6355.414324,
++    6335.282651, 6315.278115, 6295.399516, 6275.645667, 6256.015399, 6236.507556,
++    6217.120995, 6197.854589, 6178.707224, 6159.677801, 6140.765234, 6121.968448,
++    6103.286385, 6084.717997, 6066.262249, 6047.918120, 6029.684601, 6011.560694,
++    5993.545413, 5975.637784, 5957.836847, 5940.141650, 5922.551253, 5905.064729,
++    5887.681159, 5870.399639, 5853.219271, 5836.139169, 5819.158460, 5802.276278,
++    5785.491767, 5768.804083, 5752.212389, 5735.715861, 5719.313682, 5703.005045,
++    5686.789151, 5670.665213, 5654.632449, 5638.690089, 5622.837370, 5607.073539,
++    5591.397849, 5575.809565, 5560.307956, 5544.892301, 5529.561889, 5514.316013,
++    5499.153976, 5484.075090, 5469.078671, 5454.164044, 5439.330544, 5424.577509,
++    5409.904286, 5395.310230, 5380.794702, 5366.357069, 5351.996706, 5337.712995,
++    5323.505324, 5309.373086, 5295.315682, 5281.332521, 5267.423015, 5253.586583,
++    5239.822652, 5226.130653, 5212.510024, 5198.960208, 5185.480654, 5172.070818,
++    5158.730159, 5145.458144, 5132.254244, 5119.117937, 5106.048704, 5093.046033,
++    5080.109418, 5067.238355, 5054.432348, 5041.690906, 5029.013540, 5016.399768,
++    5003.849115, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5012.531328, 5025.125628, 5037.783375, 5050.505051, 5063.291139,
++    5076.142132, 5089.058524, 5102.040816, 5115.089514, 5128.205128, 5141.388175,
++    5154.639175, 5167.958656, 5181.347150, 5194.805195, 5208.333333, 5221.932115,
++    5235.602094, 5249.343832, 5263.157895, 5277.044855, 5291.005291, 5305.039788,
++    5319.148936, 5333.333333, 5347.593583, 5361.930295, 5376.344086, 5390.835580,
++    5405.405405, 5420.054201, 5434.782609, 5449.591281, 5464.480874, 5479.452055,
++    5494.505495, 5509.641873, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5537.413034, 5552.787072, 5568.246716, 5583.792684, 5599.425700,
++    5615.146498, 5630.955819, 5646.854413, 5662.843038, 5678.922461, 5695.093458,
++    5711.356813, 5727.713321, 5744.163782, 5760.709010, 5777.349826, 5794.087060,
++    5810.921553, 5827.854154, 5844.885725, 5862.017135, 5879.249265, 5896.583006,
++    5914.019258, 5931.558935, 5949.202959, 5966.952264, 5984.807796, 6002.770509,
++    6020.841374, 6039.021369, 6057.311486, 6075.712728, 6094.226111, 6112.852665,
++    6131.593428, 6150.449456, 6169.421814, 6188.511584, 6207.719857, 6227.047741,
++    6246.496356, 6266.066838, 6285.760335, 6305.578011, 6325.521045, 6345.590628,
++    6365.787970, 6386.114295, 6406.570842, 6427.158866, 6447.879640, 6468.734450,
++    6489.724603, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6478.943434, 6458.022851, 6437.236940, 6416.584403, 6396.063961,
++    6375.674350, 6355.414324, 6335.282651, 6315.278115, 6295.399516, 6275.645667,
++    6256.015399, 6236.507556, 6217.120995, 6197.854589, 6178.707224, 6159.677801,
++    6140.765234, 6121.968448, 6103.286385, 6084.717997, 6066.262249, 6047.918120,
++    6029.684601, 6011.560694, 5993.545413, 5975.637784, 5957.836847, 5940.141650,
++    5922.551253, 5905.064729, 5887.681159, 5870.399639, 5853.219271, 5836.139169,
++    5819.158460, 5802.276278, 5785.491767, 5768.804083, 5752.212389, 5735.715861,
++    5719.313682, 5703.005045, 5686.789151, 5670.665213, 5654.632449, 5638.690089,
++    5622.837370, 5607.073539, 5591.397849, 5575.809565, 5560.307956, 5544.892301,
++    5529.561889, 5514.316013, 5499.153976, 5484.075090, 5469.078671, 5454.164044,
++    5439.330544, 5454.164044, 5469.078671, 5484.075090, 5499.153976, 5514.316013,
++    5529.561889, 5544.892301, 5560.307956, 5575.809565, 5591.397849, 5607.073539,
++    5622.837370, 5638.690089, 5654.632449, 5670.665213, 5686.789151, 5703.005045,
++    5719.313682, 5735.715861, 5752.212389, 5768.804083, 5785.491767, 5802.276278,
++    5819.158460, 5836.139169, 5853.219271, 5870.399639, 5887.681159, 5905.064729,
++    5922.551253, 5940.141650, 5957.836847, 5975.637784, 5993.545413, 6011.560694,
++    6029.684601, 6047.918120, 6066.262249, 6084.717997, 6103.286385, 6084.717997,
++    6066.262249, 6047.918120, 6029.684601, 6011.560694, 5993.545413, 5975.637784,
++    5957.836847, 5940.141650, 5922.551253, 5905.064729, 5887.681159, 5870.399639,
++    5853.219271, 5836.139169, 5819.158460, 5802.276278, 5785.491767, 5768.804083,
++    5752.212389, 5735.715861, 5719.313682, 5703.005045, 5686.789151, 5670.665213,
++    5654.632449, 5638.690089, 5622.837370, 5607.073539, 5591.397849, 5575.809565,
++    5560.307956, 5544.892301, 5529.561889, 5514.316013, 5499.153976, 5484.075090,
++    5469.078671, 5454.164044, 5439.330544, 5424.577509, 5409.904286, 5395.310230,
++    5380.794702, 5366.357069, 5351.996706, 5337.712995, 5323.505324, 5309.373086,
++    5295.315682, 5281.332521, 5654.632449, 6084.717997, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++};
+diff --git a/src/plugins/nightlight/autotests/ambientpolicytest.cpp b/src/plugins/nightlight/autotests/ambientpolicytest.cpp
+new file mode 100644
+index 0000000000..daf0ed425e
+--- /dev/null
++++ b/src/plugins/nightlight/autotests/ambientpolicytest.cpp
+@@ -0,0 +1,75 @@
++/*
++    KWin - the KDE window manager
++    This file is part of the KDE project.
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++#include "../ambientwhitepoint.h"
++#include "ambient-test-vectors.h"
++
++#include <QTest>
++#include <cmath>
++#include <iterator>
++
++using namespace KWin;
++
++class AmbientPolicyTest : public QObject
++{
++    Q_OBJECT
++
++private Q_SLOTS:
++    void targets();
++    void trajectory();
++    void limits();
++    void compose();
++};
++
++void AmbientPolicyTest::targets()
++{
++    const AmbientModel model;
++    for (const AmbientTargetVector &v : ambient_target_vectors) {
++        const double kelvin = 1e6 / AmbientPolicy::targetMired(model, v.valid, v.lux, v.kelvin);
++        QVERIFY2(std::abs(kelvin - v.expect_k) < 1e-3, qPrintable(QStringLiteral("%1 lux %2 K gave %3 K, expected %4 K").arg(v.lux).arg(v.kelvin).arg(kelvin).arg(v.expect_k)));
++    }
++}
++
++void AmbientPolicyTest::trajectory()
++{
++    AmbientPolicy policy;
++    size_t tick = 0;
++    for (const AmbientTickRun &run : ambient_tick_runs) {
++        for (int i = 0; i < run.count; i++, tick++) {
++            const double kelvin = policy.tick(run.releasing, run.valid, run.lux, run.kelvin);
++            QVERIFY(tick < std::size(ambient_tick_expect_k));
++            QVERIFY2(std::abs(kelvin - ambient_tick_expect_k[tick]) < 1e-3, qPrintable(QStringLiteral("tick %1 gave %2 K, expected %3 K").arg(tick).arg(kelvin).arg(ambient_tick_expect_k[tick])));
++        }
++    }
++    QCOMPARE(tick, std::size(ambient_tick_expect_k));
++    QVERIFY(policy.isNeutral());
++}
++
++void AmbientPolicyTest::limits()
++{
++    const AmbientModel model;
++    AmbientPolicy policy(model);
++    double previous = 6500;
++    for (int i = 0; i < 2000; i++) {
++        const double lux = (i * 7919) % 3000;
++        const double kelvin = 1000 + (i * 104729) % 15000;
++        const double out = policy.tick(false, true, lux, kelvin);
++        QVERIFY(out >= model.warmestK - 1e-6);
++        QVERIFY(out <= model.coolestK + 1e-6);
++        QVERIFY(std::abs(1e6 / out - 1e6 / previous) <= model.rampMiredPerSecond * AmbientPolicy::tickSeconds + 1e-9);
++        previous = out;
++    }
++}
++
++void AmbientPolicyTest::compose()
++{
++    QCOMPARE(composeTemperature(6500, 5600), 5600);
++    QCOMPARE(composeTemperature(2700, 5600), 2700);
++    QCOMPARE(composeTemperature(4000, 6500), 4000);
++}
++
++QTEST_GUILESS_MAIN(AmbientPolicyTest)
++#include "ambientpolicytest.moc"
+diff --git a/src/plugins/nightlight/nightlightdbusinterface.cpp b/src/plugins/nightlight/nightlightdbusinterface.cpp
+index a0c9a38105..6825f5f055 100644
+--- a/src/plugins/nightlight/nightlightdbusinterface.cpp
++++ b/src/plugins/nightlight/nightlightdbusinterface.cpp
+@@ -99,6 +99,17 @@ NightLightDBusInterface::NightLightDBusInterface(NightLightManager *parent)
+         });
+     });
+ 
++    connect(m_manager, &NightLightManager::ambientWhitePointChanged, this, [this] {
++        announceChangedProperties({
++            {QStringLiteral("ambientWhitePointEnabled"), isAmbientWhitePointEnabled()},
++            {QStringLiteral("ambientWhitePointAvailable"), isAmbientWhitePointAvailable()},
++            {QStringLiteral("ambientWhitePointActive"), isAmbientWhitePointActive()},
++            {QStringLiteral("ambientColorTemperature"), ambientColorTemperature()},
++            {QStringLiteral("ambientWhitePointTemperature"), ambientWhitePointTemperature()},
++            {QStringLiteral("appliedTemperature"), appliedTemperature()},
++        });
++    });
++
+     new NightLightAdaptor(this);
+     QDBusConnection::sessionBus().registerObject(QStringLiteral("/org/kde/KWin/NightLight"), this);
+     QDBusConnection::sessionBus().registerService(QStringLiteral("org.kde.KWin.NightLight"));
+@@ -134,6 +145,36 @@ quint32 NightLightDBusInterface::currentTemperature() const
+     return m_manager->currentTemperature();
+ }
+ 
++bool NightLightDBusInterface::isAmbientWhitePointEnabled() const
++{
++    return m_manager->isAmbientWhitePointEnabled();
++}
++
++bool NightLightDBusInterface::isAmbientWhitePointAvailable() const
++{
++    return m_manager->isAmbientWhitePointAvailable();
++}
++
++bool NightLightDBusInterface::isAmbientWhitePointActive() const
++{
++    return m_manager->isAmbientWhitePointActive();
++}
++
++quint32 NightLightDBusInterface::ambientColorTemperature() const
++{
++    return m_manager->ambientColorTemperature();
++}
++
++quint32 NightLightDBusInterface::ambientWhitePointTemperature() const
++{
++    return m_manager->ambientWhitePointTemperature();
++}
++
++quint32 NightLightDBusInterface::appliedTemperature() const
++{
++    return m_manager->appliedTemperature();
++}
++
+ quint32 NightLightDBusInterface::targetTemperature() const
+ {
+     return m_manager->targetTemperature();
+diff --git a/src/plugins/nightlight/nightlightdbusinterface.h b/src/plugins/nightlight/nightlightdbusinterface.h
+index 40da7d4270..5779f58f07 100644
+--- a/src/plugins/nightlight/nightlightdbusinterface.h
++++ b/src/plugins/nightlight/nightlightdbusinterface.h
+@@ -35,6 +35,12 @@ class NightLightDBusInterface : public QObject, public QDBusContext
+     Q_PROPERTY(quint32 previousTransitionDuration READ previousTransitionDuration)
+     Q_PROPERTY(quint64 scheduledTransitionDateTime READ scheduledTransitionDateTime)
+     Q_PROPERTY(quint32 scheduledTransitionDuration READ scheduledTransitionDuration)
++    Q_PROPERTY(bool ambientWhitePointEnabled READ isAmbientWhitePointEnabled)
++    Q_PROPERTY(bool ambientWhitePointAvailable READ isAmbientWhitePointAvailable)
++    Q_PROPERTY(bool ambientWhitePointActive READ isAmbientWhitePointActive)
++    Q_PROPERTY(quint32 ambientColorTemperature READ ambientColorTemperature)
++    Q_PROPERTY(quint32 ambientWhitePointTemperature READ ambientWhitePointTemperature)
++    Q_PROPERTY(quint32 appliedTemperature READ appliedTemperature)
+ 
+ public:
+     explicit NightLightDBusInterface(NightLightManager *parent);
+@@ -52,6 +58,12 @@ public:
+     quint32 previousTransitionDuration() const;
+     quint64 scheduledTransitionDateTime() const;
+     quint32 scheduledTransitionDuration() const;
++    bool isAmbientWhitePointEnabled() const;
++    bool isAmbientWhitePointAvailable() const;
++    bool isAmbientWhitePointActive() const;
++    quint32 ambientColorTemperature() const;
++    quint32 ambientWhitePointTemperature() const;
++    quint32 appliedTemperature() const;
+ 
+ public Q_SLOTS:
+     /**
+diff --git a/src/plugins/nightlight/nightlightmanager.cpp b/src/plugins/nightlight/nightlightmanager.cpp
+index d8616c92a3..da5db9c9a0 100644
+--- a/src/plugins/nightlight/nightlightmanager.cpp
++++ b/src/plugins/nightlight/nightlightmanager.cpp
+@@ -17,6 +17,8 @@
+ #include "nightlightlogging.h"
+ #include "nightlightsettings.h"
+ #include "nightlightstate.h"
++#include "utils/lightsensor.h"
++#include "workspace.h"
+ 
+ #include <KDarkLightScheduleProvider>
+ #include <KGlobalAccel>
+@@ -30,6 +32,8 @@
+ #include <QDBusReply>
+ #include <QTimer>
+ 
++#include <cmath>
++
+ namespace KWin
+ {
+ 
+@@ -65,6 +69,14 @@ NightLightManager::NightLightManager()
+         QDBusConnection::sessionBus().asyncCall(message);
+     });
+ 
++    m_ambientTimer.setInterval(int(AmbientPolicy::tickSeconds * 1000));
++    connect(&m_ambientTimer, &QTimer::timeout, this, &NightLightManager::ambientTick);
++    connect(this, &NightLightManager::inhibitedChanged, this, &NightLightManager::updateAmbient);
++    if (LightSensor *sensor = workspace() ? workspace()->lightSensor() : nullptr) {
++        connect(sensor, &LightSensor::availableChanged, this, &NightLightManager::updateAmbient);
++        connect(sensor, &LightSensor::colorTemperatureChanged, this, &NightLightManager::ambientWhitePointChanged);
++    }
++
+     m_configWatcher = KConfigWatcher::create(kwinApp()->config());
+     connect(m_configWatcher.data(), &KConfigWatcher::configChanged, this, &NightLightManager::reconfigure);
+ 
+@@ -85,6 +97,11 @@ NightLightManager::NightLightManager()
+             hardReset();
+         } else {
+             cancelAllTimers();
++            // Not our screens while the session is inactive. Start again from
++            // neutral when it comes back.
++            m_ambientTimer.stop();
++            m_ambientPolicy.reset();
++            updateAmbient();
+         }
+     });
+     connect(kwinApp()->session(), &Session::awoke, this, &NightLightManager::hardReset);
+@@ -94,6 +111,9 @@ NightLightManager::NightLightManager()
+ 
+ NightLightManager::~NightLightManager()
+ {
++    if (m_ambientSensorHeld && workspace()) {
++        workspace()->lightSensor()->release();
++    }
+ }
+ 
+ void NightLightManager::hardReset()
+@@ -106,8 +126,11 @@ void NightLightManager::hardReset()
+     if (isEnabled() && !isInhibited()) {
+         setRunning(true);
+         commitGammaRamps(currentTargetTemperature());
++    } else if (!m_ambientPolicy.isNeutral()) {
++        applyChannelFactors();
+     }
+     resetAllTimers();
++    updateAmbient();
+ }
+ 
+ void NightLightManager::reconfigure()
+@@ -115,6 +138,7 @@ void NightLightManager::reconfigure()
+     cancelAllTimers();
+     readConfig();
+     resetAllTimers();
++    updateAmbient();
+ }
+ 
+ void NightLightManager::toggle()
+@@ -229,6 +253,8 @@ void NightLightManager::readConfig()
+         m_darkLightScheduler.reset();
+     }
+ 
++    m_ambientEnabled = settings->ambientWhitePoint();
++
+     m_dayTargetTemperature = std::clamp(settings->dayTemperature(), MIN_TEMPERATURE, DEFAULT_DAY_TEMPERATURE);
+     m_nightTargetTemperature = std::clamp(settings->nightTemperature(), MIN_TEMPERATURE, DEFAULT_DAY_TEMPERATURE);
+ }
+@@ -520,6 +546,20 @@ int NightLightManager::currentTargetTemperature() const
+ 
+ void NightLightManager::commitGammaRamps(int temperature)
+ {
++    setCurrentTemperature(temperature);
++    applyChannelFactors();
++}
++
++void NightLightManager::applyChannelFactors()
++{
++    // Night Light always wins: the ambient white point may make the screens
++    // warmer than Night Light's current temperature, never cooler, and a
++    // preview shows exactly the previewed temperature.
++    int temperature = m_currentTemperature;
++    if (!m_previewTimer && !m_ambientPolicy.isNeutral()) {
++        temperature = composeTemperature(m_currentTemperature, ambientWhitePointTemperature());
++    }
++
+     // TODO this list should ideally be filtered by workspace
+     const QList<BackendOutput *> outputs = kwinApp()->outputBackend()->outputs();
+     const QVector3D rgbFactors = sampleColorTemperature(temperature);
+@@ -527,7 +567,92 @@ void NightLightManager::commitGammaRamps(int temperature)
+         output->setChannelFactors(rgbFactors);
+     }
+ 
+-    setCurrentTemperature(temperature);
++    if (m_appliedTemperature != temperature) {
++        m_appliedTemperature = temperature;
++        Q_EMIT ambientWhitePointChanged();
++    }
++}
++
++bool NightLightManager::ambientWanted() const
++{
++    const LightSensor *sensor = workspace() ? workspace()->lightSensor() : nullptr;
++    return m_ambientEnabled && !isInhibited() && sensor && sensor->isAvailable()
++        && kwinApp()->session()->isActive();
++}
++
++// Claims the light sensor and runs the policy while wanted; otherwise lets
++// the white point return to neutral, then stops and releases the sensor.
++void NightLightManager::updateAmbient()
++{
++    LightSensor *sensor = workspace() ? workspace()->lightSensor() : nullptr;
++    if (!sensor) {
++        return;
++    }
++    const bool wanted = ambientWanted();
++    if (wanted && !m_ambientSensorHeld) {
++        sensor->acquire();
++        m_ambientSensorHeld = true;
++    }
++    if (!m_ambientTimer.isActive() && kwinApp()->session()->isActive()
++        && (wanted || !m_ambientPolicy.isNeutral())) {
++        m_ambientTimer.start();
++    }
++    if (!wanted && m_ambientSensorHeld) {
++        sensor->release();
++        m_ambientSensorHeld = false;
++    }
++    Q_EMIT ambientWhitePointChanged();
++}
++
++void NightLightManager::ambientTick()
++{
++    const LightSensor *sensor = workspace() ? workspace()->lightSensor() : nullptr;
++    const bool wanted = ambientWanted();
++    // reading() is only set for readings in lux, which the policy needs.
++    const auto lux = sensor ? sensor->reading() : std::nullopt;
++    const auto kelvin = sensor ? sensor->colorTemperature() : std::nullopt;
++    const bool valid = wanted && lux && kelvin;
++
++    m_ambientPolicy.tick(!wanted, valid, valid ? *lux : 0, valid ? *kelvin : 0);
++    if (!wanted && m_ambientPolicy.isNeutral()) {
++        m_ambientPolicy.reset();
++        m_ambientTimer.stop();
++    }
++    applyChannelFactors();
++}
++
++bool NightLightManager::isAmbientWhitePointEnabled() const
++{
++    return m_ambientEnabled;
++}
++
++bool NightLightManager::isAmbientWhitePointAvailable() const
++{
++    const LightSensor *sensor = workspace() ? workspace()->lightSensor() : nullptr;
++    // The colour temperature is only known while the light sensor is claimed.
++    return sensor && sensor->isAvailable() && sensor->colorTemperature().has_value();
++}
++
++bool NightLightManager::isAmbientWhitePointActive() const
++{
++    return !m_ambientPolicy.isNeutral() && m_appliedTemperature < m_currentTemperature;
++}
++
++int NightLightManager::ambientColorTemperature() const
++{
++    const LightSensor *sensor = workspace() ? workspace()->lightSensor() : nullptr;
++    const auto kelvin = sensor ? sensor->colorTemperature() : std::nullopt;
++    return kelvin ? int(std::round(*kelvin)) : 0;
++}
++
++int NightLightManager::ambientWhitePointTemperature() const
++{
++    return int(std::round(m_ambientPolicy.kelvin()));
++}
++
++int NightLightManager::appliedTemperature() const
++{
++    return m_appliedTemperature;
+ }
+ 
+ void NightLightManager::setEnabled(bool enabled)
+diff --git a/src/plugins/nightlight/nightlightmanager.h b/src/plugins/nightlight/nightlightmanager.h
+index 0b347403cb..f7c5c4024b 100644
+--- a/src/plugins/nightlight/nightlightmanager.h
++++ b/src/plugins/nightlight/nightlightmanager.h
+@@ -10,6 +10,7 @@
+ 
+ #pragma once
+ 
++#include "ambientwhitepoint.h"
+ #include "constants.h"
+ #include "plugin.h"
+ 
+@@ -18,6 +19,7 @@
+ #include <QDateTime>
+ #include <QObject>
+ #include <QPair>
++#include <QTimer>
+ 
+ class KDarkLightScheduleProvider;
+ class KSystemClockSkewNotifier;
+@@ -175,6 +177,37 @@ public:
+      */
+     void stopPreview();
+ 
++    /**
++     * Returns @c true if the display white point follows the ambient light.
++     */
++    bool isAmbientWhitePointEnabled() const;
++
++    /**
++     * Returns @c true if an ambient light sensor that reports colour is present.
++     */
++    bool isAmbientWhitePointAvailable() const;
++
++    /**
++     * Returns @c true if the ambient white point currently changes the screens.
++     */
++    bool isAmbientWhitePointActive() const;
++
++    /**
++     * Returns the ambient light's colour temperature, or 0 if unknown.
++     */
++    int ambientColorTemperature() const;
++
++    /**
++     * Returns the white point chosen for the ambient light, 6500 K when neutral.
++     */
++    int ambientWhitePointTemperature() const;
++
++    /**
++     * Returns the colour temperature applied to the screens: Night Light's
++     * current temperature, or the ambient white point when that is warmer.
++     */
++    int appliedTemperature() const;
++
+ public Q_SLOTS:
+     void quickAdjust(int targetTemperature);
+ 
+@@ -224,6 +257,11 @@ Q_SIGNALS:
+      */
+     void scheduledTransitionTimingsChanged();
+ 
++    /**
++     * Emitted whenever any of the ambient white point properties change.
++     */
++    void ambientWhitePointChanged();
++
+ private:
+     void readConfig();
+     void hardReset();
+@@ -244,6 +282,11 @@ private:
+     void updateTransitionTimings(const QDateTime &dateTime);
+ 
+     void commitGammaRamps(int temperature);
++    void applyChannelFactors();
++
++    bool ambientWanted() const;
++    void updateAmbient();
++    void ambientTick();
+ 
+     void setEnabled(bool enabled);
+     void setRunning(bool running);
+@@ -286,6 +329,13 @@ private:
+     int m_nightTargetTemperature = DEFAULT_NIGHT_TEMPERATURE;
+ 
+     int m_inhibitReferenceCount = 0;
++
++    // Ambient white point, off unless AmbientWhitePoint is set.
++    bool m_ambientEnabled = false;
++    bool m_ambientSensorHeld = false;
++    AmbientPolicy m_ambientPolicy;
++    QTimer m_ambientTimer;
++    int m_appliedTemperature = DEFAULT_DAY_TEMPERATURE;
+     KConfigWatcher::Ptr m_configWatcher;
+ };
+ 
+diff --git a/src/plugins/nightlight/nightlightsettings.kcfg b/src/plugins/nightlight/nightlightsettings.kcfg
+index a99b262f6b..67c29a8455 100644
+--- a/src/plugins/nightlight/nightlightsettings.kcfg
++++ b/src/plugins/nightlight/nightlightsettings.kcfg
+@@ -21,5 +21,9 @@
+         <entry name="NightTemperature" type="Int">
+             <default>4500</default>
+         </entry>
++        <entry name="AmbientWhitePoint" type="Bool">
++            <label>Adapt the screen white point to the ambient light, where a light sensor reports its colour. Night Light takes priority.</label>
++            <default>false</default>
++        </entry>
+     </group>
+ </kcfg>
+diff --git a/src/plugins/nightlight/org.kde.KWin.NightLight.xml b/src/plugins/nightlight/org.kde.KWin.NightLight.xml
+index c057861259..3ac2cf66b6 100644
+--- a/src/plugins/nightlight/org.kde.KWin.NightLight.xml
++++ b/src/plugins/nightlight/org.kde.KWin.NightLight.xml
+@@ -119,5 +119,42 @@
+         the constant mode, this property holds a value of 0.
+     -->
+     <property name="scheduledTransitionDuration" type="u" access="read"/>
++
++    <!--
++        This property holds a value to indicate whether the screen white point
++        follows the ambient light.
++    -->
++    <property name="ambientWhitePointEnabled" type="b" access="read"/>
++
++    <!--
++        This property holds a value to indicate whether an ambient light sensor
++        that reports the light's colour is present. The colour is only known
++        while the sensor is in use, so this is false until a reading arrived.
++    -->
++    <property name="ambientWhitePointAvailable" type="b" access="read"/>
++
++    <!--
++        This property holds a value to indicate whether the ambient white point
++        currently changes the screens.
++    -->
++    <property name="ambientWhitePointActive" type="b" access="read"/>
++
++    <!--
++        This property holds the ambient light's correlated colour temperature,
++        in kelvin, or 0 if it is unknown.
++    -->
++    <property name="ambientColorTemperature" type="u" access="read"/>
++
++    <!--
++        This property holds the white point chosen for the ambient light, in
++        kelvin. It is 6500 when neutral.
++    -->
++    <property name="ambientWhitePointTemperature" type="u" access="read"/>
++
++    <!--
++        This property holds the colour temperature applied to the screens: Night
++        Light's current temperature, or the ambient white point when that is warmer.
++    -->
++    <property name="appliedTemperature" type="u" access="read"/>
+   </interface>
+ </node>
+diff --git a/src/utils/lightsensor.cpp b/src/utils/lightsensor.cpp
+index 827efd4c29..9779b4f4e9 100644
+--- a/src/utils/lightsensor.cpp
++++ b/src/utils/lightsensor.cpp
+@@ -17,6 +17,8 @@
+ #include <QDBusPendingCall>
+ #include <QDBusServiceWatcher>
+ 
++#include <cmath>
++
+ namespace KWin
+ {
+ 
+@@ -49,6 +51,9 @@ public:
+     std::optional<double> reading() const;
+     void setReading(double reading);
+ 
++    std::optional<double> colorTemperature() const;
++    void setColorTemperature(double colorTemperature);
++
+ Q_SIGNALS:
+     void readingChanged();
+ 
+@@ -60,6 +65,7 @@ private:
+     std::unique_ptr<NetHadessSensorProxyInterface> m_sensorInterface;
+     std::optional<QString> m_unit;
+     std::optional<double> m_reading;
++    std::optional<double> m_colorTemperature;
+ };
+ 
+ LightSensorSubscription::LightSensorSubscription()
+@@ -89,6 +95,13 @@ LightSensorSubscription::LightSensorSubscription()
+             qCWarning(KWIN_CORE) << "Failed to fetch net.hadess.SensorProxy.LightLevel property:" << result.error();
+         }
+     });
++
++    // Older iio-sensor-proxy versions have no ColorTemperature; that is not an error.
++    intoFuture<QVariant>(m_sensorProperties->Get(m_sensorInterface->interface(), QStringLiteral("ColorTemperature"))).then(this, [this](const std::expected<QVariant, QDBusError> &result) {
++        if (result.has_value()) {
++            setColorTemperature(result->toDouble());
++        }
++    });
+ }
+ 
+ LightSensorSubscription::~LightSensorSubscription()
+@@ -102,6 +115,10 @@ void LightSensorSubscription::onPropertiesChanged(const QString &interfaceName,
+         setUnit(it->toString());
+     }
+ 
++    if (auto it = properties.find(QStringLiteral("ColorTemperature")); it != properties.end()) {
++        setColorTemperature(it->toDouble());
++    }
++
+     if (auto it = properties.find(QStringLiteral("LightLevel")); it != properties.end()) {
+         setReading(it->toDouble());
+     }
+@@ -130,6 +147,19 @@ void LightSensorSubscription::setReading(double reading)
+     }
+ }
+ 
++std::optional<double> LightSensorSubscription::colorTemperature() const
++{
++    return m_colorTemperature;
++}
++
++void LightSensorSubscription::setColorTemperature(double colorTemperature)
++{
++    if (m_colorTemperature != colorTemperature) {
++        m_colorTemperature = colorTemperature;
++        Q_EMIT readingChanged();
++    }
++}
++
+ LightSensor::LightSensor()
+ {
+     m_watcher = std::make_unique<QDBusServiceWatcher>(serviceName(), QDBusConnection::systemBus(), QDBusServiceWatcher::WatchForOwnerChange);
+@@ -158,9 +188,7 @@ void LightSensor::onServiceRegistered()
+         }
+     });
+ 
+-    if (m_enabled) {
+-        subscribe();
+-    }
++    updateSubscription();
+ }
+ 
+ void LightSensor::onServiceUnregistered()
+@@ -169,6 +197,7 @@ void LightSensor::onServiceUnregistered()
+ 
+     m_unit.reset();
+     m_reading.reset();
++    updateColorTemperature(std::nullopt);
+ 
+     updateAvailable(false);
+ }
+@@ -202,8 +231,31 @@ void LightSensor::setEnabled(bool enabled)
+     }
+ 
+     m_enabled = enabled;
++    updateSubscription();
++}
++
++std::optional<double> LightSensor::colorTemperature() const
++{
++    return m_colorTemperature;
++}
+ 
+-    if (enabled) {
++void LightSensor::acquire()
++{
++    m_users++;
++    updateSubscription();
++}
++
++void LightSensor::release()
++{
++    Q_ASSERT(m_users > 0);
++    m_users--;
++    updateSubscription();
++}
++
++void LightSensor::updateSubscription()
++{
++    // One claim per connection: iio-sensor-proxy tracks claims by D-Bus name.
++    if (m_enabled || m_users > 0) {
+         subscribe();
+     } else {
+         unsubscribe();
+@@ -223,16 +275,31 @@ void LightSensor::subscribe()
+     m_subscription = std::make_unique<LightSensorSubscription>();
+     connect(m_subscription.get(), &LightSensorSubscription::readingChanged, this, [this]() {
+         updateLevelUnit(m_subscription->unit());
++        updateColorTemperature(m_subscription->colorTemperature());
+         updateLevel(m_subscription->reading());
+     });
+ 
+     updateLevelUnit(m_subscription->unit());
++    updateColorTemperature(m_subscription->colorTemperature());
+     updateLevel(m_subscription->reading());
+ }
+ 
+ void LightSensor::unsubscribe()
+ {
+     m_subscription.reset();
++    updateColorTemperature(std::nullopt);
++}
++
++void LightSensor::updateColorTemperature(std::optional<double> value)
++{
++    // 0 means the sensor has no colour channel.
++    if (value && (!std::isfinite(*value) || *value <= 0)) {
++        value.reset();
++    }
++    if (m_colorTemperature != value) {
++        m_colorTemperature = value;
++        Q_EMIT colorTemperatureChanged();
++    }
+ }
+ 
+ void LightSensor::updateAvailable(bool available)
+diff --git a/src/utils/lightsensor.h b/src/utils/lightsensor.h
+index faaed9bcd4..0ac2a23f36 100644
+--- a/src/utils/lightsensor.h
++++ b/src/utils/lightsensor.h
+@@ -7,6 +7,8 @@
+ 
+ #pragma once
+ 
++#include "kwin_export.h"
++
+ #include <QObject>
+ 
+ class OrgFreedesktopDBusPropertiesInterface;
+@@ -17,7 +19,7 @@ namespace KWin
+ 
+ class LightSensorSubscription;
+ 
+-class LightSensor : public QObject
++class KWIN_EXPORT LightSensor : public QObject
+ {
+     Q_OBJECT
+ 
+@@ -28,13 +30,26 @@ public:
+     bool isAvailable() const;
+ 
+     std::optional<double> reading() const;
++    /**
++     * The correlated colour temperature of the ambient light in kelvin, if
++     * the sensor reports one.
++     */
++    std::optional<double> colorTemperature() const;
+ 
+     bool isEnabled() const;
+     void setEnabled(bool enabled);
+ 
++    /**
++     * Keeps the sensor claimed for another user, independently of setEnabled().
++     * Each call to acquire() must be balanced by release().
++     */
++    void acquire();
++    void release();
++
+ Q_SIGNALS:
+     void availableChanged();
+     void readingReceived();
++    void colorTemperatureChanged();
+ 
+ private:
+     void subscribe();
+@@ -47,15 +62,19 @@ private:
+     void updateAvailable(bool available);
+     void updateLevel(std::optional<double> value);
+     void updateLevelUnit(std::optional<QString> unit);
++    void updateColorTemperature(std::optional<double> value);
++    void updateSubscription();
+ 
+     bool m_available = false;
+     bool m_enabled = false;
++    int m_users = 0;
+ 
+     std::unique_ptr<QDBusServiceWatcher> m_watcher;
+     std::unique_ptr<OrgFreedesktopDBusPropertiesInterface> m_properties;
+     std::unique_ptr<LightSensorSubscription> m_subscription;
+     std::optional<QString> m_unit;
+     std::optional<double> m_reading;
++    std::optional<double> m_colorTemperature;
+ };
+ 
+ } // namespace KWin
+diff --git a/src/workspace.h b/src/workspace.h
+index 12062bc01c..a78bd6a570 100644
+--- a/src/workspace.h
++++ b/src/workspace.h
+@@ -217,6 +217,12 @@ public:
+ 
+     SessionManager *sessionManager() const;
+ 
++    /**
++     * The ambient light sensor, shared by everything in the compositor that
++     * reads it.
++     */
++    LightSensor *lightSensor() const;
++
+     /**
+      * @returns the TileManager associated to a given output
+      */
+@@ -819,6 +825,11 @@ inline bool Workspace::wasUserInteraction() const
+     return was_user_interaction;
+ }
+ 
++inline LightSensor *Workspace::lightSensor() const
++{
++    return m_lightSensor.get();
++}
++
+ inline SessionManager *Workspace::sessionManager() const
+ {
+     return m_sessionManager;
