@@ -5,6 +5,8 @@ stdenvNoCC.mkDerivation {
   outputs = [ "out" "debug" ];
   nativeBuildInputs = [ meson ninja python3 llvmPackages_22.clang-unwrapped
     llvmPackages_22.llvm llvmPackages_22.lld ];
+  # The upstream queue test runs natively; firmware still uses unwrapped clang.
+  CC_FOR_BUILD = "${llvmPackages_22.clang}/bin/clang";
   strictDeps = true;
   dontStrip = true;
   configurePhase = ''
@@ -22,6 +24,7 @@ stdenvNoCC.mkDerivation {
   doCheck = true;
   checkPhase = ''
     runHook preCheck
+    meson test -C build --print-errorlogs
     python3 ${./firmware/check-avd.py} build
     runHook postCheck
   '';

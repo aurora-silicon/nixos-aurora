@@ -12,3 +12,6 @@ flags cleared or disabled. The package check prints and verifies all seven
 clang 22 image SHA-256 hashes as well as sizes, ARM ELF headers and reset
 vectors. A different toolchain must pass the same checks; mismatches fail the
 build and require investigation rather than replacing the expected hashes.
+
+Provide a wrapped native clang for the upstream queue test while the bare-metal
+firmware continues to use unwrapped clang. Run the queue test during checks.
