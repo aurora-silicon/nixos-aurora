@@ -39,7 +39,7 @@ gsettings set org.gnome.settings-daemon.plugins.color ambient-white-point-enable
 KDE Plasma:
 
 ```
-kwriteconfig6 --file kwinrc --group NightColor --key AmbientWhitePoint true
+kwriteconfig6 --notify --file kwinrc --group NightColor --key AmbientWhitePoint true
 ```
 
 KWin picks the change up right away. Set either back to `false` to turn it off. aurora-diag has a live demo with the sensor reading, the chosen white point and a toggle (`aurora-diag demo whitepoint`).
