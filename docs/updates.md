@@ -34,7 +34,7 @@ including the MacBook Neo.
 
 - At build time `scripts/check-stage2.py` requires the file to start with the system's aura build, carry
   only device trees, one gzip U-Boot member and m1n1 option lines, and include the device trees of
-  `aurora.stage2.requiredBoards` (`j700` by default). The build fails otherwise, so a rebuild stops before
+  `aurora.stage2.requiredBoards` (`j700` and `j616s` by default). The build fails otherwise, so a rebuild stops before
   it switches.
 - At install time `aurora-install-stage2` (`scripts/install-stage2.sh`) checks the input against its
   recorded digest and that the ESP is the mounted FAT partition this Mac booted from

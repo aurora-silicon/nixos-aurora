@@ -9,10 +9,10 @@ in {
       default = true;
       description = ''
         Run aurora-camera-denoise, a PipeWire filter that denoises the built-in
-        camera in low light, as a user service for every user. It adds a
-        filtered node next to each built-in camera and only filters on boards
-        with data in its boards.conf (the MacBook Neo and the MacBook Pro M5
-        Pro/Max today), unless `settings.mode` is `on`.
+        camera the way macOS does, as a user service for every user. It adds a
+        filtered node next to each built-in camera. A temporal filter runs on
+        every frame, and a low-light stage (a backend plugin) joins in above
+        the per-board gain levels in its boards.conf.
 
         Backends load from the package's own `lib/aurora-camera-denoise`. The
         CPU backend is built in; a Neural Engine backend has to be built into
@@ -27,7 +27,12 @@ in {
           mode = lib.mkOption {
             type = lib.types.nullOr (lib.types.enum [ "auto" "on" "off" ]);
             default = null;
-            description = "`auto` follows the sensor gain and noise, `on` always filters, `off` passes frames through.";
+            description = "`auto` runs the temporal filter always and the low-light stage by sensor gain and noise, `on` runs both always, `off` passes frames through.";
+          };
+          temporal = lib.mkOption {
+            type = lib.types.nullOr (lib.types.enum [ "on" "off" ]);
+            default = null;
+            description = "`on` (the default) runs the temporal filter on every frame, like macOS; `off` only filters above the low-light levels.";
           };
           backend = lib.mkOption {
             type = lib.types.nullOr lib.types.str;

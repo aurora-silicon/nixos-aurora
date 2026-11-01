@@ -1,12 +1,33 @@
 { lib, pkgs, ... }:
 {
   hardware.bluetooth.enable = true;
+  # BlueZ 5.87 includes the empty default-parameter transaction fix.
+  assertions = [ {
+    assertion = lib.versionAtLeast pkgs.bluez.version "5.87";
+    message = "Aurora requires BlueZ >= 5.87 (empty default system config fix).";
+  } ];
   hardware.enableRedistributableFirmware = true;
   hardware.firmware = [ pkgs.aurora-avd-firmware ];
   services.upower.enable = true;
   hardware.wirelessRegulatoryDatabase = true;
   systemd.packages = [ pkgs.speakerguardd ];
-  services.udev.packages = [ pkgs.speakerguardd ];
+  services.udev.packages = [
+    pkgs.speakerguardd
+    # Keep the firmware's product name unchanged in ID_MODEL (hostnamed's
+    # hardware model): udev turns parentheses into underscores in $attr{}.
+    (pkgs.writeTextFile {
+      name = "aurora-dmi-id-rules";
+      destination = "/lib/udev/rules.d/61-aurora-dmi-id.rules";
+      text = builtins.replaceStrings [ "@sed@" ] [ "${pkgs.gnused}/bin/sed" ]
+        (builtins.readFile ./61-aurora-dmi-id.rules);
+    })
+    # Name the DMI vendor "Apple" instead of "Apple Inc." for hostnamed.
+    (pkgs.writeTextFile {
+      name = "aurora-dmi-vendor-hwdb";
+      destination = "/lib/udev/hwdb.d/60-aurora-dmi-vendor.hwdb";
+      text = builtins.readFile ./60-aurora-dmi-vendor.hwdb;
+    })
+  ];
   # The sense-PCM udev rule starts the feed-forward guardian only on J700.
   systemd.services.speakersafetyd.serviceConfig = {
     ExecCondition = "${pkgs.speakerguardd}/libexec/speakerguardd/use-feedback-guard";

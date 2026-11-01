@@ -1,0 +1,2 @@
+# Patch context has a required leading space before source indentation.
+*.patch -whitespace

@@ -1,0 +1,393 @@
+{
+  "since": "2026-10-28T00:00:00Z",
+  "through": "2026-10-31T07:31:00Z",
+  "pull_requests": [
+    {
+      "number": 31,
+      "title": "aurora-audio: move to asahi-audio f513878 (4.1-5)",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/31",
+      "mergedAt": "2026-10-28T07:20:43Z",
+      "mergeCommit": {
+        "oid": "c646319f8b8117ee2f09e0051b8076470e5ee805"
+      }
+    },
+    {
+      "number": 32,
+      "title": "alsa-utils: skip controls another process has locked",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/32",
+      "mergedAt": "2026-10-28T11:13:18Z",
+      "mergeCommit": {
+        "oid": "7935b98fa87f5b2a6178e54ed94082aa33cabad4"
+      }
+    },
+    {
+      "number": 33,
+      "title": "aurora-audio: carry snd-seq in the initramfs",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/33",
+      "mergedAt": "2026-10-28T11:13:23Z",
+      "mergeCommit": {
+        "oid": "569d5640d15def944ca15e5908baeaf7a8669713"
+      }
+    },
+    {
+      "number": 34,
+      "title": "aurora-audio: pin the source archive the spec builds",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/34",
+      "mergedAt": "2026-10-28T11:18:01Z",
+      "mergeCommit": {
+        "oid": "b7d1b627f77f9615b5d06a47a91a7b98f0f1fde5"
+      }
+    },
+    {
+      "number": 35,
+      "title": "aurora-release: let the malcontent daemons stop on SIGTERM",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/35",
+      "mergedAt": "2026-10-28T15:55:56Z",
+      "mergeCommit": {
+        "oid": "4ce4b4e13f57c2cc1276f8b697ccddfee34c4b2c"
+      }
+    },
+    {
+      "number": 36,
+      "title": "aurora-flatpak-gl: give Flatpak apps Aurora's Mesa",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/36",
+      "mergedAt": "2026-10-28T17:52:51Z",
+      "mergeCommit": {
+        "oid": "7e023e0a2c3c036194ae4a3aff72037a52512604"
+      }
+    },
+    {
+      "number": 38,
+      "title": "aurora-release: ship the service drop-ins as aurora-system-fixes",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/38",
+      "mergedAt": "2026-10-28T20:41:17Z",
+      "mergeCommit": {
+        "oid": "c65982e4dd2416a570d7d63fcb85e06f17700363"
+      }
+    },
+    {
+      "number": 39,
+      "title": "Track upstream: kernel-aurora d266c70, mesa-aurora 108c721",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/39",
+      "mergedAt": "2026-10-28T22:22:10Z",
+      "mergeCommit": {
+        "oid": "e70ff9bc0a415b7989e83b4e4dbbd3bfb419f9a3"
+      }
+    },
+    {
+      "number": 40,
+      "title": "aurora-flatpak-gl: move in lockstep with mesa-aurora",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/40",
+      "mergedAt": "2026-10-28T22:04:52Z",
+      "mergeCommit": {
+        "oid": "fed36b147439241736fabd2381c87ae2b1e4f0e9"
+      }
+    },
+    {
+      "number": 41,
+      "title": "Default VRR-capable displays to variable refresh rate in GNOME",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/41",
+      "mergedAt": "2026-10-30T03:29:17Z",
+      "mergeCommit": {
+        "oid": "c235a22d75af3ead263114805e7e6b004e87d443"
+      }
+    },
+    {
+      "number": 42,
+      "title": "aurora-flatpak-gl: follow mesa-aurora to 108c7218, and merge source proposals only on their planned main",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/42",
+      "mergedAt": "2026-10-29T01:53:29Z",
+      "mergeCommit": {
+        "oid": "f96fb7aad347bc4689b28f6426090abcc3ed4115"
+      }
+    },
+    {
+      "number": 43,
+      "title": "Pin alsa-ucm-conf-aurora to a270b2e so a closed lid hides the mics",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/43",
+      "mergedAt": "2026-10-29T05:51:22Z",
+      "mergeCommit": {
+        "oid": "401fb10bbb3e27b73761f951241e2fb8077948f7"
+      }
+    },
+    {
+      "number": 44,
+      "title": "aurora-sep: update to the linux tree's Touch ID kit",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/44",
+      "mergedAt": "2026-10-30T03:26:57Z",
+      "mergeCommit": {
+        "oid": "e9dd533a010abac9a5f8d87ab040d3f3709b959a"
+      }
+    },
+    {
+      "number": 45,
+      "title": "Pin aurora-firstboot 0.1.11: the account password unlocks the disk",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/45",
+      "mergedAt": "2026-10-29T23:01:53Z",
+      "mergeCommit": {
+        "oid": "6fcee7e01fb6988f3e8fefc8588f78db54a8b7fc"
+      }
+    },
+    {
+      "number": 46,
+      "title": "Ship aura 1.0.0b1 and U-Boot 2026.07-g2409ad5a25f8",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/46",
+      "mergedAt": "2026-10-30T03:39:26Z",
+      "mergeCommit": {
+        "oid": "ac11b44a41150ab42ea33e653429188a821568f3"
+      }
+    },
+    {
+      "number": 47,
+      "title": "aurora-sep: never write over a calibration this helper did not install",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/47",
+      "mergedAt": "2026-10-30T00:35:07Z",
+      "mergeCommit": {
+        "oid": "0556f5497ee17d9aad58ef474ed4f84c9b946348"
+      }
+    },
+    {
+      "number": 48,
+      "title": "Pin the payload workflow with the fixed release notes",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/48",
+      "mergedAt": "2026-10-30T00:09:58Z",
+      "mergeCommit": {
+        "oid": "77efdf0723ebaea3f003800e741a5c121d15a3be"
+      }
+    },
+    {
+      "number": 49,
+      "title": "Track the tips: kernel 695d974, Mesa 14b6b0c, speakerguardd 0.1.12, Neo trackpad quirk",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/49",
+      "mergedAt": "2026-10-30T03:41:17Z",
+      "mergeCommit": {
+        "oid": "bff3cd4cf43acbdb45d4b245f1ba778ff02800e7"
+      }
+    },
+    {
+      "number": 50,
+      "title": "Check the ESP at boot on Fedora images",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/50",
+      "mergedAt": "2026-10-30T03:21:56Z",
+      "mergeCommit": {
+        "oid": "19986b84078803c858b6a8ee4acb6276faebf4ba"
+      }
+    },
+    {
+      "number": 51,
+      "title": "Split the hardware services into aurora-platform-core",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/51",
+      "mergedAt": "2026-10-30T02:16:13Z",
+      "mergeCommit": {
+        "oid": "cc8aadc4618cb724c24f68657c06becc76cf4dc0"
+      }
+    },
+    {
+      "number": 52,
+      "title": "aurora-logos: provide start-here and system-logo-white.png",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/52",
+      "mergedAt": "2026-10-30T01:35:11Z",
+      "mergeCommit": {
+        "oid": "a112f43475bcc007a5d8505cd529373d597ce6ed"
+      }
+    },
+    {
+      "number": 53,
+      "title": "Wait for the SEP bring-up before probing trusted keys",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/53",
+      "mergedAt": "2026-10-30T03:38:44Z",
+      "mergeCommit": {
+        "oid": "91e71395b0860e2b4b789c1a983f63e9479f8dc7"
+      }
+    },
+    {
+      "number": 54,
+      "title": "aurora-flatpak-gl: remove a GL.aurora the package no longer carries",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/54",
+      "mergedAt": "2026-10-30T03:21:36Z",
+      "mergeCommit": {
+        "oid": "cbe212da373dc91c0fe0477b0bcaa7f1815e75d6"
+      }
+    },
+    {
+      "number": 55,
+      "title": "Pin aurora-firstboot 0.1.12: harden the account-password disk unlock",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/55",
+      "mergedAt": "2026-10-30T03:26:23Z",
+      "mergeCommit": {
+        "oid": "dda53087bc6bc5d8e3bc7b89e8fb2c00737b7b57"
+      }
+    },
+    {
+      "number": 56,
+      "title": "Stop the first-boot units from freezing PID 1",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/56",
+      "mergedAt": "2026-10-30T03:20:55Z",
+      "mergeCommit": {
+        "oid": "e8352efcd4b5b74f496f4834da7ccc676e066430"
+      }
+    },
+    {
+      "number": 57,
+      "title": "Ship openssh-server on every image with sshd off by default",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/57",
+      "mergedAt": "2026-10-30T03:32:06Z",
+      "mergeCommit": {
+        "oid": "ce4c2f5e8360c6f03878031bec7c58fe8acb3138"
+      }
+    },
+    {
+      "number": 58,
+      "title": "Publish RPMs under the release asset names GitHub stores",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/58",
+      "mergedAt": "2026-10-30T04:43:06Z",
+      "mergeCommit": {
+        "oid": "232de18b6c267b04b2d00922c89e17debdfbc0a5"
+      }
+    },
+    {
+      "number": 59,
+      "title": "Rename the distribution to Aurora Fedora Remix",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/59",
+      "mergedAt": "2026-10-30T05:11:14Z",
+      "mergeCommit": {
+        "oid": "3758eaf139fd47e5b0d6aea84ea7075faa0f1c48"
+      }
+    },
+    {
+      "number": 60,
+      "title": "Pin the payload producer that names the volume Aurora Fedora Remix",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/60",
+      "mergedAt": "2026-10-30T05:24:13Z",
+      "mergeCommit": {
+        "oid": "65ef1ea7a98c33697618c9214734cfa1cb6336ae"
+      }
+    },
+    {
+      "number": 61,
+      "title": "aurora-audio: keep the headphone mute and volume across boots",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/61",
+      "mergedAt": "2026-10-30T11:32:49Z",
+      "mergeCommit": {
+        "oid": "09084fb4a64d18807b331637f6fdd52d4abe0280"
+      }
+    },
+    {
+      "number": 63,
+      "title": "aurora-sep: read the fingerprint firmware-name as a list",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/63",
+      "mergedAt": "2026-10-30T11:44:16Z",
+      "mergeCommit": {
+        "oid": "0c65d4037b683a03564be4f23045f4b7e573b0b6"
+      }
+    },
+    {
+      "number": 64,
+      "title": "aurora-sep: set up the Touch ID calibration on demand with aurora-touchid-setup",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/64",
+      "mergedAt": "2026-10-30T12:47:34Z",
+      "mergeCommit": {
+        "oid": "a0c55926497f54a51104f6b137330bf4d1f0bfb1"
+      }
+    },
+    {
+      "number": 65,
+      "title": "Track the kernel at integration/aurora 5d7c3e7",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/65",
+      "mergedAt": "2026-10-30T13:03:47Z",
+      "mergeCommit": {
+        "oid": "50a8ad375476ebaa395fe8795b380c48e72880b5"
+      }
+    },
+    {
+      "number": 66,
+      "title": "Track Mesa at aurora-wip cf4e081 (Borealis driver ID)",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/66",
+      "mergedAt": "2026-10-30T13:18:07Z",
+      "mergeCommit": {
+        "oid": "4552f3028845d753ab4b7bdb6e883cf7da9f6c65"
+      }
+    },
+    {
+      "number": 68,
+      "title": "libfprint: update to 1.94.100-1.aurora6 from aurora-sep-userspace",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/68",
+      "mergedAt": "2026-10-30T16:19:54Z",
+      "mergeCommit": {
+        "oid": "f28019374acfefb13fd55fe3b2cc3b2604ce7435"
+      }
+    },
+    {
+      "number": 69,
+      "title": "Fix fleet graphics payloads, driver identity and legacy Mesa package migration",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/69",
+      "mergedAt": "2026-10-30T18:34:54Z",
+      "mergeCommit": {
+        "oid": "71a189f2ea45a8fff9bea8be0df8cb461f5a9065"
+      }
+    },
+    {
+      "number": 70,
+      "title": "Document SEP, audio and speakerguardd distro parity",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/70",
+      "mergedAt": "2026-10-30T20:24:35Z",
+      "mergeCommit": {
+        "oid": "8afebfaa74a0e527b7d296ce9844c64773ae19ba"
+      }
+    },
+    {
+      "number": 71,
+      "title": "mesa-aurora: ship lavapipe and build on Fedora 45",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/71",
+      "mergedAt": "2026-10-30T23:23:50Z",
+      "mergeCommit": {
+        "oid": "48fd7b0345803fdc54705258828bae192a73984d"
+      }
+    },
+    {
+      "number": 72,
+      "title": "Fix FEX Mesa overlay upgrades and validate release 13 migration",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/72",
+      "mergedAt": "2026-10-31T04:00:34Z",
+      "mergeCommit": {
+        "oid": "dea9fc2adf431512370d2c3d43a55dd72d0142d2"
+      }
+    },
+    {
+      "number": 73,
+      "title": "SEP: ship v4/v5 userspace and guarded enrolment",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/73",
+      "mergedAt": "2026-10-31T05:56:22Z",
+      "mergeCommit": {
+        "oid": "fbf635c4d51b09720f05d62de817e70ab5a08116"
+      }
+    },
+    {
+      "number": 75,
+      "title": "images: keep native GL selection automatic",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/75",
+      "mergedAt": "2026-10-31T06:01:27Z",
+      "mergeCommit": {
+        "oid": "9084278f7f01ad3ddce5c9fae66c11d151b526df"
+      }
+    },
+    {
+      "number": 76,
+      "title": "UPower 1.91.5: Fedora 45 fork upgrade and rollback",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/76",
+      "mergedAt": "2026-10-31T06:04:31Z",
+      "mergeCommit": {
+        "oid": "86ff62cdf3091e98d8c7ab025ec64f3b5d19d7e2"
+      }
+    },
+    {
+      "number": 83,
+      "title": "Track Mesa at aurora-wip c208afc (26.3.0-14)",
+      "url": "https://github.com/aurora-silicon/fedora-aurora/pull/83",
+      "mergedAt": "2026-10-31T07:16:58Z",
+      "mergeCommit": {
+        "oid": "5c3bd34d88655a6921dab673f90dc2fed91898d8"
+      }
+    }
+  ]
+}

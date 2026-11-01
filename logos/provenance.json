@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/aurora-silicon/fedora-aurora",
+  "commit": "a112f43475bcc007a5d8505cd529373d597ce6ed",
+  "source_directory": "packages/aurora-logos",
+  "license": "MIT",
+  "files_sha256": {
+    "AuroraLogo-128.png": "6e27595973c70d28f0e64a329bbf124acdb8d203d379f597e1f8e84695653ee5",
+    "AuroraLogo-16.png": "e513c6e63d4c6b895031e9cd9fa4c28bcfb2ff29d1359b05784d644a6a8b66d5",
+    "AuroraLogo-22.png": "1b0c6d731efd7b9e95d54ea872bca408c9949d09c241afa91e67a4da52bc0f43",
+    "AuroraLogo-24.png": "79218848cbf76b693656aaba210d46ab141fb00351c49be6d587074e609f91fb",
+    "AuroraLogo-256.png": "3e7c157b9a8ebb7ca9ff327a1c5dc2890fe36a360f93ae10e9538fd2f8a42a32",
+    "AuroraLogo-32.png": "707d6d55f2360d53578358b48aaca23524d0fd8a0ea57a2f8b00531c19d7b6c0",
+    "AuroraLogo-48.png": "ad3a321dd252054fe1771b107f29ba55f8bf04c0171073bcdfeea9264207a0ef",
+    "AuroraLogo-512.png": "67c785a07f8c84d76a44e201d45faf819c5645182aa995aa22bdf0faeeb96dab",
+    "AuroraLogo-64.png": "068c997fa2cf9179cace075b4a05f9f76fbf064f0370957197720956156de329",
+    "AuroraLogo-96.png": "cd4f5a15d90b557029a7e2feb4564ce353c93e753c0afe72c2c8d6333ff7bf63"
+  }
+}

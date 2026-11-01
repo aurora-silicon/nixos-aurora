@@ -23,7 +23,7 @@ def validate_payload(root, commit):
         raise ValueError('GL payload has the wrong Mesa commit')
     for name in ('lib/libvulkan_asahi.so', 'lib/libvulkan_lvp.so',
                  'lib/libEGL_mesa.so.0', 'lib/libGLX_mesa.so.0',
-                 'lib/libLLVM.so.22.1', 'lib/dri/asahi_dri.so',
+                 'lib/libLLVM.so.22.1', 'lib/dri/aurora_dri.so', 'lib/dri/asahi_dri.so',
                  'lib/dri/zink_dri.so', 'lib/dri/swrast_dri.so'):
         path = (root / name).resolve(strict=True)
         if not path.is_relative_to(root):

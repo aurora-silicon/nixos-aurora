@@ -46,6 +46,14 @@ def expected_outputs():
     ], text=True))
 
 
+def graphics_evidence(path):
+    """checks.yml keeps the graphics package's generation switch evidence
+    (graphics-generation/*.txt and *.sha256) beside its build record. It is
+    extracted with the artifact but never read or published from here."""
+    return (path.parts[:1] == ('graphics-generation',)
+            and (len(path.parts) == 1 or len(path.parts) == 2 and path.suffix in ('.txt', '.sha256')))
+
+
 def unpack(archive, directory):
     with zipfile.ZipFile(archive) as package:
         entries = package.infolist()
@@ -60,7 +68,8 @@ def unpack(archive, directory):
                 raise ValueError('Unsafe cache artifact entry')
             names.add(item.filename)
             if not (path.parts and path.parts[0] == 'cache'
-                    or item.filename in ('build.json', 'closure.json')):
+                    or item.filename in ('build.json', 'closure.json')
+                    or graphics_evidence(path)):
                 raise ValueError('Unexpected cache artifact path')
         # Budget the extracted input plus a verified merged copy before writing.
         peak = 2 * sum(item.file_size for item in entries)

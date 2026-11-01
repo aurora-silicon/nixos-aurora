@@ -1,13 +1,37 @@
 final: prev:
 let
   stableFile = path: final.writeText (builtins.baseNameOf path) (builtins.readFile path);
+  # nixpkgs constructs the CLI and engine with the same builder argument.
+  # Patch only the engine, so the resulting Docker symlinks and wrappers all
+  # refer to the fixed moby derivation, including its exposed .moby output.
+  dockerPolicyBuilder = args: prev.buildGoModule (args // final.lib.optionalAttrs
+    ((args.pname or "") == "moby") {
+      patches = (args.patches or [ ]) ++ [ (stableFile ./patches/docker-query-forwarding-policy.patch) ];
+      doCheck = true;
+      checkPhase = ''
+        runHook preCheck
+        go test -mod=vendor -p=8 ./daemon/libnetwork/iptables -run '^TestSetupDockerForwardingPolicy$' -count=1 -v
+        runHook postCheck
+      '';
+    });
+  kernelProvenance = builtins.fromJSON (builtins.readFile ./kernel/provenance.json);
+  kernelBase =
+    assert final.lib.assertMsg
+      (kernelProvenance.kernel_commit == pins."kernel-aurora".commit
+        && kernelProvenance.config_upstream.kernel_commit == kernelProvenance.kernel_commit)
+      "Refresh the canonical ALARM resolved config together with the kernel pin";
+    assert final.lib.assertMsg
+      (builtins.hashFile "sha256" ./kernel/config == kernelProvenance.config_upstream.config_sha256)
+      "The vendored ALARM resolved config does not match its provenance";
+    builtins.readFile ./kernel/config;
+  kernelBaseFile = final.writeText "config" kernelBase;
   # The shared distribution config with NixOS's requirements on top, as the
   # build merges them. NixOS modules read kernel features from this.
   kernelConfig = final.lib.listToAttrs (final.lib.concatMap (line:
     let matched = builtins.match "(CONFIG_[^=]+)=([ym])" line;
     in final.lib.optional (matched != null) {
       name = builtins.elemAt matched 0; value = builtins.elemAt matched 1;
-    }) (final.lib.splitString "\n" (builtins.readFile ./kernel/config + "\n" + builtins.readFile ./kernel/nixos.config)));
+    }) (final.lib.splitString "\n" (kernelBase + "\n" + builtins.readFile ./kernel/nixos.config)));
   kernelLLVM = final.llvmPackages_22;
   # GNOME Initial Setup creates the owner account on GNOME images (its
   # new-user mode). nixpkgs' vendor file skips the account and password pages,
@@ -64,6 +88,9 @@ let
     compilerTools = mesaCompilerTools;
   };
 in {
+  docker_29 = prev.docker_29.override { buildGoModule = dockerPolicyBuilder; };
+  docker = final.docker_29;
+  aurora-logos = final.callPackage ./logos/package.nix { };
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [
@@ -131,6 +158,27 @@ in {
     src = source "avd-fw";
     version = pins.avd-fw.version;
   };
+  # Userspace for the kernel's ANE driver; no firmware, module or overlays.
+  mil-hwx-compiler = final.callPackage ./mil-hwx-compiler.nix {
+    basePatch = stableFile ./ane/gnustep-base-block-ivar.patch;
+    baseSrc = let pin = pins.mil-hwx-compiler.extra_sources.gnustep-base; in final.fetchurl {
+      name = "gnustep-base-${pin.commit}.tar.gz";
+      url = pin.source_url;
+      sha256 = pin.sha256;
+    };
+    src = source "mil-hwx-compiler";
+    version = pins.mil-hwx-compiler.version;
+  };
+  omarchy-ane-tools = final.callPackage ./omarchy-ane-tools.nix {
+    src = source "omarchy-ane-tools";
+    version = pins.omarchy-ane-tools.version;
+  };
+  # Drive.Size for NVMe controllers that leave TNVMCAP at zero, such as the
+  # Apple silicon SSDs, from their namespaces (udisks f032f09cc760 for 2.11.x),
+  # so GNOME's About page and desktop tools show the internal disk's capacity.
+  udisks = prev.udisks.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ (stableFile ./patches/udisks-nvme-namespace-size.patch) ];
+  });
   upower = prev.upower.overrideAttrs (old: {
     src = source "upower-aurora";
     version = pins.upower-aurora.version;
@@ -152,7 +200,7 @@ in {
         version = "7.3.0";
         modDirVersion = "7.3.0";
         src = source "kernel-aurora";
-        configfile = stableFile ./kernel/config;
+        configfile = kernelBaseFile;
         config = kernelConfig;
         stdenv = kernelLLVM.stdenv;
         # Keep the native wrapped host compiler for host tools/RPATHs;
@@ -194,7 +242,7 @@ in {
           runHook preConfigure
           mkdir build
           export buildRoot="$PWD/build"
-          cp ${stableFile ./kernel/config} "$buildRoot/.config"
+          cp ${kernelBaseFile} "$buildRoot/.config"
           chmod u+w "$buildRoot/.config"
           bash scripts/kconfig/merge_config.sh -m -O "$buildRoot" \
             "$buildRoot/.config" ${stableFile ./kernel/nixos.config}
@@ -207,7 +255,7 @@ in {
         '';
         postConfigure = ''
           python3 ${stableFile ./kernel/validate-config.py} arch/arm64/configs/asahi.config \
-            ${stableFile ./kernel/common.config} ${stableFile ./kernel/nixos.config} "$buildRoot/.config"
+            ${stableFile ./kernel/nixos.config} "$buildRoot/.config"
           python3 ${stableFile ./kernel/check-required.py} "$buildRoot/.config"
           grep -qx 'CONFIG_RUST=y' "$buildRoot/.config"
           grep -qx 'CONFIG_ARM64_16K_PAGES=y' "$buildRoot/.config"

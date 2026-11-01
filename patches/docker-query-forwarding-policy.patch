@@ -1,0 +1,110 @@
+From: Aurora Silicon <ryan@aurorasilicon.org>
+Subject: [PATCH] libnetwork: query permanent policies before creating docker-forwarding
+
+--- a/daemon/libnetwork/iptables/firewalld.go
++++ b/daemon/libnetwork/iptables/firewalld.go
+@@ -284,6 +284,22 @@
+ // zone (where packets will be dealt with by docker's usual/non-firewalld configuration).
+ // The bool return value is true if a firewalld reload is required.
+ func setupDockerForwardingPolicy() (bool, error) {
++	// Query permanent policies, not runtime policies: an existing policy can
++	// be inactive until its zones exist. Re-adding it causes NAME_CONFLICT in
++	// firewalld even though Docker treats that error as success.
++	var policies []string
++	if err := connection.sysConfObj.Call(dbusInterface+".config.getPolicyNames", 0).Store(&policies); err != nil {
++		var derr dbus.Error
++		if errors.As(err, &derr) && derr.Name == dbus.ErrMsgUnknownMethod.Name {
++			// Policies were added in firewalld 0.9.0.
++			return false, nil
++		}
++		return false, err
++	}
++	if contains(policies, dockerFwdPolicy) {
++		return false, nil
++	}
++
+ 	// https://firewalld.org/documentation/man-pages/firewalld.dbus.html#FirewallD1.config
+ 	policy := map[string]any{
+ 		"version":       "1.0",
+--- /dev/null
++++ b/daemon/libnetwork/iptables/firewalld_policy_test.go
+@@ -0,0 +1,79 @@
++//go:build linux
++
++package iptables
++
++import (
++	"errors"
++	"reflect"
++	"testing"
++
++	"github.com/godbus/dbus/v5"
++)
++
++type policyFirewalldObject struct {
++	dbus.BusObject
++	policies []string
++	queryErr error
++	addErr   error
++	methods  []string
++	settings map[string]any
++}
++
++func (o *policyFirewalldObject) Call(method string, _ dbus.Flags, args ...any) *dbus.Call {
++	o.methods = append(o.methods, method)
++	switch method {
++	case dbusInterface + ".config.getPolicyNames":
++		return &dbus.Call{Err: o.queryErr, Body: []any{o.policies}}
++	case dbusInterface + ".config.addPolicy":
++		if args[0] != dockerFwdPolicy {
++			panic("unexpected policy name")
++		}
++		o.settings = args[1].(map[string]any)
++		return &dbus.Call{Err: o.addErr}
++	default:
++		panic("unexpected firewalld operation: " + method)
++	}
++}
++
++func TestSetupDockerForwardingPolicy(t *testing.T) {
++	saved := connection
++	t.Cleanup(func() { connection = saved })
++	denied := errors.New("access denied")
++	unknown := dbus.ErrMsgUnknownMethod
++	conflict := dbus.Error{Name: dbusInterface + ".Exception", Body: []any{"NAME_CONFLICT: docker-forwarding"}}
++	for _, tc := range []struct {
++		name     string
++		policies []string
++		queryErr error
++		addErr   error
++		added    bool
++		wantErr  bool
++		calls    int
++	}{
++		{name: "permanent policy exists", policies: []string{dockerFwdPolicy}, calls: 1},
++		{name: "create missing policy", policies: []string{"unrelated"}, added: true, calls: 2},
++		{name: "query denied", queryErr: denied, wantErr: true, calls: 1},
++		{name: "old firewalld", queryErr: unknown, calls: 1},
++		{name: "creation denied", addErr: denied, wantErr: true, calls: 2},
++		{name: "concurrent creator", addErr: conflict, calls: 2},
++		{name: "add method unsupported", addErr: unknown, calls: 2},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			obj := &policyFirewalldObject{policies: tc.policies, queryErr: tc.queryErr, addErr: tc.addErr}
++			connection = &Conn{sysConfObj: obj}
++			added, err := setupDockerForwardingPolicy()
++			if added != tc.added || (err != nil) != tc.wantErr || len(obj.methods) != tc.calls {
++				t.Fatalf("added=%v err=%v calls=%v", added, err, obj.methods)
++			}
++			if tc.calls == 2 {
++				want := map[string]any{
++					"version": "1.0", "description": "allow forwarding to the docker zone",
++					"ingress_zones": []string{"ANY"}, "egress_zones": []string{dockerZone}, "target": "ACCEPT",
++				}
++				if !reflect.DeepEqual(obj.settings, want) {
++					t.Fatalf("policy settings changed: %v", obj.settings)
++				}
++			}
++		})
++	}
++}

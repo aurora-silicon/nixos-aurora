@@ -1,0 +1,130 @@
+From: Ryan Murray <ryan@aurorasilicon.org>
+Subject: [PATCH] udiskslinuxdrive: Size NVMe drives from their namespaces
+
+An NVMe controller only reports Total NVM Capacity (TNVMCAP) when it
+supports namespace management. Controllers that do not, such as the Apple
+silicon SSDs and many consumer drives, leave it at zero, so the Drive.Size
+of the controller object was 0 and GNOME's About page showed the disk
+capacity as unknown.
+
+When TNVMCAP is zero, add up the namespaces attached to the controller:
+the block devices below it in sysfs, or below its NVMe subsystem for
+transports whose block devices are not children of the controller.
+
+Upstream fixed this in master with commit f032f09cc760
+("udiskslinuxdriveobject: Recalculate NVMe drive size from subsystem
+blocks"), which builds on the NVMe subsystem uevents that 2.11.x lacks.
+This is the same calculation for 2.11.x, read from sysfs.
+
+Upstream-Status: Backport [https://github.com/storaged-project/udisks/commit/f032f09cc7600b814747ce31741a4678a058856d]
+---
+diff --git a/src/udiskslinuxdrive.c b/src/udiskslinuxdrive.c
+index 93ca381..1b731cc 100644
+--- a/src/udiskslinuxdrive.c
++++ b/src/udiskslinuxdrive.c
+@@ -744,6 +744,96 @@ append_fixedup_sd (const gchar *prefix,
+  *
+  * Returns: %TRUE if configuration has changed, %FALSE otherwise.
+  */
++/*
++ * The capacity of an NVMe controller from its namespaces, for controllers that
++ * leave Total NVM Capacity (TNVMCAP) at zero. TNVMCAP is only defined for
++ * controllers with namespace management, so many report none.
++ *
++ * The namespaces attached to the controller are the block devices below it in
++ * sysfs (the disks, or the hidden per-path devices with native multipath).
++ * Transports whose block devices are not children of their controller have
++ * them below the NVMe subsystem the controller belongs to instead.
++ *
++ * Backport of udisks commit f032f09cc760 ("udiskslinuxdriveobject: Recalculate
++ * NVMe drive size from subsystem blocks") for 2.11.x, which lacks the NVMe
++ * subsystem uevents that commit builds on.
++ */
++/* nvme<subsys>n<ns>, or nvme<subsys>c<ctrl>n<ns> for a path, but not a partition */
++static gboolean
++is_nvme_namespace_name (const gchar *name)
++{
++  const gchar *p = name + 4;
++
++  if (!g_str_has_prefix (name, "nvme") || !g_ascii_isdigit (*p))
++    return FALSE;
++  for (; *p != '\0'; p++)
++    if (!g_ascii_isalnum (*p) || *p == 'p')
++      return FALSE;
++  return strchr (name + 4, 'n') != NULL;
++}
++
++static guint64
++nvme_namespaces_size_in_dir (const gchar *dir_path)
++{
++  GDir *dir;
++  const gchar *name;
++  guint64 total = 0;
++
++  dir = g_dir_open (dir_path, 0, NULL);
++  if (dir == NULL)
++    return 0;
++
++  while ((name = g_dir_read_name (dir)) != NULL)
++    {
++      gchar *size_path;
++      gchar *contents = NULL;
++
++      if (!is_nvme_namespace_name (name))
++        continue;
++
++      size_path = g_build_filename (dir_path, name, "size", NULL);
++      if (g_file_get_contents (size_path, &contents, NULL, NULL))
++        total += g_ascii_strtoull (contents, NULL, 10) * 512;
++      g_free (contents);
++      g_free (size_path);
++    }
++  g_dir_close (dir);
++
++  return total;
++}
++
++static guint64
++nvme_ctrl_namespaces_size (GUdevDevice *ctrl)
++{
++  const gchar *ctrl_path = g_udev_device_get_sysfs_path (ctrl);
++  const gchar *ctrl_name = g_udev_device_get_name (ctrl);
++  guint64 size;
++  GDir *dir;
++  const gchar *name;
++
++  size = nvme_namespaces_size_in_dir (ctrl_path);
++  if (size > 0)
++    return size;
++
++  /* blocks below the subsystem that lists this controller */
++  dir = g_dir_open ("/sys/class/nvme-subsystem", 0, NULL);
++  if (dir == NULL)
++    return 0;
++  while (size == 0 && (name = g_dir_read_name (dir)) != NULL)
++    {
++      gchar *subsys_path = g_build_filename ("/sys/class/nvme-subsystem", name, NULL);
++      gchar *ctrl_link = g_build_filename (subsys_path, ctrl_name, NULL);
++
++      if (g_file_test (ctrl_link, G_FILE_TEST_EXISTS))
++        size = nvme_namespaces_size_in_dir (subsys_path);
++      g_free (ctrl_link);
++      g_free (subsys_path);
++    }
++  g_dir_close (dir);
++
++  return size;
++}
++
+ gboolean
+ udisks_linux_drive_update (UDisksLinuxDrive       *drive,
+                            UDisksLinuxDriveObject *object)
+@@ -870,6 +960,8 @@ udisks_linux_drive_update (UDisksLinuxDrive       *drive,
+           if (device->nvme_ctrl_info->serial_number && strlen (device->nvme_ctrl_info->serial_number) > 0)
+             serial = device->nvme_ctrl_info->serial_number;
+           size = device->nvme_ctrl_info->size_total;
++          if (size == 0)
++            size = nvme_ctrl_namespaces_size (device->udev_device);
+           /* WWN is namespace specific, leaving unset */
+         }
+       else

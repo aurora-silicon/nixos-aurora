@@ -64,6 +64,19 @@ class NativeCacheInputsTests(unittest.TestCase):
                 module.unpack(self.archive(name, mode), self.root / 'unpacked')
         self.assertFalse((self.root / 'unpacked').exists())
 
+    def test_graphics_generation_evidence_is_accepted_and_nothing_else_beside_it(self):
+        for name in ['graphics-generation/', 'graphics-generation/switch.txt',
+                     'graphics-generation/layer.sha256']:
+            with self.subTest(name=name):
+                mode = 0o040755 if name.endswith('/') else 0o100644
+                with patch.object(module.shutil, 'disk_usage') as usage:
+                    usage.return_value.free = 64 * 1024**3
+                    module.unpack(self.archive(name, mode), self.root / name.replace('/', '_'))
+        for name in ['graphics-generation/run.sh', 'graphics-generation/nested/a.txt',
+                     'graphics-generation-other/a.txt']:
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'Unexpected cache artifact path'):
+                module.unpack(self.archive(name), self.root / 'rejected')
+
     def test_zip_rejects_duplicate_members_and_insufficient_peak_space(self):
         archive = self.archive('cache/nix-cache-info')
         with patch.object(module.shutil, 'disk_usage') as usage:

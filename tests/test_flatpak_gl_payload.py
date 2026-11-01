@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('gl_payload', ROOT / 'flatpak-gl/validate-repository.py')
 validator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validator)
-COMMIT = 'cf4e08105dfa526b8874318b6a52b3ce948f6297'
+COMMIT = 'c208afc352e9d4c10ee71c883a369a9079dd7d84'
 
 
 class PayloadValidationTests(unittest.TestCase):
@@ -23,7 +23,7 @@ class PayloadValidationTests(unittest.TestCase):
         for name in ('libvulkan_asahi.so', 'libvulkan_lvp.so', 'libEGL_mesa.so.0',
                      'libGLX_mesa.so.0', 'libLLVM.so.22.1'):
             self.write('lib/' + name, elf + f' Mesa (git-{COMMIT[:10]}), Borealis'.encode())
-        for name in ('asahi', 'zink', 'swrast'):
+        for name in ('aurora', 'asahi', 'zink', 'swrast'):
             self.write('lib/dri/' + name + '_dri.so', elf)
         for path, lib in (('vulkan/icd.d/asahi_icd.aarch64.json', 'libvulkan_asahi.so'),
                           ('vulkan/icd.d/lvp_icd.aarch64.json', 'libvulkan_lvp.so'),

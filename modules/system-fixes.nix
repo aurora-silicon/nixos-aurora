@@ -20,8 +20,21 @@ in {
     default = true;
     description = "Allow malcontent's optional daemons to handle SIGTERM and stop promptly.";
   };
-  config = lib.mkIf config.aurora.systemFixes.malcontentSignal {
-    systemd.units = lib.genAttrs (map (name: "${name}.service")
-      (daemons ++ [ "malcontent-webd-update" ])) signalFix;
-  };
+  config = lib.mkMerge [
+    (lib.mkIf config.aurora.systemFixes.malcontentSignal {
+      systemd.units = lib.genAttrs (map (name: "${name}.service")
+        (daemons ++ [ "malcontent-webd-update" ])) signalFix;
+    })
+    {
+      # Only contributes ordering when this optional swapfile unit exists.
+      # Btrfs activates swapfiles under an exclusive filesystem operation.
+      systemd.units."var-swap-swapfile2.swap" = {
+        overrideStrategy = "asDropin";
+        text = ''
+          [Unit]
+          After=var-swap-swapfile.swap
+        '';
+      };
+    }
+  ];
 }
