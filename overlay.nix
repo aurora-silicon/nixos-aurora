@@ -128,6 +128,9 @@ in {
       (stableFile ./patches/iio-sensor-proxy-ambient-colour-temperature.patch)
     ];
     # Run the integration tests, which include one for the colour channel.
+    postPatch = (old.postPatch or "") + ''
+      patchShebangs tests
+    '';
     mesonFlags = (old.mesonFlags or [ ]) ++ [ (final.lib.mesonBool "tests" true) ];
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
       final.gobject-introspection
