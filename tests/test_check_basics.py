@@ -48,6 +48,8 @@ class CheckBasicsTests(unittest.TestCase):
     def desktop_root(self, profile, usr='usr', etc='etc'):
         root = self.base / 'root'
         u, e = root / usr, root / etc
+        write(e / 'udev/rules.d/70-uaccess.rules',
+              'SUBSYSTEM=="media", TAG+="uaccess"\nSUBSYSTEM=="video4linux", TAG+="uaccess"\n')
         write(e / 'locale.conf', 'LANG=en_US.UTF-8\n')
         write(root / 'usr/lib/locale/locale-archive', b'\0en_US.utf8\0')
         link(e / 'systemd/system/multi-user.target.wants/NetworkManager.service',
@@ -76,6 +78,35 @@ class CheckBasicsTests(unittest.TestCase):
               f'  search --no-floppy --fs-uuid --set=root --hint="$aurora_boot" {BOOT}\n')
         write(boot / 'grub/grub.cfg', f'search --no-floppy --fs-uuid --set=root --hint="${{aurora_disk}}," {BOOT}\n')
         return ['--esp', str(esp), '--boot-dir', str(boot), '--boot-uuid', BOOT]
+
+    def test_vendor_media_rules_pass(self):
+        root = self.desktop_root('minimal')
+        local = root / 'etc/udev/rules.d/70-uaccess.rules'
+        write(root / 'usr/lib/udev/rules.d/70-uaccess.rules', local.read_text())
+        local.unlink()
+        result = self.check('--profile', 'minimal', '--root', str(root))
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_missing_media_rules_fails(self):
+        self.assert_fails('minimal', lambda root:
+                          (root / 'etc/udev/rules.d/70-uaccess.rules').unlink(),
+                          'systemd 70-uaccess.rules is missing')
+
+    def test_commented_media_rule_fails(self):
+        self.assert_fails('minimal', lambda root: write(root / 'etc/udev/rules.d/70-uaccess.rules',
+                          '# SUBSYSTEM=="media", TAG+="uaccess"\n'
+                          'SUBSYSTEM=="video4linux", TAG+="uaccess"\n'),
+                          'does not tag media with uaccess')
+
+    def test_local_mask_hides_vendor_media_rules(self):
+        root = self.desktop_root('minimal')
+        vendor = root / 'usr/lib/udev/rules.d/70-uaccess.rules'
+        write(vendor, (root / 'etc/udev/rules.d/70-uaccess.rules').read_text())
+        (root / 'etc/udev/rules.d/70-uaccess.rules').unlink()
+        link(root / 'etc/udev/rules.d/70-uaccess.rules', '/dev/null')
+        result = self.check('--profile', 'minimal', '--root', str(root))
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('does not tag media', result.stdout)
 
     def test_complete_images_pass(self):
         for profile in ('gnome', 'kde', 'minimal'):
@@ -187,6 +218,8 @@ class CheckBasicsTests(unittest.TestCase):
         etc = '/nix/store/cccc-etc/etc'
         link(root / system.lstrip('/') / 'sw', sw)
         link(root / system.lstrip('/') / 'etc', etc)
+        write(root / etc.lstrip('/') / 'udev/rules.d/70-uaccess.rules',
+              'SUBSYSTEM=="media", TAG+="uaccess"\nSUBSYSTEM=="video4linux", TAG+="uaccess"\n')
         write(root / etc.lstrip('/') / 'locale.conf', 'LANG=en_US.UTF-8\n')
         write(root / etc.lstrip('/') / 'set-environment',
               'export LOCALE_ARCHIVE="/nix/store/dddd-glibc-locales/lib/locale/locale-archive"\n')
@@ -204,6 +237,16 @@ class CheckBasicsTests(unittest.TestCase):
         link(root / sw.lstrip('/') / 'share/pixmaps', '/nix/store/ffff-aurora-logos/share/pixmaps')
         result = self.check('--profile', 'gnome', '--root', str(root), '--system', system, *self.boot())
         self.assertEqual(result.returncode, 0, result.stdout)
+        # A mask behind the system closure's /etc link still wins over vendor rules.
+        rule = root / etc.lstrip('/') / 'udev/rules.d/70-uaccess.rules'
+        write(root / 'usr/lib/udev/rules.d/70-uaccess.rules', rule.read_text())
+        rule.unlink()
+        link(rule, '/dev/null')
+        masked = self.check('--profile', 'gnome', '--root', str(root), '--system', system)
+        self.assertNotEqual(masked.returncode, 0, masked.stdout)
+        self.assertIn('does not tag media', masked.stdout)
+        rule.unlink()
+        write(rule, (root / 'usr/lib/udev/rules.d/70-uaccess.rules').read_text())
         write(root / etc.lstrip('/') / 'locale.conf', 'LANG=C\n')
         self.assertNotEqual(self.check('--profile', 'gnome', '--root', str(root), '--system', system).returncode, 0)
 

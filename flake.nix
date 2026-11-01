@@ -37,6 +37,7 @@
         aurora-minimal = makeSystem "minimal";
       };
       packages.${system} = {
+        inherit (pkgs.aurora) ffmpeg-avd mpv-avd;
         logos = pkgs.aurora-logos;
         firstboot = pkgs.aurora-firstboot;
         docker = pkgs.docker;
@@ -79,6 +80,20 @@
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;
       checks.${system} = {
+      avd-coinstall = pkgs.buildEnv {
+        name = "avd-stock-coinstall";
+        paths = [ pkgs.ffmpeg pkgs.mpv pkgs.aurora.ffmpeg-avd pkgs.aurora.mpv-avd ];
+        pathsToLink = [ "/bin" "/lib" "/share" ];
+        ignoreCollisions = false;
+      };
+      media-uaccess = pkgs.runCommand "aurora-media-uaccess" {
+        rules = imageProbe.config.environment.etc."udev/rules.d".source;
+      } ''
+        for subsystem in media video4linux; do
+          grep -E '^[^#]*SUBSYSTEM=="'"$subsystem"'".*TAG\+="uaccess"' "$rules/70-uaccess.rules"
+        done
+        touch $out
+      '';
       clean-boot = let
         inherit (nixpkgs) lib;
         profiles = lib.attrValues self.nixosConfigurations;

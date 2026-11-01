@@ -1,0 +1,39 @@
+From: Aurora contributors <noreply@aurora-silicon.org>
+Subject: [PROPOSAL] vd_lavc: use a separate request device with DRM import
+
+GPL-2.0-or-later, matching mpv. Built only against the pinned patched FFmpeg.
+The request hwdevice is a decoder context while the DRM hwdevice belongs to
+rendering. Copy mode already creates its own request device. Direct mode
+needs the same separation after confirming that the DRM importer is loaded.
+No new command-line option is introduced. Hardware import needs qualification.
+
+--- a/video/decode/vd_lavc.c
++++ b/video/decode/vd_lavc.c
+@@ -481,12 +481,24 @@
+         };
+         hwdec_devices_request_for_img_fmt(ctx->hwdec_devs, &params);
+ 
++        // Request decoding exports DRM-PRIME frames, but the decoder is a
++        // media/video device, not the renderer's DRM device. Require the
++        // normal DRM importer, then create an independent request context.
++        bool request = hwdec->lavc_device == AV_HWDEVICE_TYPE_V4L2REQUEST;
++        enum AVHWDeviceType renderer_type = request ? AV_HWDEVICE_TYPE_DRM
++                                                    : hwdec->lavc_device;
+         const struct mp_hwdec_ctx *hw_ctx =
+             hwdec_devices_get_by_imgfmt_and_type(ctx->hwdec_devs, imgfmt,
+-                                                 hwdec->lavc_device);
+-
+-        if (hw_ctx && hw_ctx->av_device_ref)
++                                                renderer_type);
++
++        if (hw_ctx && hw_ctx->av_device_ref) {
++            if (request) {
++                AVBufferRef *ref = NULL;
++                av_hwdevice_ctx_create(&ref, hwdec->lavc_device, NULL, NULL, 0);
++                return ref;
++            }
+             return av_buffer_ref(hw_ctx->av_device_ref);
++        }
+     }
+ 
+     return NULL;

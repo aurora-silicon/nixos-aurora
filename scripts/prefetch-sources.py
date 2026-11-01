@@ -42,6 +42,8 @@ NEEDS = {
     'libfprint': ['libfprint'],
     'fprintd': [],  # nixpkgs' pinned release, with the local companion patch
     'avd-fw': ['avd-fw'],
+    'ffmpeg-avd': ['ffmpeg-avd'],
+    'mpv-avd': ['ffmpeg-avd', 'ffmpeg-avd/mpv'],
     'omarchy-ane-tools': ['omarchy-ane-tools'],
     'mil-hwx-compiler': ['mil-hwx-compiler', 'mil-hwx-compiler/gnustep-base'],
     'upower': ['upower-aurora'],
@@ -61,7 +63,7 @@ def archives():
     mirror = os.environ.get('AURORA_SOURCE_MIRROR', MIRROR).rstrip('/')
     result = {}
     for key, pin in pins.items():
-        name = f'{key}-{pin["commit"]}.tar.gz'
+        name = pin.get('archive_file', f'{key}-{pin["commit"]}.tar.gz')
         result[key] = (name, ([f'{mirror}/{name}'] if mirror and pin.get('redistribute_source', True) else []) + [pin['source_url']], pin['sha256'])
     for key, record in pins.items():
         for dependency, pin in record.get('extra_sources', {}).items():

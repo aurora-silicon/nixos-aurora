@@ -165,5 +165,25 @@
         "version": "1.31.1"
       }
     }
+  },
+  "ffmpeg-avd": {
+    "repository": "https://github.com/FFmpeg/FFmpeg",
+    "commit": "9047fa1b084f76b1b4d065af2d743df1b40dfb56",
+    "version": "8.1",
+    "source_url": "https://ffmpeg.org/releases/ffmpeg-8.1.tar.xz",
+    "archive_root": "ffmpeg-8.1",
+    "archive_file": "ffmpeg-8.1.tar.xz",
+    "sha256": "b072aed6871998cce9b36e7774033105ca29e33632be5b6347f3206898e0756a",
+    "extra_sources": {
+      "mpv": {
+        "repository": "https://github.com/mpv-player/mpv",
+        "commit": "41f6a645068483470267271e1d09966ca3b9f413",
+        "version": "0.41.0",
+        "source_url": "https://codeload.github.com/mpv-player/mpv/tar.gz/41f6a645068483470267271e1d09966ca3b9f413",
+        "archive_root": "mpv-41f6a645068483470267271e1d09966ca3b9f413",
+        "sha256": "068960e89211f2adc80af03f637fa393fb5e407d3dd23592c8fe8c5490bb7ae4"
+      }
+    },
+    "nix_hash": "sha256-sHKu1ocZmMzps253dAMxBcop4zYyvltjR/MgaJjgdWo="
   }
 }

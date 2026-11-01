@@ -1,0 +1,60 @@
+{
+  "base_commit": "9047fa1b084f76b1b4d065af2d743df1b40dfb56",
+  "request_commit": "b57fbbe50c9b2656fad86a1a7eeabfd2b2a50935",
+  "patch_url": "https://github.com/Kwiboo/FFmpeg/compare/n8.1...b57fbbe50c9b2656fad86a1a7eeabfd2b2a50935.patch",
+  "patch_sha256": "36406ad3579e3454eda9c3b9199d6b31dfcf936facf08078a7782dc98d198c6e",
+  "series": [
+    {
+      "commit": "900fa8e6625a0134432a1dccf87633b499af5fb1",
+      "subject": "avutil/hwcontext: Add hwdevice type for V4L2 Request API"
+    },
+    {
+      "commit": "2d317790a8e86fe5451c48d28f4925f3372591e3",
+      "subject": "avutil/hwcontext_v4l2request: Probe for a capable media and video device"
+    },
+    {
+      "commit": "9a5d025a873145afc16fea3078ae3410d2291280",
+      "subject": "avcodec: Add common V4L2 Request API code"
+    },
+    {
+      "commit": "f227da5a137d45d44d37e1d2be6427e9f7c247b3",
+      "subject": "avcodec/v4l2request: Add common decode support for hwaccels"
+    },
+    {
+      "commit": "51a441640119ef3359a38dae67290a96ed77e6a0",
+      "subject": "avcodec: Add V4L2 Request API mpeg2 hwaccel"
+    },
+    {
+      "commit": "55d176a32f6e55543261889e172270df833ce19b",
+      "subject": "avcodec/h264dec: add ref_pic_marking and pic_order_cnt bit_size to slice context"
+    },
+    {
+      "commit": "84bb22c3eba4b8ed70322f65882dd52cdeec31ed",
+      "subject": "avcodec: Add V4L2 Request API h264 hwaccel"
+    },
+    {
+      "commit": "adab6e2bb9472e9e8f9716569d54aeede50c1aa3",
+      "subject": "avcodec: Add V4L2 Request API hevc hwaccel"
+    },
+    {
+      "commit": "6724bfac7fd7c8b3fa31233983ac6979d0c3954d",
+      "subject": "avcodec: Add V4L2 Request API vp8 hwaccel"
+    },
+    {
+      "commit": "523f6c9fa1a3b5acbc70d841ba0e8444f5d2400b",
+      "subject": "avcodec: Add V4L2 Request API vp9 hwaccel"
+    },
+    {
+      "commit": "6b67aa32fc3b9cad3e2487875e058ba726e0513d",
+      "subject": "avcodec: Add V4L2 Request API av1 hwaccel"
+    },
+    {
+      "commit": "6d218019f1d8294ab17648358a3259082d9b64a4",
+      "subject": "avutil/hwcontext_v4l2request: Add support for AFBC_16X16_SPLIT pix fmts"
+    },
+    {
+      "commit": "b57fbbe50c9b2656fad86a1a7eeabfd2b2a50935",
+      "subject": "avutil/hwcontext_v4l2request: Add support for BROADCOM_SAND128 pix fmts"
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Build aarch64 outputs on a native or binfmt-enabled Linux builder.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+# Freeze source before producing artifacts; later flake calls reuse this tree.
+avd_source=$(mktemp -d)
+trap 'rm -rf -- "$avd_source"' EXIT
+tar --exclude='./out' --exclude='./.git' --exclude='__pycache__' -cf - . | tar -C "$avd_source" -xf -
+avd_flake="path:$avd_source"
+mkdir -p out/avd
+sha256sum avd/* flake.nix overlay.nix sources.json scripts/build-avd-nix scripts/check-basics.py > out/avd/recipe-sha256.txt
+export_runtime() {
+  local -a closure_paths
+  nix-store --query --requisites "$@" | sort -u > out/avd/runtime-closure.paths
+  mapfile -t closure_paths < out/avd/runtime-closure.paths
+  nix-store --export "${closure_paths[@]}" | gzip -n > out/avd/runtime-closure.nar.gz.tmp
+  mv out/avd/runtime-closure.nar.gz.tmp out/avd/runtime-closure.nar.gz
+  (cd out/avd && sha256sum runtime-closure.nar.gz > runtime-closure.sha256)
+  nix --extra-experimental-features 'nix-command flakes' path-info --json "$@" > out/avd/paths.json
+}
+program_paths=()
+: > out/avd/outputs.txt
+for program in ffmpeg-avd mpv-avd; do
+  nix --extra-experimental-features 'nix-command flakes' build -L --no-link \
+    --option extra-platforms aarch64-linux --cores 8 --max-jobs 1 --print-out-paths \
+    "$avd_flake#packages.aarch64-linux.$program" | tee -a out/avd/outputs.txt
+  program_path=$(nix --extra-experimental-features 'nix-command flakes' eval --raw \
+    "$avd_flake#packages.aarch64-linux.$program.outPath")
+  case $program in
+    ffmpeg-avd) ffmpeg=$program_path; printf '%s\n' "$ffmpeg" > out/avd/ffmpeg-path.txt ;;
+    mpv-avd) mpv=$program_path; printf '%s\n' "$mpv" > out/avd/mpv-path.txt ;;
+  esac
+  program_paths+=("$program_path")
+  # Preserve completed outputs before starting the next expensive build.
+  export_runtime "${program_paths[@]}"
+done
+"$ffmpeg/bin/ffmpeg-avd" -hide_banner -hwaccels | tee out/avd/hwaccels.txt
+"$mpv/bin/mpv-avd" --no-config --hwdec=help | tee out/avd/mpv-hwdec.txt
+grep -qx v4l2request out/avd/hwaccels.txt
+grep -qw v4l2request out/avd/mpv-hwdec.txt
+grep -qw v4l2request-copy out/avd/mpv-hwdec.txt
+# Keep the built package closure even if a later integration check fails.
+nix --extra-experimental-features 'nix-command flakes' build -L --no-link \
+  --option extra-platforms aarch64-linux --cores 8 --max-jobs 1 --print-out-paths \
+  "$avd_flake#checks.aarch64-linux.avd-coinstall" \
+  "$avd_flake#checks.aarch64-linux.media-uaccess" | tee out/avd/checks.txt
+# The repository fixtures compile Linux UAPI headers and use GNU utilities.
+nixpkgs_rev=$(nix --extra-experimental-features 'nix-command flakes' eval --raw \
+  --impure --expr '(builtins.fromJSON (builtins.readFile ./flake.lock)).nodes.nixpkgs.locked.rev')
+nix --extra-experimental-features 'nix-command flakes' shell --cores 8 --max-jobs 1 \
+  "github:NixOS/nixpkgs/$nixpkgs_rev#python3" \
+  "github:NixOS/nixpkgs/$nixpkgs_rev#gcc" \
+  "github:NixOS/nixpkgs/$nixpkgs_rev#bash" \
+  "github:NixOS/nixpkgs/$nixpkgs_rev#coreutils" \
+  "github:NixOS/nixpkgs/$nixpkgs_rev#diffutils" \
+  "github:NixOS/nixpkgs/$nixpkgs_rev#git" \
+  --command python3 -m unittest discover -s tests > out/avd/repository-tests.log 2>&1

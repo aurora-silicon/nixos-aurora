@@ -88,6 +88,7 @@ let
     compilerTools = mesaCompilerTools;
   };
 in {
+  aurora = (prev.aurora or { }) // (final.callPackage ./avd { });
   docker_29 = prev.docker_29.override { buildGoModule = dockerPolicyBuilder; };
   docker = final.docker_29;
   aurora-logos = final.callPackage ./logos/package.nix { };

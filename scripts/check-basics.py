@@ -66,6 +66,26 @@ class Root:
         return path.read_text(errors='replace') if path.is_file() else None
 
 
+def check_media_access(root):
+    """Keep systemd's existing per-seat media access; add no permission rules."""
+    # udev gives /etc precedence over vendor rules, including /dev/null masks.
+    for base in (root.etc, '/run', '/usr/local/lib', '/usr/lib'):
+        name = f'{base}/udev/rules.d/70-uaccess.rules'
+        path = root.path(name)
+        link = root.path(str(PurePosixPath(name).parent)) / '70-uaccess.rules'
+        if path.exists() or link.is_symlink():
+            rules = root.text(name) or ''
+            break
+    else:
+        return 'systemd 70-uaccess.rules is missing'
+    lines = [line.split('#', 1)[0] for line in rules.splitlines()]
+    for subsystem in ('media', 'video4linux'):
+        if not any(re.search(r'SUBSYSTEM\s*==\s*"' + subsystem + r'"', line)
+                   and re.search(r'TAG\s*\+=\s*"uaccess"', line) for line in lines):
+            return f'70-uaccess.rules does not tag {subsystem} with uaccess'
+    return None
+
+
 def normalize_locale(name):
     language, _, codeset = name.partition('.')
     codeset, _, modifier = codeset.partition('@')
@@ -311,6 +331,7 @@ def main():
     checks = []
     if args.root:
         root = Root(args.root, args.system)
+        checks.append(('media-access', check_media_access(root)))
         checks.append(('locale', check_locale(root)))
         checks.append(('gl-selection', check_gl_selection(root)))
         if args.profile != 'minimal':

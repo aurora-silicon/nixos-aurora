@@ -44,3 +44,5 @@ Installed systems follow `channel-testing` (their `flake.lock` pins the installe
 Aurora defaults and the October 2026 Fedora changes are mapped in [the parity table](docs/fedora-parity-20261029.md). The shared module includes the locked-control ALSA restore fix, early sequencer, malcontent signal overrides, host and FEX guest Mesa, and Aurora's Flatpak GL extension for 25.08 and 26.08. Image assembly checks their actual payloads and initrd. The parity table records software verification; physical qualification remains separate.
 
 The [31 October Fedora merge sweep](docs/fedora-parity-20261031.md) maps all 43 Fedora merges since 28 October, including the native Aurora artwork package and the remaining proposed source/config twins.
+
+Opt-in [AVD FFmpeg and mpv](docs/avd-userspace.md) use pinned public Request API patches and private FFmpeg libraries alongside the system programs.
