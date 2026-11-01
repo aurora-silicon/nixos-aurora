@@ -21,6 +21,12 @@
       text = builtins.replaceStrings [ "@sed@" ] [ "${pkgs.gnused}/bin/sed" ]
         (builtins.readFile ./61-aurora-dmi-id.rules);
     })
+    # Name the DMI vendor "Apple" instead of "Apple Inc." for hostnamed.
+    (pkgs.writeTextFile {
+      name = "aurora-dmi-vendor-hwdb";
+      destination = "/lib/udev/hwdb.d/60-aurora-dmi-vendor.hwdb";
+      text = builtins.readFile ./60-aurora-dmi-vendor.hwdb;
+    })
   ];
   # The sense-PCM udev rule starts the feed-forward guardian only on J700.
   systemd.services.speakersafetyd.serviceConfig = {
