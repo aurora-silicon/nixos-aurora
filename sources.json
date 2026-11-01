@@ -137,12 +137,12 @@
   },
   "camera-denoise": {
     "repository": "https://github.com/aurora-silicon/camera-denoise",
-    "commit": "da883730b16d6ac6ddb55e9e0348e92065d05c69",
+    "commit": "77e35ccbfd2f2b5c16a48caf501dd850c9430302",
     "version": "0.1.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/camera-denoise/tar.gz/da883730b16d6ac6ddb55e9e0348e92065d05c69",
-    "archive_root": "camera-denoise-da883730b16d6ac6ddb55e9e0348e92065d05c69",
-    "sha256": "d3457a8697f3af3e5cf0fa94ea9fd3406e5dd2eec53eafdfc71b36d3ec5cd933",
-    "nix_hash": "sha256-00V6hpfzrz5c8PqU6p/TQG5d0u7FPq/fxxs20+xc2TM="
+    "source_url": "https://codeload.github.com/aurora-silicon/camera-denoise/tar.gz/77e35ccbfd2f2b5c16a48caf501dd850c9430302",
+    "archive_root": "camera-denoise-77e35ccbfd2f2b5c16a48caf501dd850c9430302",
+    "sha256": "bd3c92b0272e98e8651283a7848164e04faaa6d69feae3f699b61415c65f576b",
+    "nix_hash": "sha256-vTySsCcumOhlEoOnhIFk4E+qptaf6uP2mbYUFcZfV2s="
   },
   "omarchy-ane-tools": {
     "repository": "https://github.com/joshuaswarren/omarchy-ane",
