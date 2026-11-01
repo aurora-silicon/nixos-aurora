@@ -57,6 +57,7 @@
     # on it, as every later boot does. The spinner theme needs no ACPI BGRT
     # firmware logo. Plymouth runs in the systemd initrd.
     boot.plymouth.enable = lib.mkDefault (config.aurora.desktop != "minimal");
+    boot.plymouth.package = lib.mkDefault pkgs.plymouth;
     boot.plymouth.theme = lib.mkDefault "spinner";
     hardware.graphics.enable = true;
     hardware.graphics.extraPackages = [ pkgs.aurora-rusticl pkgs.aurora-lavapipe ];

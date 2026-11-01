@@ -38,6 +38,7 @@
       };
       packages.${system} = {
         logos = pkgs.aurora-logos;
+        plymouth = pkgs.plymouth;
         firstboot = pkgs.aurora-firstboot;
         docker = pkgs.docker;
         sep = pkgs.aurora-sep;
@@ -229,6 +230,10 @@
         desktopExpectations = {
           "desktop images boot with the spinner splash" = kde.boot.plymouth.enable && gnome.boot.plymouth.enable
             && kde.boot.plymouth.theme == "spinner" && gnome.boot.plymouth.theme == "spinner";
+          "every profile selects the patched Plymouth" = lib.all (c:
+            c.boot.plymouth.package.drvPath == pkgs.plymouth.drvPath
+            && patchedWith "0001-ply-terminal-Keep-terminal-input-nonblocking.patch" c.boot.plymouth.package
+            && c.boot.plymouth.package.doCheck) [ kde gnome minimal ];
           "minimal images boot without a splash" = !minimal.boot.plymouth.enable;
           "the initrd asks for no TPM drivers, which the shared kernel lacks" = lib.all (c:
             !(lib.elem "tpm-tis" c.boot.initrd.availableKernelModules)
