@@ -11,7 +11,7 @@ stdenvNoCC.mkDerivation {
     runHook preConfigure
     unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
     meson setup --cross-file llvm.ini --prefix="$out" --libdir=lib \
-      -Doptimization=2 -Ddebug=false -Dc_link_args=-fuse-ld=lld build
+      build
     runHook postConfigure
   '';
   buildPhase = ''

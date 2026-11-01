@@ -43,7 +43,7 @@ class ImageParityTests(unittest.TestCase):
                    'JackControl "Internal Mic Jack"\n')
         for branch in ('25.08', '26.08'):
             self.write('/nix/store/flatpakGL/refs/heads/runtime/org.freedesktop.Platform.GL.aurora/aarch64/' + branch, 'ostree-commit')
-        for variant in ('v2-t0', 'v3-t0', 'v3-t1', 'v4-t0', 'v5-t0', 'v5-t1'):
+        for variant in ('v2-t0', 'v3-t0', 'v3-t1', 'v4-t0', 'v5-t0', 'v5-t1', 'v5-t2'):
             self.write(f'/nix/store/avdFirmware/lib/firmware/apple/avd-fw-{variant}.bin', b'firmware')
         self.write(self.system + '/initrd', cpio('lib/modules/kernel/snd-seq.ko.zst') + cpio('TRAILER!!!', b''))
         self.save_metadata()
@@ -65,6 +65,11 @@ class ImageParityTests(unittest.TestCase):
         data = (self.root / self.system.lstrip('/') / 'initrd').read_bytes()
         self.write(self.system + '/initrd', gzip.compress(data, mtime=0))
         self.check()
+
+    def test_t6040_firmware_must_be_installed(self):
+        (self.root / 'nix/store/avdFirmware/lib/firmware/apple/avd-fw-v5-t2.bin').unlink()
+        with self.assertRaisesRegex(ValueError, 'AVD firmware v5-t2 is missing'):
+            self.check()
 
     def test_image_with_stale_graphics_is_rejected(self):
         self.write('/nix/store/fexMesa/.aurora-mesa-commit', '2' * 40)
