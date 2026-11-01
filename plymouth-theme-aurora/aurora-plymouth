@@ -7,6 +7,9 @@ set -eu
 theme=${1:-/usr/share/plymouth/themes/aurora}
 out=${2:-/run/plymouth/aurora.script}
 dt=${3:-/sys/firmware/devicetree/base}
+# Another selected theme may omit Aurora's source from the initramfs.
+# Its Plymouth startup must not fail because this package is installed.
+[ -r "$theme/aurora.script" ] || exit 0
 
 # DT cells are big endian, regardless of the host byte order. Reading bytes
 # also works with BusyBox od. Reject truncated properties.

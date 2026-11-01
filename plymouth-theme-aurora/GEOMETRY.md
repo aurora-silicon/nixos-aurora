@@ -41,6 +41,8 @@ the cropped view, the movement is half the notch height for even heights.
 The full-height mode stays centered. Flooring before subtracting also handles
 odd notch heights exactly.
 
+When another selected theme omits Aurora's source from the initramfs, the
+helper exits successfully without creating a script or changing its startup.
 Missing, truncated, translated or ambiguous DT data produces zero geometry
 and the ordinary centre rule. The script plugin exposes dimensions without
 connector identity, so an external display with identical pixel dimensions

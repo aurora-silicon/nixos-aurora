@@ -63,6 +63,11 @@ class GeometryTests(unittest.TestCase):
         self.assertTrue(text.endswith((THEME / "aurora.script").read_text()))
         return values
 
+    def test_another_theme_without_aurora_source_is_a_noop(self):
+        subprocess.run(["sh", str(THEME / "aurora-plymouth"),
+                        str(self.root / "absent-theme"), str(self.out), str(self.dt)], check=True)
+        self.assertFalse(self.out.exists())
+
     def test_platforms_both_origins(self):
         for w, h, n in ((3456, 2234, 74), (2560, 1664, 64), (2408, 1506, 0), (2560, 1665, 65)):
             for full in (False, True):
