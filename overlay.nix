@@ -173,6 +173,12 @@ in {
     src = source "omarchy-ane-tools";
     version = pins.omarchy-ane-tools.version;
   };
+  # Drive.Size for NVMe controllers that leave TNVMCAP at zero, such as the
+  # Apple silicon SSDs, from their namespaces (udisks f032f09cc760 for 2.11.x),
+  # so GNOME's About page and desktop tools show the internal disk's capacity.
+  udisks = prev.udisks.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ (stableFile ./patches/udisks-nvme-namespace-size.patch) ];
+  });
   upower = prev.upower.overrideAttrs (old: {
     src = source "upower-aurora";
     version = pins.upower-aurora.version;
