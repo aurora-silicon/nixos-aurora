@@ -363,9 +363,14 @@ in {
   # variant of the preferred mode becomes the preferred one, which new monitor
   # configurations use. Saved configurations still win. The same patch is in
   # fedora-aurora's mutter package (fedora-aurora PR 41).
+  # A panel that scales PQ with its backlight reports PQ_REFERENCE_LUMINANCE;
+  # in BT.2100 mode mutter then keeps that backlight as the brightness control
+  # and puts its reference white at the reported PQ level (PQ 100 cd/m² on
+  # Apple's EDR panels) instead of 203 cd/m².
   mutter = prev.mutter.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ map stableFile [
       ./patches/mutter-prefer-variable-refresh-rate.patch
+      ./patches/mutter-pq-reference-luminance.patch
     ];
   });
   # nixpkgs exposes a symlink join here: overriding its src does not replace
