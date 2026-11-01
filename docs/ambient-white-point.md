@@ -15,14 +15,14 @@ Three pieces, each in the standard place for it.
 The display white point, as a colour temperature, follows half of the ambient light's shift away from 6500 K, measured in mired (one million divided by kelvin, where equal steps look about equally large).
 
 * It never goes warmer than 5000 K and never cooler than 6500 K, the panel's native white.
-* Below 50 lux the adaptation fades out, and at 5 lux or less it is off. In a dark room the screen is the main light and the sensor's colour reading gets noisy.
+* Below 15 lux the adaptation fades out, and at 10 lux or less it is off. In a dark room the screen is the main light and the sensor's colour reading gets noisy. There is no cut-off in bright light. These lux points are the ones macOS uses.
 * A 10 second median filter ignores short changes, such as a shadow or a phone screen near the sensor, so a real change in the room shows up about 5 seconds later.
-* Every change, including turning it on or off, ramps smoothly over 2 seconds whatever its size. macOS does the same for True Tone and Night Shift on the M4 Pro.
+* Turning it on or off fades over 2 seconds, and a change in the room fades over 5 seconds, whatever the size, with the same easing curve macOS uses. These are the macOS True Tone timings on the M4 Pro.
 * Small changes under 2.5 mired are ignored so the screen doesn't wander.
 
 For example, at 250 lux under 5050 K light it settles near 5700 K, at 600 lux under 5400 K daylight near 5900 K, and under 2700 K or 4000 K lamps at the 5000 K limit.
 
-The ramp time comes from a trace of macOS on the M4 Pro. How much it adapts and the lux limits are starting values until macOS has been measured under changing light. The GNOME and KDE code share the same test vectors, so both desktops behave the same.
+The lux points, fade times and fade shape come from macOS on the M4 Pro. How much it adapts is a starting value until macOS has been measured under changing light. macOS adapts in two dimensions with a Bradford matrix; this follows the colour temperature only, through Night Light's per-channel scale. The GNOME and KDE code share the same test vectors, so both desktops behave the same.
 
 ## Night Light
 
@@ -73,7 +73,7 @@ busctl --user get-property org.kde.KWin.NightLight /org/kde/KWin/NightLight org.
 
 * A light sensor with a colour channel. On Apple silicon that is the AOP light sensor on the M1 Pro, M2 and M4 Pro machines with a kernel that reports `in_colortemp_input`. The Neo's sensor reports lux only, so nothing changes there.
 * A compositor that can apply Night Light to the display. mutter 51 and KWin apply it through the CRTC colour matrix when the display has no gamma table. mutter 50 needs a gamma table, so GNOME on mutter 50 can't shift a display that only has the colour matrix, for Night Light or for this.
-* The white point is applied as Night Light's per-channel scale, a simple approximation of chromatic adaptation.
+* The white point is applied as Night Light's per-channel scale, a simple approximation of the Bradford adaptation macOS uses.
 * One setting covers every display, as with Night Light.
 
 ## Packages

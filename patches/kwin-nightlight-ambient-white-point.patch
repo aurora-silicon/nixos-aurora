@@ -40,10 +40,10 @@ index 41a5047ea1..cf233b20b5 100644
 +endif()
 diff --git a/src/plugins/nightlight/ambientwhitepoint.cpp b/src/plugins/nightlight/ambientwhitepoint.cpp
 new file mode 100644
-index 0000000000..2cecf09afb
+index 0000000000..b9849d74ce
 --- /dev/null
 +++ b/src/plugins/nightlight/ambientwhitepoint.cpp
-@@ -0,0 +1,137 @@
+@@ -0,0 +1,166 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -63,13 +63,37 @@ index 0000000000..2cecf09afb
 +    return 1e6 / kelvin;
 +}
 +
-+// Starting constants: follow half of the ambient shift in mired, never warmer
-+// than 5000 K and never cooler than the native white, fade out between 50 and
-+// 5 lux where the screen dominates the room and the colour reading gets noisy,
-+// and ignore anything shorter than about half of a 10 s window. Each change
-+// ramps over 2 s whatever its size, which is what macOS does for True Tone
-+// and Night Shift on the M4 Pro. The amount of adaptation and its lux limits
-+// are not measured yet; the test vectors pin the behaviour.
++// The low-light branch points (no adaptation through 10 lux, blending in to
++// full at 15 lux, no high-lux cut-off) and the fade durations (2 s when
++// switched on or off, 5 s when the ambient target moves) are macOS 26A428's
++// True Tone policy on the M4 Pro. The amount of adaptation is a starting value
++// until macOS has been measured under changing light, applied as a fraction of
++// the ambient shift in mired and limited to 5000 to 6500 K. The test vectors
++// pin the behaviour.
++
++// A monotone cubic through the quartiles of macOS's fade (0.25033, 0.66672 and
++// 0.91656 of the change at a quarter, half and three quarters of the time),
++// with Fritsch-Carlson slopes.
++static constexpr double easeY[] = {0.0, 0.25033, 0.66672, 0.91656, 1.0};
++static constexpr double easeM[] = {1.00132, 1.25072, 1.24919, 0.50040, 0.33376};
++
++double AmbientPolicy::ease(double x)
++{
++    if (x <= 0) {
++        return 0;
++    }
++    if (x >= 1) {
++        return 1;
++    }
++    const double h = 0.25;
++    const int i = std::min(int(x * 4), 3);
++    const double t = (x - i * h) / h;
++    return (2 * t * t * t - 3 * t * t + 1) * easeY[i]
++        + (t * t * t - 2 * t * t + t) * h * easeM[i]
++        + (-2 * t * t * t + 3 * t * t) * easeY[i + 1]
++        + (t * t * t - t * t) * h * easeM[i + 1];
++}
++
 +AmbientPolicy::AmbientPolicy(const AmbientModel &model)
 +    : m_model(model)
 +    , m_window(std::clamp(int(std::round(model.windowSeconds / tickSeconds)), 1, maxSamples))
@@ -84,11 +108,10 @@ index 0000000000..2cecf09afb
 +        || kelvin < model.minValidK || kelvin > model.maxValidK) {
 +        return neutral;
 +    }
-+    if (lux <= model.luxOff) {
++    if (lux <= model.luxLow) {
 +        return neutral;
 +    }
-+    double fraction = (std::log10(lux) - std::log10(model.luxOff)) / (std::log10(model.luxFull) - std::log10(model.luxOff));
-+    fraction = std::clamp(fraction, 0.0, 1.0);
++    const double fraction = std::clamp((lux - model.luxLow) / (model.luxFull - model.luxLow), 0.0, 1.0);
 +    const double target = neutral + model.strength * fraction * (mired(kelvin) - neutral);
 +    return std::clamp(target, mired(model.coolestK), mired(model.warmestK));
 +}
@@ -102,7 +125,8 @@ index 0000000000..2cecf09afb
 +    m_currentMired = m_heldMired;
 +    m_rampFrom = m_heldMired;
 +    m_rampTo = m_heldMired;
-+    m_rampElapsed = m_model.rampSeconds;
++    m_rampDuration = m_model.toggleRampSeconds;
++    m_rampElapsed = m_rampDuration;
 +}
 +
 +double AmbientPolicy::median() const
@@ -116,6 +140,9 @@ index 0000000000..2cecf09afb
 +void AmbientPolicy::sample(bool releasing, bool valid, double lux, double colorTemperature)
 +{
 +    const double neutral = mired(m_model.neutralK);
++    // Switching on or off fades like a manual change; later moves use the
++    // slower ambient fade.
++    const bool toggle = releasing || !m_haveTarget;
 +
 +    if (releasing) {
 +        m_sampleCount = 0;
@@ -142,19 +169,21 @@ index 0000000000..2cecf09afb
 +        m_rampFrom = m_currentMired;
 +        m_rampTo = m_heldMired;
 +        m_rampElapsed = 0;
++        m_rampDuration = toggle ? m_model.toggleRampSeconds : m_model.ambientRampSeconds;
 +    }
 +}
 +
 +double AmbientPolicy::advance(double seconds)
 +{
-+    // Linear in mired, where equal steps look about equally large.
-+    if (m_rampElapsed < m_model.rampSeconds) {
++    // In mired, where equal steps look about equally large, with the macOS
++    // fade shape.
++    if (m_rampElapsed < m_rampDuration) {
 +        m_rampElapsed += seconds;
 +        // Finish exactly, whatever rounding the steps collected.
-+        if (m_rampElapsed > m_model.rampSeconds - 1e-9) {
-+            m_rampElapsed = m_model.rampSeconds;
++        if (m_rampElapsed > m_rampDuration - 1e-9) {
++            m_rampElapsed = m_rampDuration;
 +        }
-+        m_currentMired = m_rampFrom + (m_rampTo - m_rampFrom) * m_rampElapsed / m_model.rampSeconds;
++        m_currentMired = m_rampFrom + (m_rampTo - m_rampFrom) * ease(m_rampElapsed / m_rampDuration);
 +    }
 +    return kelvin();
 +}
@@ -167,7 +196,7 @@ index 0000000000..2cecf09afb
 +
 +bool AmbientPolicy::isSettled() const
 +{
-+    return m_rampElapsed >= m_model.rampSeconds;
++    return m_rampElapsed >= m_rampDuration;
 +}
 +
 +double AmbientPolicy::kelvin() const
@@ -183,10 +212,10 @@ index 0000000000..2cecf09afb
 +} // namespace KWin
 diff --git a/src/plugins/nightlight/ambientwhitepoint.h b/src/plugins/nightlight/ambientwhitepoint.h
 new file mode 100644
-index 0000000000..6bf8d42975
+index 0000000000..0fda48e5e4
 --- /dev/null
 +++ b/src/plugins/nightlight/ambientwhitepoint.h
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,111 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -214,13 +243,14 @@ index 0000000000..6bf8d42975
 +    double warmestK = 5000; // never warmer than this
 +    double coolestK = 6500; // never cooler than this
 +    double strength = 0.5; // fraction of the ambient shift followed, in mired
-+    double luxOff = 5; // at or below this, no adaptation
-+    double luxFull = 50; // at or above this, full strength
++    double luxLow = 10; // at or below this, no adaptation
++    double luxFull = 15; // at or above this, full strength
 +    double minValidK = 1500; // sensor readings outside are ignored
 +    double maxValidK = 20000;
 +    double windowSeconds = 10; // median filter window
 +    double deadbandMired = 2.5; // ignore target changes smaller than this
-+    double rampSeconds = 2.0; // every change ramps over this long
++    double toggleRampSeconds = 2.0; // fade when switched on or off
++    double ambientRampSeconds = 5.0; // fade when the ambient target moves
 +};
 +
 +class AmbientPolicy
@@ -237,6 +267,11 @@ index 0000000000..6bf8d42975
 +     * gives the neutral point.
 +     */
 +    static double targetMired(const AmbientModel &model, bool valid, double lux, double kelvin);
++
++    /**
++     * The fade shape, 0 to 1 over normalised time 0 to 1.
++     */
++    static double ease(double x);
 +
 +    /**
 +     * Forgets all samples and jumps to neutral.
@@ -277,6 +312,7 @@ index 0000000000..6bf8d42975
 +    double m_rampFrom = 0;
 +    double m_rampTo = 0;
 +    double m_rampElapsed = 0;
++    double m_rampDuration = 0;
 +    bool m_haveTarget = false;
 +};
 +
@@ -305,10 +341,10 @@ index 0000000000..6594e18e41
 +ecm_mark_as_test(nightlightAmbientPolicyTest)
 diff --git a/src/plugins/nightlight/autotests/ambient-test-vectors.h b/src/plugins/nightlight/autotests/ambient-test-vectors.h
 new file mode 100644
-index 0000000000..e1dc4f3c1d
+index 0000000000..ba05f5b686
 --- /dev/null
 +++ b/src/plugins/nightlight/autotests/ambient-test-vectors.h
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,140 @@
 +/* Generated by ambient_model.py. Do not edit. */
 +#pragma once
 +
@@ -326,8 +362,9 @@ index 0000000000..e1dc4f3c1d
 +    { 1, 600.0, 2700.0, 5000.000000 },
 +    { 1, 600.0, 9000.0, 6500.000000 },
 +    { 1, 50.0, 4000.0, 5000.000000 },
-+    { 1, 15.8114, 4000.0, 5621.621133 },
-+    { 1, 10.0, 4000.0, 5941.108767 },
++    { 1, 15.0, 4000.0, 5000.000000 },
++    { 1, 12.5, 4000.0, 5621.621622 },
++    { 1, 10.0, 4000.0, 6500.000000 },
 +    { 1, 5.0, 2700.0, 6500.000000 },
 +    { 1, 1.0, 2700.0, 6500.000000 },
 +    { 1, 0.0, 2700.0, 6500.000000 },
@@ -338,7 +375,7 @@ index 0000000000..e1dc4f3c1d
 +    { 1, 600.0, INFINITY, 6500.000000 },
 +    { 1, -1.0, 4000.0, 6500.000000 },
 +    { 1, 20000.0, 5800.0, 6130.081301 },
-+    { 1, 30.0, 5200.0, 5923.798590 },
++    { 1, 30.0, 5200.0, 5777.777778 },
 +};
 +static const AmbientTickRun ambient_tick_runs[] = {
 +    { 20, 0, 1, 400.0, 6500.0 },
@@ -346,6 +383,7 @@ index 0000000000..e1dc4f3c1d
 +    { 6, 0, 1, 300.0, 9000.0 },
 +    { 20, 0, 1, 300.0, 3000.0 },
 +    { 60, 0, 1, 300.0, 4800.0 },
++    { 40, 0, 1, 12.0, 3000.0 },
 +    { 120, 0, 1, 2.0, 3000.0 },
 +    { 60, 0, 1, 300.0, 3000.0 },
 +    { 40, 0, 0, 0.0, 0.0 },
@@ -357,8 +395,9 @@ index 0000000000..e1dc4f3c1d
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6265.060241,
-+    5892.351275, 5561.497326, 5265.822785, 5000.000000, 5000.000000, 5000.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6409.485502,
++    6243.778145, 6079.928588, 5873.580242, 5610.477169, 5395.433089, 5244.952904,
++    5130.239073, 5068.457282, 5032.510546, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
@@ -381,8 +420,8 @@ index 0000000000..e1dc4f3c1d
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5059.801338, 5167.969357, 5280.863218, 5398.799546, 5522.123894,
++    5000.000000, 5022.353649, 5065.514654, 5111.301840, 5173.911253, 5262.987946,
++    5344.864580, 5407.838592, 5459.408387, 5488.578768, 5506.028423, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
@@ -391,8 +430,15 @@ index 0000000000..e1dc4f3c1d
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
-+    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
-+    5522.123894, 5627.959414, 5823.272091, 6032.628399, 6257.599499, 6500.000000,
++    5522.123894, 5509.729670, 5486.261500, 5462.010501, 5429.878077, 5386.096771,
++    5347.730787, 5319.368431, 5296.846000, 5284.376201, 5277.007656, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5317.627683,
++    5410.281752, 5510.363526, 5650.292060, 5855.754530, 6051.551753, 6206.900766,
++    6337.329477, 6412.428004, 6457.818282, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
@@ -410,9 +456,9 @@ index 0000000000..e1dc4f3c1d
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6265.060241, 5892.351275, 5561.497326, 5265.822785, 5000.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6409.485502,
++    6243.778145, 6079.928588, 5873.580242, 5610.477169, 5395.433089, 5244.952904,
++    5130.239073, 5068.457282, 5032.510546, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
@@ -420,32 +466,31 @@ index 0000000000..e1dc4f3c1d
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5148.514851, 5430.809399, 5745.856354, 6099.706745, 6500.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5054.911740,
++    5162.976700, 5280.652480, 5446.853185, 5694.495073, 5934.569455, 6127.951409,
++    6292.337048, 6387.839177, 6445.866733, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6265.060241,
-+    5892.351275, 5561.497326, 5265.822785, 5000.000000, 5000.000000, 5000.000000,
++    6500.000000, 6500.000000, 6500.000000, 6409.485502, 6243.778145, 6079.928588,
++    5873.580242, 5610.477169, 5395.433089, 5244.952904, 5130.239073, 5068.457282,
++    5032.510546, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5000.000000, 5306.122449, 5652.173913, 6046.511628, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    5306.551305, 5909.176861, 6341.265443, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +};
 diff --git a/src/plugins/nightlight/autotests/ambientpolicytest.cpp b/src/plugins/nightlight/autotests/ambientpolicytest.cpp
 new file mode 100644
-index 0000000000..c87c83a39f
+index 0000000000..969b9e4dc8
 --- /dev/null
 +++ b/src/plugins/nightlight/autotests/ambientpolicytest.cpp
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,135 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -511,37 +556,64 @@ index 0000000000..c87c83a39f
 +            const double out = policy.advance(AmbientPolicy::stepSeconds);
 +            QVERIFY(out >= model.warmestK - 1e-6);
 +            QVERIFY(out <= model.coolestK + 1e-6);
-+            QVERIFY(std::abs(1e6 / out - 1e6 / previous) <= swing * AmbientPolicy::stepSeconds / model.rampSeconds + 1e-9);
++            QVERIFY(std::abs(1e6 / out - 1e6 / previous) <= 1.9 * swing * AmbientPolicy::stepSeconds / model.toggleRampSeconds + 1e-9);
 +            previous = out;
 +        }
 +    }
 +}
 +
++static int fadeSteps(AmbientPolicy &policy)
++{
++    int steps = 0;
++    while (!policy.isSettled()) {
++        policy.advance(AmbientPolicy::stepSeconds);
++        steps++;
++    }
++    return steps;
++}
++
 +void AmbientPolicyTest::ramp()
 +{
 +    const AmbientModel model;
-+    const int expectedSteps = int(std::round(model.rampSeconds / AmbientPolicy::stepSeconds));
-+    AmbientPolicy policy(model);
++    const int toggleSteps = int(std::round(model.toggleRampSeconds / AmbientPolicy::stepSeconds));
++    const int ambientSteps = int(std::round(model.ambientRampSeconds / AmbientPolicy::stepSeconds));
++    const double n = 1e6 / 6500;
++    const double w = 1e6 / 5000;
 +
-+    // A change ramps over exactly rampSeconds, linear in mired, whatever its size.
++    // The fade shape passes through the macOS quartiles and is monotonic.
++    QVERIFY(std::abs(AmbientPolicy::ease(0.25) - 0.25033) < 1e-9);
++    QVERIFY(std::abs(AmbientPolicy::ease(0.5) - 0.66672) < 1e-9);
++    QVERIFY(std::abs(AmbientPolicy::ease(0.75) - 0.91656) < 1e-9);
++    for (int i = 0; i < 200; i++) {
++        QVERIFY(AmbientPolicy::ease(i / 200.0) <= AmbientPolicy::ease((i + 1) / 200.0));
++    }
++
++    // Switching on fades over the 2 s toggle time along that shape.
++    AmbientPolicy policy(model);
 +    policy.sample(false, true, 300, 3000);
 +    QVERIFY(!policy.isSettled());
 +    int steps = 0;
 +    while (!policy.isSettled()) {
 +        const double out = policy.advance(AmbientPolicy::stepSeconds);
 +        steps++;
-+        const double expected = 1e6 / 6500 + (1e6 / 5000 - 1e6 / 6500) * std::min(steps * AmbientPolicy::stepSeconds / model.rampSeconds, 1.0);
++        const double expected = n + (w - n) * AmbientPolicy::ease(std::min(steps * AmbientPolicy::stepSeconds / model.toggleRampSeconds, 1.0));
 +        QVERIFY(std::abs(1e6 / out - expected) < 1e-6);
 +    }
-+    QCOMPARE(steps, expectedSteps);
++    QCOMPARE(steps, toggleSteps);
 +    QVERIFY(std::abs(policy.kelvin() - 5000) < 1e-6);
 +
-+    // Switching off returns to neutral in the same time.
-+    policy.sample(true, true, 300, 3000);
-+    for (steps = 0; !policy.isSettled(); steps++) {
-+        policy.advance(AmbientPolicy::stepSeconds);
++    // A move of the ambient target afterwards takes the 5 s ambient fade.
++    for (int i = 0; i < 40; i++) {
++        policy.sample(false, true, 300, 6000);
 +    }
-+    QCOMPARE(steps, expectedSteps);
++    QVERIFY(!policy.isSettled());
++    steps = fadeSteps(policy);
++    QVERIFY(steps <= ambientSteps);
++    QVERIFY(steps > toggleSteps);
++
++    // Switching off returns to neutral in the toggle time.
++    policy.sample(true, true, 300, 3000);
++    QCOMPARE(fadeSteps(policy), toggleSteps);
 +    QVERIFY(policy.isNeutral());
 +}
 +

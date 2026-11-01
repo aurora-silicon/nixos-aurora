@@ -29,10 +29,10 @@ index 286ea80..01d03c5 100644
        <summary>If the night light mode is enabled</summary>
 diff --git a/plugins/color/ambient-policy-test.c b/plugins/color/ambient-policy-test.c
 new file mode 100644
-index 0000000..baa88a8
+index 0000000..03f9ff7
 --- /dev/null
 +++ b/plugins/color/ambient-policy-test.c
-@@ -0,0 +1,113 @@
+@@ -0,0 +1,137 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include <math.h>
 +#include "gsd-ambient-policy.h"
@@ -78,8 +78,8 @@ index 0000000..baa88a8
 +        GsdAmbientPolicy policy;
 +        double previous = 6500;
 +
-+        /* Any input stays inside the limits, and no ramp step is faster than
-+         * the largest swing spread over one ramp. */
++        /* Any input stays inside the limits, and no step is faster than the
++         * largest swing over the shortest fade at the fade's steepest. */
 +        gsd_ambient_policy_init (&policy, model);
 +        for (guint i = 0; i < 2000; i++) {
 +                double lux = (i * 7919) % 3000;
@@ -91,38 +91,62 @@ index 0000000..baa88a8
 +                        g_assert_cmpfloat (out, >=, model->warmest_k - 1e-6);
 +                        g_assert_cmpfloat (out, <=, model->coolest_k + 1e-6);
 +                        g_assert_cmpfloat (fabs (1e6 / out - 1e6 / previous), <=,
-+                                           swing * GSD_AMBIENT_STEP_S / model->ramp_s + 1e-9);
++                                           1.9 * swing * GSD_AMBIENT_STEP_S / model->toggle_ramp_s + 1e-9);
 +                        previous = out;
 +                }
 +        }
++}
++
++static guint
++fade_steps (GsdAmbientPolicy *policy)
++{
++        guint steps = 0;
++
++        while (!gsd_ambient_policy_is_settled (policy)) {
++                gsd_ambient_policy_advance (policy, GSD_AMBIENT_STEP_S);
++                steps++;
++        }
++        return steps;
 +}
 +
 +static void
 +test_ramp (void)
 +{
 +        const GsdAmbientModel *model = &gsd_ambient_model_default;
++        double n = gsd_ambient_mired (6500), w = gsd_ambient_mired (5000);
 +        GsdAmbientPolicy policy;
 +        guint steps = 0;
 +
-+        /* A change ramps over exactly ramp_s, linear in mired, whatever its size. */
++        /* The fade shape passes through the macOS quartiles and is monotonic. */
++        g_assert_cmpfloat_with_epsilon (gsd_ambient_ease (0.25), 0.25033, 1e-9);
++        g_assert_cmpfloat_with_epsilon (gsd_ambient_ease (0.5), 0.66672, 1e-9);
++        g_assert_cmpfloat_with_epsilon (gsd_ambient_ease (0.75), 0.91656, 1e-9);
++        for (guint i = 0; i < 200; i++)
++                g_assert_cmpfloat (gsd_ambient_ease (i / 200.0), <=, gsd_ambient_ease ((i + 1) / 200.0));
++
++        /* Switching on fades over the 2 s toggle time along that shape. */
 +        gsd_ambient_policy_init (&policy, model);
 +        gsd_ambient_policy_sample (&policy, FALSE, TRUE, 300, 3000);
-+        g_assert_false (gsd_ambient_policy_is_settled (&policy));
 +        while (!gsd_ambient_policy_is_settled (&policy)) {
 +                double out = gsd_ambient_policy_advance (&policy, GSD_AMBIENT_STEP_S);
 +                steps++;
-+                g_assert_cmpfloat_with_epsilon (1e6 / out,
-+                        gsd_ambient_mired (6500) + (gsd_ambient_mired (5000) - gsd_ambient_mired (6500)) *
-+                        MIN (steps * GSD_AMBIENT_STEP_S / model->ramp_s, 1.0), 1e-6);
++                g_assert_cmpfloat_with_epsilon (1e6 / out, n + (w - n) *
++                        gsd_ambient_ease (MIN (steps * GSD_AMBIENT_STEP_S / model->toggle_ramp_s, 1.0)), 1e-6);
 +        }
-+        g_assert_cmpuint (steps, ==, (guint) round (model->ramp_s / GSD_AMBIENT_STEP_S));
++        g_assert_cmpuint (steps, ==, (guint) round (model->toggle_ramp_s / GSD_AMBIENT_STEP_S));
 +        g_assert_cmpfloat_with_epsilon (gsd_ambient_policy_get_kelvin (&policy), 5000, 1e-6);
 +
-+        /* Switching off returns to neutral in the same time. */
++        /* A move of the ambient target afterwards takes the 5 s ambient fade. */
++        for (guint i = 0; i < 40; i++)
++                gsd_ambient_policy_sample (&policy, FALSE, TRUE, 300, 6000);
++        g_assert_false (gsd_ambient_policy_is_settled (&policy));
++        steps = fade_steps (&policy);
++        g_assert_cmpuint (steps, <=, (guint) round (model->ambient_ramp_s / GSD_AMBIENT_STEP_S));
++        g_assert_cmpuint (steps, >, (guint) round (model->toggle_ramp_s / GSD_AMBIENT_STEP_S));
++
++        /* Switching off returns to neutral in the toggle time. */
 +        gsd_ambient_policy_sample (&policy, TRUE, TRUE, 300, 3000);
-+        for (steps = 0; !gsd_ambient_policy_is_settled (&policy); steps++)
-+                gsd_ambient_policy_advance (&policy, GSD_AMBIENT_STEP_S);
-+        g_assert_cmpuint (steps, ==, (guint) round (model->ramp_s / GSD_AMBIENT_STEP_S));
++        g_assert_cmpuint (fade_steps (&policy), ==, (guint) round (model->toggle_ramp_s / GSD_AMBIENT_STEP_S));
 +        g_assert_true (gsd_ambient_policy_is_neutral (&policy));
 +}
 +
@@ -454,10 +478,10 @@ index 0000000..5f32a5f
 +}
 diff --git a/plugins/color/ambient-test-vectors.h b/plugins/color/ambient-test-vectors.h
 new file mode 100644
-index 0000000..e1dc4f3
+index 0000000..ba05f5b
 --- /dev/null
 +++ b/plugins/color/ambient-test-vectors.h
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,140 @@
 +/* Generated by ambient_model.py. Do not edit. */
 +#pragma once
 +
@@ -475,8 +499,9 @@ index 0000000..e1dc4f3
 +    { 1, 600.0, 2700.0, 5000.000000 },
 +    { 1, 600.0, 9000.0, 6500.000000 },
 +    { 1, 50.0, 4000.0, 5000.000000 },
-+    { 1, 15.8114, 4000.0, 5621.621133 },
-+    { 1, 10.0, 4000.0, 5941.108767 },
++    { 1, 15.0, 4000.0, 5000.000000 },
++    { 1, 12.5, 4000.0, 5621.621622 },
++    { 1, 10.0, 4000.0, 6500.000000 },
 +    { 1, 5.0, 2700.0, 6500.000000 },
 +    { 1, 1.0, 2700.0, 6500.000000 },
 +    { 1, 0.0, 2700.0, 6500.000000 },
@@ -487,7 +512,7 @@ index 0000000..e1dc4f3
 +    { 1, 600.0, INFINITY, 6500.000000 },
 +    { 1, -1.0, 4000.0, 6500.000000 },
 +    { 1, 20000.0, 5800.0, 6130.081301 },
-+    { 1, 30.0, 5200.0, 5923.798590 },
++    { 1, 30.0, 5200.0, 5777.777778 },
 +};
 +static const AmbientTickRun ambient_tick_runs[] = {
 +    { 20, 0, 1, 400.0, 6500.0 },
@@ -495,6 +520,7 @@ index 0000000..e1dc4f3
 +    { 6, 0, 1, 300.0, 9000.0 },
 +    { 20, 0, 1, 300.0, 3000.0 },
 +    { 60, 0, 1, 300.0, 4800.0 },
++    { 40, 0, 1, 12.0, 3000.0 },
 +    { 120, 0, 1, 2.0, 3000.0 },
 +    { 60, 0, 1, 300.0, 3000.0 },
 +    { 40, 0, 0, 0.0, 0.0 },
@@ -506,8 +532,9 @@ index 0000000..e1dc4f3
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6265.060241,
-+    5892.351275, 5561.497326, 5265.822785, 5000.000000, 5000.000000, 5000.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6409.485502,
++    6243.778145, 6079.928588, 5873.580242, 5610.477169, 5395.433089, 5244.952904,
++    5130.239073, 5068.457282, 5032.510546, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
@@ -530,8 +557,8 @@ index 0000000..e1dc4f3
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5059.801338, 5167.969357, 5280.863218, 5398.799546, 5522.123894,
++    5000.000000, 5022.353649, 5065.514654, 5111.301840, 5173.911253, 5262.987946,
++    5344.864580, 5407.838592, 5459.408387, 5488.578768, 5506.028423, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
@@ -540,8 +567,15 @@ index 0000000..e1dc4f3
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
-+    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
-+    5522.123894, 5627.959414, 5823.272091, 6032.628399, 6257.599499, 6500.000000,
++    5522.123894, 5509.729670, 5486.261500, 5462.010501, 5429.878077, 5386.096771,
++    5347.730787, 5319.368431, 5296.846000, 5284.376201, 5277.007656, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5317.627683,
++    5410.281752, 5510.363526, 5650.292060, 5855.754530, 6051.551753, 6206.900766,
++    6337.329477, 6412.428004, 6457.818282, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
@@ -559,9 +593,9 @@ index 0000000..e1dc4f3
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6265.060241, 5892.351275, 5561.497326, 5265.822785, 5000.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6409.485502,
++    6243.778145, 6079.928588, 5873.580242, 5610.477169, 5395.433089, 5244.952904,
++    5130.239073, 5068.457282, 5032.510546, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
@@ -569,58 +603,81 @@ index 0000000..e1dc4f3
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5148.514851, 5430.809399, 5745.856354, 6099.706745, 6500.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5054.911740,
++    5162.976700, 5280.652480, 5446.853185, 5694.495073, 5934.569455, 6127.951409,
++    6292.337048, 6387.839177, 6445.866733, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6265.060241,
-+    5892.351275, 5561.497326, 5265.822785, 5000.000000, 5000.000000, 5000.000000,
++    6500.000000, 6500.000000, 6500.000000, 6409.485502, 6243.778145, 6079.928588,
++    5873.580242, 5610.477169, 5395.433089, 5244.952904, 5130.239073, 5068.457282,
++    5032.510546, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5000.000000, 5306.122449, 5652.173913, 6046.511628, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    5306.551305, 5909.176861, 6341.265443, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +};
 diff --git a/plugins/color/gsd-ambient-policy.c b/plugins/color/gsd-ambient-policy.c
 new file mode 100644
-index 0000000..45b1085
+index 0000000..b467f54
 --- /dev/null
 +++ b/plugins/color/gsd-ambient-policy.c
-@@ -0,0 +1,178 @@
+@@ -0,0 +1,206 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include "gsd-ambient-policy.h"
 +#include <math.h>
 +#include <string.h>
 +
-+/* Starting constants. The adaptation follows half of the ambient shift in
-+ * mired, never warmer than 5000 K and never cooler than the native white,
-+ * fades out between 50 and 5 lux where the screen dominates the room and the
-+ * sensor's colour reading gets noisy, and ignores anything shorter than about
-+ * half of a 10 s window. Each change ramps over 2 s whatever its size, which
-+ * is what macOS does for True Tone and Night Shift on the M4 Pro. The amount
-+ * of adaptation and its lux limits are not measured yet; the test vectors
-+ * pin the behaviour. */
++/* The low-light branch points (no adaptation through 10 lux, blending in to
++ * full at 15 lux, no high-lux cut-off) and the fade durations (2 s when
++ * switched on or off, 5 s when the ambient target moves) are macOS 26A428's
++ * True Tone policy on the M4 Pro. The amount of adaptation is a starting
++ * value until macOS has been measured under changing light, applied as a
++ * fraction of the ambient shift in mired and limited to 5000 to 6500 K. The
++ * test vectors pin the behaviour. */
 +const GsdAmbientModel gsd_ambient_model_default = {
 +        .neutral_k = 6500,
 +        .warmest_k = 5000,
 +        .coolest_k = 6500,
 +        .strength = 0.5,
-+        .lux_off = 5,
-+        .lux_full = 50,
++        .lux_low = 10,
++        .lux_full = 15,
 +        .min_valid_k = 1500,
 +        .max_valid_k = 20000,
 +        .window_s = 10,
 +        .deadband_mired = 2.5,
-+        .ramp_s = 2.0,
++        .toggle_ramp_s = 2.0,
++        .ambient_ramp_s = 5.0,
 +};
++
++/* A monotone cubic through the quartiles of macOS's fade (0.25033, 0.66672
++ * and 0.91656 of the change at a quarter, half and three quarters of the
++ * time), with Fritsch-Carlson slopes. */
++static const double ease_y[] = { 0.0, 0.25033, 0.66672, 0.91656, 1.0 };
++static const double ease_m[] = { 1.00132, 1.25072, 1.24919, 0.50040, 0.33376 };
++
++double
++gsd_ambient_ease (double x)
++{
++        double t, h = 0.25;
++        int i;
++
++        if (x <= 0)
++                return 0;
++        if (x >= 1)
++                return 1;
++        i = MIN ((int) (x * 4), 3);
++        t = (x - i * h) / h;
++        return (2 * t * t * t - 3 * t * t + 1) * ease_y[i] +
++               (t * t * t - 2 * t * t + t) * h * ease_m[i] +
++               (-2 * t * t * t + 3 * t * t) * ease_y[i + 1] +
++               (t * t * t - t * t) * h * ease_m[i + 1];
++}
 +
 +double
 +gsd_ambient_target_mired (const GsdAmbientModel *model, gboolean valid,
@@ -632,11 +689,9 @@ index 0000000..45b1085
 +        if (!valid || !isfinite (lux) || !isfinite (kelvin) || lux < 0 ||
 +            kelvin < model->min_valid_k || kelvin > model->max_valid_k)
 +                return neutral;
-+        if (lux <= model->lux_off)
++        if (lux <= model->lux_low)
 +                return neutral;
-+        fraction = (log10 (lux) - log10 (model->lux_off)) /
-+                   (log10 (model->lux_full) - log10 (model->lux_off));
-+        fraction = CLAMP (fraction, 0.0, 1.0);
++        fraction = CLAMP ((lux - model->lux_low) / (model->lux_full - model->lux_low), 0.0, 1.0);
 +        target = neutral + model->strength * fraction * (gsd_ambient_mired (kelvin) - neutral);
 +        return CLAMP (target, gsd_ambient_mired (model->coolest_k),
 +                      gsd_ambient_mired (model->warmest_k));
@@ -662,7 +717,8 @@ index 0000000..45b1085
 +        policy->current_mired = policy->held_mired;
 +        policy->ramp_from = policy->held_mired;
 +        policy->ramp_to = policy->held_mired;
-+        policy->ramp_elapsed = policy->model.ramp_s;
++        policy->ramp_duration = policy->model.toggle_ramp_s;
++        policy->ramp_elapsed = policy->ramp_duration;
 +}
 +
 +void
@@ -696,6 +752,9 @@ index 0000000..45b1085
 +{
 +        const GsdAmbientModel *model = &policy->model;
 +        double neutral = gsd_ambient_mired (model->neutral_k);
++        /* Switching on or off fades like a manual change; later moves use
++         * the slower ambient fade. */
++        gboolean toggle = releasing || !policy->have_target;
 +
 +        if (releasing) {
 +                policy->n_samples = 0;
@@ -728,22 +787,24 @@ index 0000000..45b1085
 +                policy->ramp_from = policy->current_mired;
 +                policy->ramp_to = policy->held_mired;
 +                policy->ramp_elapsed = 0;
++                policy->ramp_duration = toggle ? model->toggle_ramp_s : model->ambient_ramp_s;
 +        }
 +}
 +
 +double
 +gsd_ambient_policy_advance (GsdAmbientPolicy *policy, double seconds)
 +{
-+        double ramp_s = policy->model.ramp_s;
++        double ramp_s = policy->ramp_duration;
 +
-+        /* Linear in mired, where equal steps look about equally large. */
++        /* In mired, where equal steps look about equally large, with the
++         * macOS fade shape. */
 +        if (policy->ramp_elapsed < ramp_s) {
 +                policy->ramp_elapsed += seconds;
 +                /* Finish exactly, whatever rounding the steps collected. */
 +                if (policy->ramp_elapsed > ramp_s - 1e-9)
 +                        policy->ramp_elapsed = ramp_s;
 +                policy->current_mired = policy->ramp_from +
-+                        (policy->ramp_to - policy->ramp_from) * policy->ramp_elapsed / ramp_s;
++                        (policy->ramp_to - policy->ramp_from) * gsd_ambient_ease (policy->ramp_elapsed / ramp_s);
 +        }
 +        return gsd_ambient_policy_get_kelvin (policy);
 +}
@@ -759,7 +820,7 @@ index 0000000..45b1085
 +gboolean
 +gsd_ambient_policy_is_settled (const GsdAmbientPolicy *policy)
 +{
-+        return policy->ramp_elapsed >= policy->model.ramp_s;
++        return policy->ramp_elapsed >= policy->ramp_duration;
 +}
 +
 +double
@@ -775,10 +836,10 @@ index 0000000..45b1085
 +}
 diff --git a/plugins/color/gsd-ambient-policy.h b/plugins/color/gsd-ambient-policy.h
 new file mode 100644
-index 0000000..00f3263
+index 0000000..f09f8cf
 --- /dev/null
 +++ b/plugins/color/gsd-ambient-policy.h
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,90 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + *
 + * Ambient white point policy: maps the ambient light's correlated colour
@@ -797,13 +858,14 @@ index 0000000..00f3263
 +        double warmest_k;          /* never warmer than this */
 +        double coolest_k;          /* never cooler than this */
 +        double strength;           /* fraction of the ambient shift followed, in mired */
-+        double lux_off;            /* at or below this, no adaptation */
++        double lux_low;            /* at or below this, no adaptation */
 +        double lux_full;           /* at or above this, full strength */
 +        double min_valid_k;        /* sensor readings outside are ignored */
 +        double max_valid_k;
 +        double window_s;           /* median filter window */
 +        double deadband_mired;     /* ignore target changes smaller than this */
-+        double ramp_s;             /* every change ramps over this long */
++        double toggle_ramp_s;      /* fade when switched on or off */
++        double ambient_ramp_s;     /* fade when the ambient target moves */
 +} GsdAmbientModel;
 +
 +extern const GsdAmbientModel gsd_ambient_model_default;
@@ -823,6 +885,7 @@ index 0000000..00f3263
 +        double ramp_from;
 +        double ramp_to;
 +        double ramp_elapsed;
++        double ramp_duration;
 +        gboolean have_target;
 +} GsdAmbientPolicy;
 +
@@ -847,6 +910,8 @@ index 0000000..00f3263
 + * sensor is ignored. */
 +void gsd_ambient_policy_sample (GsdAmbientPolicy *policy, gboolean releasing,
 +                                gboolean valid, double lux, double kelvin);
++/* The fade shape, 0 to 1 over normalised time 0 to 1. */
++double gsd_ambient_ease (double x);
 +/* Moves along the current ramp by @seconds. Returns kelvin. */
 +double gsd_ambient_policy_advance (GsdAmbientPolicy *policy, double seconds);
 +/* A sample followed by a whole sampling interval of ramp. Returns kelvin. */
