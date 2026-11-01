@@ -29,10 +29,10 @@ index 286ea80..01d03c5 100644
        <summary>If the night light mode is enabled</summary>
 diff --git a/plugins/color/ambient-policy-test.c b/plugins/color/ambient-policy-test.c
 new file mode 100644
-index 0000000..078f874
+index 0000000..baa88a8
 --- /dev/null
 +++ b/plugins/color/ambient-policy-test.c
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,113 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include <math.h>
 +#include "gsd-ambient-policy.h"
@@ -74,21 +74,56 @@ index 0000000..078f874
 +test_limits (void)
 +{
 +        const GsdAmbientModel *model = &gsd_ambient_model_default;
++        double swing = gsd_ambient_mired (model->warmest_k) - gsd_ambient_mired (model->coolest_k);
 +        GsdAmbientPolicy policy;
 +        double previous = 6500;
 +
-+        /* Any input stays inside the limits, and every step is slow. */
++        /* Any input stays inside the limits, and no ramp step is faster than
++         * the largest swing spread over one ramp. */
 +        gsd_ambient_policy_init (&policy, model);
 +        for (guint i = 0; i < 2000; i++) {
 +                double lux = (i * 7919) % 3000;
 +                double kelvin = 1000 + (i * 104729) % 15000;
-+                double out = gsd_ambient_policy_tick (&policy, FALSE, TRUE, lux, kelvin);
-+                g_assert_cmpfloat (out, >=, model->warmest_k - 1e-6);
-+                g_assert_cmpfloat (out, <=, model->coolest_k + 1e-6);
-+                g_assert_cmpfloat (fabs (1e6 / out - 1e6 / previous), <=,
-+                                   model->ramp_mired_per_s * GSD_AMBIENT_TICK_S + 1e-9);
-+                previous = out;
++
++                gsd_ambient_policy_sample (&policy, FALSE, TRUE, lux, kelvin);
++                for (guint step = 0; step < 10; step++) {
++                        double out = gsd_ambient_policy_advance (&policy, GSD_AMBIENT_STEP_S);
++                        g_assert_cmpfloat (out, >=, model->warmest_k - 1e-6);
++                        g_assert_cmpfloat (out, <=, model->coolest_k + 1e-6);
++                        g_assert_cmpfloat (fabs (1e6 / out - 1e6 / previous), <=,
++                                           swing * GSD_AMBIENT_STEP_S / model->ramp_s + 1e-9);
++                        previous = out;
++                }
 +        }
++}
++
++static void
++test_ramp (void)
++{
++        const GsdAmbientModel *model = &gsd_ambient_model_default;
++        GsdAmbientPolicy policy;
++        guint steps = 0;
++
++        /* A change ramps over exactly ramp_s, linear in mired, whatever its size. */
++        gsd_ambient_policy_init (&policy, model);
++        gsd_ambient_policy_sample (&policy, FALSE, TRUE, 300, 3000);
++        g_assert_false (gsd_ambient_policy_is_settled (&policy));
++        while (!gsd_ambient_policy_is_settled (&policy)) {
++                double out = gsd_ambient_policy_advance (&policy, GSD_AMBIENT_STEP_S);
++                steps++;
++                g_assert_cmpfloat_with_epsilon (1e6 / out,
++                        gsd_ambient_mired (6500) + (gsd_ambient_mired (5000) - gsd_ambient_mired (6500)) *
++                        MIN (steps * GSD_AMBIENT_STEP_S / model->ramp_s, 1.0), 1e-6);
++        }
++        g_assert_cmpuint (steps, ==, (guint) round (model->ramp_s / GSD_AMBIENT_STEP_S));
++        g_assert_cmpfloat_with_epsilon (gsd_ambient_policy_get_kelvin (&policy), 5000, 1e-6);
++
++        /* Switching off returns to neutral in the same time. */
++        gsd_ambient_policy_sample (&policy, TRUE, TRUE, 300, 3000);
++        for (steps = 0; !gsd_ambient_policy_is_settled (&policy); steps++)
++                gsd_ambient_policy_advance (&policy, GSD_AMBIENT_STEP_S);
++        g_assert_cmpuint (steps, ==, (guint) round (model->ramp_s / GSD_AMBIENT_STEP_S));
++        g_assert_true (gsd_ambient_policy_is_neutral (&policy));
 +}
 +
 +static void
@@ -107,6 +142,7 @@ index 0000000..078f874
 +        g_test_add_func ("/color/ambient/targets", test_targets);
 +        g_test_add_func ("/color/ambient/trajectory", test_trajectory);
 +        g_test_add_func ("/color/ambient/limits", test_limits);
++        g_test_add_func ("/color/ambient/ramp", test_ramp);
 +        g_test_add_func ("/color/ambient/compose", test_compose);
 +        return g_test_run ();
 +}
@@ -418,7 +454,7 @@ index 0000000..5f32a5f
 +}
 diff --git a/plugins/color/ambient-test-vectors.h b/plugins/color/ambient-test-vectors.h
 new file mode 100644
-index 0000000..6d3b018
+index 0000000..e1dc4f3
 --- /dev/null
 +++ b/plugins/color/ambient-test-vectors.h
 @@ -0,0 +1,131 @@
@@ -470,23 +506,8 @@ index 0000000..6d3b018
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6478.943434,
-+    6458.022851, 6437.236940, 6416.584403, 6396.063961, 6375.674350, 6355.414324,
-+    6335.282651, 6315.278115, 6295.399516, 6275.645667, 6256.015399, 6236.507556,
-+    6217.120995, 6197.854589, 6178.707224, 6159.677801, 6140.765234, 6121.968448,
-+    6103.286385, 6084.717997, 6066.262249, 6047.918120, 6029.684601, 6011.560694,
-+    5993.545413, 5975.637784, 5957.836847, 5940.141650, 5922.551253, 5905.064729,
-+    5887.681159, 5870.399639, 5853.219271, 5836.139169, 5819.158460, 5802.276278,
-+    5785.491767, 5768.804083, 5752.212389, 5735.715861, 5719.313682, 5703.005045,
-+    5686.789151, 5670.665213, 5654.632449, 5638.690089, 5622.837370, 5607.073539,
-+    5591.397849, 5575.809565, 5560.307956, 5544.892301, 5529.561889, 5514.316013,
-+    5499.153976, 5484.075090, 5469.078671, 5454.164044, 5439.330544, 5424.577509,
-+    5409.904286, 5395.310230, 5380.794702, 5366.357069, 5351.996706, 5337.712995,
-+    5323.505324, 5309.373086, 5295.315682, 5281.332521, 5267.423015, 5253.586583,
-+    5239.822652, 5226.130653, 5212.510024, 5198.960208, 5185.480654, 5172.070818,
-+    5158.730159, 5145.458144, 5132.254244, 5119.117937, 5106.048704, 5093.046033,
-+    5080.109418, 5067.238355, 5054.432348, 5041.690906, 5029.013540, 5016.399768,
-+    5003.849115, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6265.060241,
++    5892.351275, 5561.497326, 5265.822785, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
@@ -495,26 +516,32 @@ index 0000000..6d3b018
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5012.531328, 5025.125628, 5037.783375, 5050.505051, 5063.291139,
-+    5076.142132, 5089.058524, 5102.040816, 5115.089514, 5128.205128, 5141.388175,
-+    5154.639175, 5167.958656, 5181.347150, 5194.805195, 5208.333333, 5221.932115,
-+    5235.602094, 5249.343832, 5263.157895, 5277.044855, 5291.005291, 5305.039788,
-+    5319.148936, 5333.333333, 5347.593583, 5361.930295, 5376.344086, 5390.835580,
-+    5405.405405, 5420.054201, 5434.782609, 5449.591281, 5464.480874, 5479.452055,
-+    5494.505495, 5509.641873, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5059.801338, 5167.969357, 5280.863218, 5398.799546, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
-+    5522.123894, 5537.413034, 5552.787072, 5568.246716, 5583.792684, 5599.425700,
-+    5615.146498, 5630.955819, 5646.854413, 5662.843038, 5678.922461, 5695.093458,
-+    5711.356813, 5727.713321, 5744.163782, 5760.709010, 5777.349826, 5794.087060,
-+    5810.921553, 5827.854154, 5844.885725, 5862.017135, 5879.249265, 5896.583006,
-+    5914.019258, 5931.558935, 5949.202959, 5966.952264, 5984.807796, 6002.770509,
-+    6020.841374, 6039.021369, 6057.311486, 6075.712728, 6094.226111, 6112.852665,
-+    6131.593428, 6150.449456, 6169.421814, 6188.511584, 6207.719857, 6227.047741,
-+    6246.496356, 6266.066838, 6285.760335, 6305.578011, 6325.521045, 6345.590628,
-+    6365.787970, 6386.114295, 6406.570842, 6427.158866, 6447.879640, 6468.734450,
-+    6489.724603, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5627.959414, 5823.272091, 6032.628399, 6257.599499, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
@@ -525,40 +552,49 @@ index 0000000..6d3b018
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6478.943434, 6458.022851, 6437.236940, 6416.584403, 6396.063961,
-+    6375.674350, 6355.414324, 6335.282651, 6315.278115, 6295.399516, 6275.645667,
-+    6256.015399, 6236.507556, 6217.120995, 6197.854589, 6178.707224, 6159.677801,
-+    6140.765234, 6121.968448, 6103.286385, 6084.717997, 6066.262249, 6047.918120,
-+    6029.684601, 6011.560694, 5993.545413, 5975.637784, 5957.836847, 5940.141650,
-+    5922.551253, 5905.064729, 5887.681159, 5870.399639, 5853.219271, 5836.139169,
-+    5819.158460, 5802.276278, 5785.491767, 5768.804083, 5752.212389, 5735.715861,
-+    5719.313682, 5703.005045, 5686.789151, 5670.665213, 5654.632449, 5638.690089,
-+    5622.837370, 5607.073539, 5591.397849, 5575.809565, 5560.307956, 5544.892301,
-+    5529.561889, 5514.316013, 5499.153976, 5484.075090, 5469.078671, 5454.164044,
-+    5439.330544, 5454.164044, 5469.078671, 5484.075090, 5499.153976, 5514.316013,
-+    5529.561889, 5544.892301, 5560.307956, 5575.809565, 5591.397849, 5607.073539,
-+    5622.837370, 5638.690089, 5654.632449, 5670.665213, 5686.789151, 5703.005045,
-+    5719.313682, 5735.715861, 5752.212389, 5768.804083, 5785.491767, 5802.276278,
-+    5819.158460, 5836.139169, 5853.219271, 5870.399639, 5887.681159, 5905.064729,
-+    5922.551253, 5940.141650, 5957.836847, 5975.637784, 5993.545413, 6011.560694,
-+    6029.684601, 6047.918120, 6066.262249, 6084.717997, 6103.286385, 6084.717997,
-+    6066.262249, 6047.918120, 6029.684601, 6011.560694, 5993.545413, 5975.637784,
-+    5957.836847, 5940.141650, 5922.551253, 5905.064729, 5887.681159, 5870.399639,
-+    5853.219271, 5836.139169, 5819.158460, 5802.276278, 5785.491767, 5768.804083,
-+    5752.212389, 5735.715861, 5719.313682, 5703.005045, 5686.789151, 5670.665213,
-+    5654.632449, 5638.690089, 5622.837370, 5607.073539, 5591.397849, 5575.809565,
-+    5560.307956, 5544.892301, 5529.561889, 5514.316013, 5499.153976, 5484.075090,
-+    5469.078671, 5454.164044, 5439.330544, 5424.577509, 5409.904286, 5395.310230,
-+    5380.794702, 5366.357069, 5351.996706, 5337.712995, 5323.505324, 5309.373086,
-+    5295.315682, 5281.332521, 5654.632449, 6084.717997, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6265.060241, 5892.351275, 5561.497326, 5265.822785, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5148.514851, 5430.809399, 5745.856354, 6099.706745, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6265.060241,
++    5892.351275, 5561.497326, 5265.822785, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5306.122449, 5652.173913, 6046.511628, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +};
 diff --git a/plugins/color/gsd-ambient-policy.c b/plugins/color/gsd-ambient-policy.c
 new file mode 100644
-index 0000000..cf7a5a3
+index 0000000..45b1085
 --- /dev/null
 +++ b/plugins/color/gsd-ambient-policy.c
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,178 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include "gsd-ambient-policy.h"
 +#include <math.h>
@@ -567,10 +603,11 @@ index 0000000..cf7a5a3
 +/* Starting constants. The adaptation follows half of the ambient shift in
 + * mired, never warmer than 5000 K and never cooler than the native white,
 + * fades out between 50 and 5 lux where the screen dominates the room and the
-+ * sensor's colour reading gets noisy, ignores anything shorter than about
-+ * half of a 10 s window, and moves at 1 mired/s (a full 6500 to 5000 K swing
-+ * takes about 45 s). Replace them with the measured macOS model when it is
-+ * available; the test vectors pin the behaviour. */
++ * sensor's colour reading gets noisy, and ignores anything shorter than about
++ * half of a 10 s window. Each change ramps over 2 s whatever its size, which
++ * is what macOS does for True Tone and Night Shift on the M4 Pro. The amount
++ * of adaptation and its lux limits are not measured yet; the test vectors
++ * pin the behaviour. */
 +const GsdAmbientModel gsd_ambient_model_default = {
 +        .neutral_k = 6500,
 +        .warmest_k = 5000,
@@ -582,8 +619,7 @@ index 0000000..cf7a5a3
 +        .max_valid_k = 20000,
 +        .window_s = 10,
 +        .deadband_mired = 2.5,
-+        .ramp_mired_per_s = 1.0,
-+        .release_mired_per_s = 25.0,
++        .ramp_s = 2.0,
 +};
 +
 +double
@@ -624,6 +660,9 @@ index 0000000..cf7a5a3
 +        policy->have_target = FALSE;
 +        policy->held_mired = gsd_ambient_mired (policy->model.neutral_k);
 +        policy->current_mired = policy->held_mired;
++        policy->ramp_from = policy->held_mired;
++        policy->ramp_to = policy->held_mired;
++        policy->ramp_elapsed = policy->model.ramp_s;
 +}
 +
 +void
@@ -651,21 +690,18 @@ index 0000000..cf7a5a3
 +        return n % 2 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
 +}
 +
-+double
-+gsd_ambient_policy_tick (GsdAmbientPolicy *policy, gboolean releasing,
-+                         gboolean valid, double lux, double kelvin)
++void
++gsd_ambient_policy_sample (GsdAmbientPolicy *policy, gboolean releasing,
++                           gboolean valid, double lux, double kelvin)
 +{
 +        const GsdAmbientModel *model = &policy->model;
 +        double neutral = gsd_ambient_mired (model->neutral_k);
-+        double target, step, delta;
 +
 +        if (releasing) {
 +                policy->n_samples = 0;
 +                policy->next_sample = 0;
 +                policy->have_target = FALSE;
 +                policy->held_mired = neutral;
-+                target = neutral;
-+                step = model->release_mired_per_s * GSD_AMBIENT_TICK_S;
 +        } else {
 +                double filtered;
 +                gboolean at_bound;
@@ -685,13 +721,45 @@ index 0000000..cf7a5a3
 +                        policy->held_mired = filtered;
 +                        policy->have_target = TRUE;
 +                }
-+                target = policy->held_mired;
-+                step = model->ramp_mired_per_s * GSD_AMBIENT_TICK_S;
 +        }
 +
-+        delta = target - policy->current_mired;
-+        policy->current_mired += CLAMP (delta, -step, step);
++        /* A new target starts a fresh ramp from wherever the screen is now. */
++        if (policy->held_mired != policy->ramp_to) {
++                policy->ramp_from = policy->current_mired;
++                policy->ramp_to = policy->held_mired;
++                policy->ramp_elapsed = 0;
++        }
++}
++
++double
++gsd_ambient_policy_advance (GsdAmbientPolicy *policy, double seconds)
++{
++        double ramp_s = policy->model.ramp_s;
++
++        /* Linear in mired, where equal steps look about equally large. */
++        if (policy->ramp_elapsed < ramp_s) {
++                policy->ramp_elapsed += seconds;
++                /* Finish exactly, whatever rounding the steps collected. */
++                if (policy->ramp_elapsed > ramp_s - 1e-9)
++                        policy->ramp_elapsed = ramp_s;
++                policy->current_mired = policy->ramp_from +
++                        (policy->ramp_to - policy->ramp_from) * policy->ramp_elapsed / ramp_s;
++        }
 +        return gsd_ambient_policy_get_kelvin (policy);
++}
++
++double
++gsd_ambient_policy_tick (GsdAmbientPolicy *policy, gboolean releasing,
++                         gboolean valid, double lux, double kelvin)
++{
++        gsd_ambient_policy_sample (policy, releasing, valid, lux, kelvin);
++        return gsd_ambient_policy_advance (policy, GSD_AMBIENT_TICK_S);
++}
++
++gboolean
++gsd_ambient_policy_is_settled (const GsdAmbientPolicy *policy)
++{
++        return policy->ramp_elapsed >= policy->model.ramp_s;
 +}
 +
 +double
@@ -707,10 +775,10 @@ index 0000000..cf7a5a3
 +}
 diff --git a/plugins/color/gsd-ambient-policy.h b/plugins/color/gsd-ambient-policy.h
 new file mode 100644
-index 0000000..7c8e8a5
+index 0000000..00f3263
 --- /dev/null
 +++ b/plugins/color/gsd-ambient-policy.h
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,86 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + *
 + * Ambient white point policy: maps the ambient light's correlated colour
@@ -735,13 +803,13 @@ index 0000000..7c8e8a5
 +        double max_valid_k;
 +        double window_s;           /* median filter window */
 +        double deadband_mired;     /* ignore target changes smaller than this */
-+        double ramp_mired_per_s;   /* following ambient changes */
-+        double release_mired_per_s;/* returning to neutral when switched off */
++        double ramp_s;             /* every change ramps over this long */
 +} GsdAmbientModel;
 +
 +extern const GsdAmbientModel gsd_ambient_model_default;
 +
-+#define GSD_AMBIENT_TICK_S 0.5
++#define GSD_AMBIENT_TICK_S 0.5   /* sensor sampling interval */
++#define GSD_AMBIENT_STEP_S 0.05  /* ramp update interval */
 +#define GSD_AMBIENT_MAX_SAMPLES 64
 +
 +typedef struct {
@@ -752,6 +820,9 @@ index 0000000..7c8e8a5
 +        guint window;
 +        double held_mired;
 +        double current_mired;
++        double ramp_from;
++        double ramp_to;
++        double ramp_elapsed;
 +        gboolean have_target;
 +} GsdAmbientPolicy;
 +
@@ -771,10 +842,18 @@ index 0000000..7c8e8a5
 +void gsd_ambient_policy_reset (GsdAmbientPolicy *policy);
 +/* Start from an explicit temperature, e.g. the one already on screen. */
 +void gsd_ambient_policy_set_current (GsdAmbientPolicy *policy, double kelvin);
-+/* Advance by one tick of GSD_AMBIENT_TICK_S. When releasing, the policy
-+ * returns quickly to neutral and ignores the sensor. Returns kelvin. */
++/* Takes one sensor sample (every GSD_AMBIENT_TICK_S) and starts a ramp to
++ * a new target when it moves. When releasing, the target is neutral and the
++ * sensor is ignored. */
++void gsd_ambient_policy_sample (GsdAmbientPolicy *policy, gboolean releasing,
++                                gboolean valid, double lux, double kelvin);
++/* Moves along the current ramp by @seconds. Returns kelvin. */
++double gsd_ambient_policy_advance (GsdAmbientPolicy *policy, double seconds);
++/* A sample followed by a whole sampling interval of ramp. Returns kelvin. */
 +double gsd_ambient_policy_tick (GsdAmbientPolicy *policy, gboolean releasing,
 +                                gboolean valid, double lux, double kelvin);
++/* No ramp in progress. */
++gboolean gsd_ambient_policy_is_settled (const GsdAmbientPolicy *policy);
 +double gsd_ambient_policy_get_kelvin (const GsdAmbientPolicy *policy);
 +gboolean gsd_ambient_policy_is_neutral (const GsdAmbientPolicy *policy);
 +
@@ -788,10 +867,10 @@ index 0000000..7c8e8a5
 +}
 diff --git a/plugins/color/gsd-ambient-white-point.c b/plugins/color/gsd-ambient-white-point.c
 new file mode 100644
-index 0000000..dc859c4
+index 0000000..abee986
 --- /dev/null
 +++ b/plugins/color/gsd-ambient-white-point.c
-@@ -0,0 +1,397 @@
+@@ -0,0 +1,422 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + *
 + * Opt-in ambient white point. The ambient light's colour temperature and
@@ -825,7 +904,9 @@ index 0000000..dc859c4
 +        gboolean supported;
 +
 +        guint timer;
++        guint ramp_timer;
 +        guint tick_ms;
++        guint step_ms;
 +        gboolean running;
 +        gboolean paused;
 +};
@@ -895,24 +976,43 @@ index 0000000..dc859c4
 +}
 +
 +static gboolean
++ramp_step (gpointer data)
++{
++        GsdAmbientWhitePoint *self = data;
++        guint before = gsd_ambient_white_point_get_temperature (self);
++
++        gsd_ambient_policy_advance (&self->policy, GSD_AMBIENT_STEP_S);
++        if (gsd_ambient_white_point_get_temperature (self) != before)
++                g_signal_emit (self, changed_signal, 0);
++        if (!gsd_ambient_policy_is_settled (&self->policy))
++                return G_SOURCE_CONTINUE;
++        self->ramp_timer = 0;
++        return G_SOURCE_REMOVE;
++}
++
++/* Samples the sensor; a new target starts a short ramp at a finer step. Once
++ * switched off and back at neutral, it stops and releases the sensor. */
++static gboolean
 +tick (gpointer data)
 +{
 +        GsdAmbientWhitePoint *self = data;
 +        gboolean want = wanted (self);
-+        guint before = gsd_ambient_white_point_get_temperature (self);
 +        double lux = 0, kelvin = 0;
 +        gboolean valid = want && read_sensor (self, &lux, &kelvin);
 +
-+        gsd_ambient_policy_tick (&self->policy, !want, valid, lux, kelvin);
-+        if (!want && gsd_ambient_policy_is_neutral (&self->policy)) {
++        gsd_ambient_policy_sample (&self->policy, !want, valid, lux, kelvin);
++        if (!gsd_ambient_policy_is_settled (&self->policy) && self->ramp_timer == 0) {
++                self->ramp_timer = g_timeout_add (self->step_ms, ramp_step, self);
++                g_source_set_name_by_id (self->ramp_timer, "[gnome-settings-daemon] ambient white point ramp");
++        }
++        if (!want && gsd_ambient_policy_is_settled (&self->policy) &&
++            gsd_ambient_policy_is_neutral (&self->policy)) {
 +                gsd_ambient_policy_reset (&self->policy);
 +                claim (self, FALSE);
 +                self->timer = 0;
 +                g_signal_emit (self, changed_signal, 0);
 +                return G_SOURCE_REMOVE;
 +        }
-+        if (gsd_ambient_white_point_get_temperature (self) != before)
-+                g_signal_emit (self, changed_signal, 0);
 +        return G_SOURCE_CONTINUE;
 +}
 +
@@ -1081,6 +1181,7 @@ index 0000000..dc859c4
 +        g_clear_handle_id (&self->sensor_watch, g_bus_unwatch_name);
 +        g_clear_handle_id (&self->display_watch, g_bus_unwatch_name);
 +        g_clear_handle_id (&self->timer, g_source_remove);
++        g_clear_handle_id (&self->ramp_timer, g_source_remove);
 +        claim (self, FALSE);
 +        g_cancellable_cancel (self->sensor_cancellable);
 +        g_clear_object (&self->sensor_cancellable);
@@ -1104,6 +1205,7 @@ index 0000000..dc859c4
 +                return;
 +        self->paused = TRUE;
 +        g_clear_handle_id (&self->timer, g_source_remove);
++        g_clear_handle_id (&self->ramp_timer, g_source_remove);
 +        gsd_ambient_policy_reset (&self->policy);
 +        claim (self, FALSE);
 +        g_signal_emit (self, changed_signal, 0);
@@ -1173,6 +1275,7 @@ index 0000000..dc859c4
 +{
 +        gsd_ambient_policy_init (&self->policy, &gsd_ambient_model_default);
 +        self->tick_ms = (guint) (GSD_AMBIENT_TICK_S * 1000);
++        self->step_ms = (guint) (GSD_AMBIENT_STEP_S * 1000);
 +        self->settings = g_settings_new ("org.gnome.settings-daemon.plugins.color");
 +        g_signal_connect (self->settings, "changed::ambient-white-point-enabled",
 +                          G_CALLBACK (setting_changed), self);
@@ -1182,6 +1285,7 @@ index 0000000..dc859c4
 +gsd_ambient_white_point_set_tick_interval (GsdAmbientWhitePoint *self, guint ms)
 +{
 +        self->tick_ms = ms;
++        self->step_ms = MAX (1, ms / 10);
 +}
 +
 +GsdAmbientWhitePoint *

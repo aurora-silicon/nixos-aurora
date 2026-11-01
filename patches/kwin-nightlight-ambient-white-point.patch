@@ -40,10 +40,10 @@ index 41a5047ea1..cf233b20b5 100644
 +endif()
 diff --git a/src/plugins/nightlight/ambientwhitepoint.cpp b/src/plugins/nightlight/ambientwhitepoint.cpp
 new file mode 100644
-index 0000000000..122e8b71b3
+index 0000000000..2cecf09afb
 --- /dev/null
 +++ b/src/plugins/nightlight/ambientwhitepoint.cpp
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,137 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -66,10 +66,10 @@ index 0000000000..122e8b71b3
 +// Starting constants: follow half of the ambient shift in mired, never warmer
 +// than 5000 K and never cooler than the native white, fade out between 50 and
 +// 5 lux where the screen dominates the room and the colour reading gets noisy,
-+// ignore anything shorter than about half of a 10 s window, and move at
-+// 1 mired/s (a full 6500 to 5000 K swing takes about 45 s). Replace them with
-+// the measured macOS model when it is available; the test vectors pin the
-+// behaviour.
++// and ignore anything shorter than about half of a 10 s window. Each change
++// ramps over 2 s whatever its size, which is what macOS does for True Tone
++// and Night Shift on the M4 Pro. The amount of adaptation and its lux limits
++// are not measured yet; the test vectors pin the behaviour.
 +AmbientPolicy::AmbientPolicy(const AmbientModel &model)
 +    : m_model(model)
 +    , m_window(std::clamp(int(std::round(model.windowSeconds / tickSeconds)), 1, maxSamples))
@@ -100,6 +100,9 @@ index 0000000000..122e8b71b3
 +    m_haveTarget = false;
 +    m_heldMired = mired(m_model.neutralK);
 +    m_currentMired = m_heldMired;
++    m_rampFrom = m_heldMired;
++    m_rampTo = m_heldMired;
++    m_rampElapsed = m_model.rampSeconds;
 +}
 +
 +double AmbientPolicy::median() const
@@ -110,19 +113,15 @@ index 0000000000..122e8b71b3
 +    return n % 2 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
 +}
 +
-+double AmbientPolicy::tick(bool releasing, bool valid, double lux, double colorTemperature)
++void AmbientPolicy::sample(bool releasing, bool valid, double lux, double colorTemperature)
 +{
 +    const double neutral = mired(m_model.neutralK);
-+    double target;
-+    double step;
 +
 +    if (releasing) {
 +        m_sampleCount = 0;
 +        m_nextSample = 0;
 +        m_haveTarget = false;
 +        m_heldMired = neutral;
-+        target = neutral;
-+        step = m_model.releaseMiredPerSecond * tickSeconds;
 +    } else {
 +        m_samples[m_nextSample] = targetMired(m_model, valid, lux, colorTemperature);
 +        m_nextSample = (m_nextSample + 1) % m_window;
@@ -136,12 +135,39 @@ index 0000000000..122e8b71b3
 +            m_heldMired = filtered;
 +            m_haveTarget = true;
 +        }
-+        target = m_heldMired;
-+        step = m_model.rampMiredPerSecond * tickSeconds;
 +    }
 +
-+    m_currentMired += std::clamp(target - m_currentMired, -step, step);
++    // A new target starts a fresh ramp from wherever the screen is now.
++    if (m_heldMired != m_rampTo) {
++        m_rampFrom = m_currentMired;
++        m_rampTo = m_heldMired;
++        m_rampElapsed = 0;
++    }
++}
++
++double AmbientPolicy::advance(double seconds)
++{
++    // Linear in mired, where equal steps look about equally large.
++    if (m_rampElapsed < m_model.rampSeconds) {
++        m_rampElapsed += seconds;
++        // Finish exactly, whatever rounding the steps collected.
++        if (m_rampElapsed > m_model.rampSeconds - 1e-9) {
++            m_rampElapsed = m_model.rampSeconds;
++        }
++        m_currentMired = m_rampFrom + (m_rampTo - m_rampFrom) * m_rampElapsed / m_model.rampSeconds;
++    }
 +    return kelvin();
++}
++
++double AmbientPolicy::tick(bool releasing, bool valid, double lux, double colorTemperature)
++{
++    sample(releasing, valid, lux, colorTemperature);
++    return advance(tickSeconds);
++}
++
++bool AmbientPolicy::isSettled() const
++{
++    return m_rampElapsed >= m_model.rampSeconds;
 +}
 +
 +double AmbientPolicy::kelvin() const
@@ -157,10 +183,10 @@ index 0000000000..122e8b71b3
 +} // namespace KWin
 diff --git a/src/plugins/nightlight/ambientwhitepoint.h b/src/plugins/nightlight/ambientwhitepoint.h
 new file mode 100644
-index 0000000000..45a12a1d85
+index 0000000000..6bf8d42975
 --- /dev/null
 +++ b/src/plugins/nightlight/ambientwhitepoint.h
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,104 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -194,14 +220,14 @@ index 0000000000..45a12a1d85
 +    double maxValidK = 20000;
 +    double windowSeconds = 10; // median filter window
 +    double deadbandMired = 2.5; // ignore target changes smaller than this
-+    double rampMiredPerSecond = 1.0; // following ambient changes
-+    double releaseMiredPerSecond = 25.0; // returning to neutral when switched off
++    double rampSeconds = 2.0; // every change ramps over this long
 +};
 +
 +class AmbientPolicy
 +{
 +public:
-+    static constexpr double tickSeconds = 0.5;
++    static constexpr double tickSeconds = 0.5; // sensor sampling interval
++    static constexpr double stepSeconds = 0.05; // ramp update interval
 +    static constexpr int maxSamples = 64;
 +
 +    explicit AmbientPolicy(const AmbientModel &model = AmbientModel());
@@ -218,13 +244,25 @@ index 0000000000..45a12a1d85
 +    void reset();
 +
 +    /**
-+     * Advances by one tick. When releasing, returns quickly to neutral and
-+     * ignores the sensor. Returns the white point in kelvin.
++     * Takes one sensor sample (every tickSeconds) and starts a ramp to a new
++     * target when it moves. When releasing, the target is neutral and the
++     * sensor is ignored.
++     */
++    void sample(bool releasing, bool valid, double lux, double colorTemperature);
++
++    /**
++     * Moves along the current ramp. Returns the white point in kelvin.
++     */
++    double advance(double seconds);
++
++    /**
++     * A sample followed by a whole sampling interval of ramp.
 +     */
 +    double tick(bool releasing, bool valid, double lux, double colorTemperature);
 +
 +    double kelvin() const;
 +    bool isNeutral() const;
++    bool isSettled() const;
 +
 +private:
 +    double median() const;
@@ -236,6 +274,9 @@ index 0000000000..45a12a1d85
 +    int m_window = 1;
 +    double m_heldMired = 0;
 +    double m_currentMired = 0;
++    double m_rampFrom = 0;
++    double m_rampTo = 0;
++    double m_rampElapsed = 0;
 +    bool m_haveTarget = false;
 +};
 +
@@ -264,7 +305,7 @@ index 0000000000..6594e18e41
 +ecm_mark_as_test(nightlightAmbientPolicyTest)
 diff --git a/src/plugins/nightlight/autotests/ambient-test-vectors.h b/src/plugins/nightlight/autotests/ambient-test-vectors.h
 new file mode 100644
-index 0000000000..6d3b018313
+index 0000000000..e1dc4f3c1d
 --- /dev/null
 +++ b/src/plugins/nightlight/autotests/ambient-test-vectors.h
 @@ -0,0 +1,131 @@
@@ -316,23 +357,8 @@ index 0000000000..6d3b018313
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6478.943434,
-+    6458.022851, 6437.236940, 6416.584403, 6396.063961, 6375.674350, 6355.414324,
-+    6335.282651, 6315.278115, 6295.399516, 6275.645667, 6256.015399, 6236.507556,
-+    6217.120995, 6197.854589, 6178.707224, 6159.677801, 6140.765234, 6121.968448,
-+    6103.286385, 6084.717997, 6066.262249, 6047.918120, 6029.684601, 6011.560694,
-+    5993.545413, 5975.637784, 5957.836847, 5940.141650, 5922.551253, 5905.064729,
-+    5887.681159, 5870.399639, 5853.219271, 5836.139169, 5819.158460, 5802.276278,
-+    5785.491767, 5768.804083, 5752.212389, 5735.715861, 5719.313682, 5703.005045,
-+    5686.789151, 5670.665213, 5654.632449, 5638.690089, 5622.837370, 5607.073539,
-+    5591.397849, 5575.809565, 5560.307956, 5544.892301, 5529.561889, 5514.316013,
-+    5499.153976, 5484.075090, 5469.078671, 5454.164044, 5439.330544, 5424.577509,
-+    5409.904286, 5395.310230, 5380.794702, 5366.357069, 5351.996706, 5337.712995,
-+    5323.505324, 5309.373086, 5295.315682, 5281.332521, 5267.423015, 5253.586583,
-+    5239.822652, 5226.130653, 5212.510024, 5198.960208, 5185.480654, 5172.070818,
-+    5158.730159, 5145.458144, 5132.254244, 5119.117937, 5106.048704, 5093.046033,
-+    5080.109418, 5067.238355, 5054.432348, 5041.690906, 5029.013540, 5016.399768,
-+    5003.849115, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6265.060241,
++    5892.351275, 5561.497326, 5265.822785, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
@@ -341,26 +367,32 @@ index 0000000000..6d3b018313
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
 +    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
-+    5000.000000, 5012.531328, 5025.125628, 5037.783375, 5050.505051, 5063.291139,
-+    5076.142132, 5089.058524, 5102.040816, 5115.089514, 5128.205128, 5141.388175,
-+    5154.639175, 5167.958656, 5181.347150, 5194.805195, 5208.333333, 5221.932115,
-+    5235.602094, 5249.343832, 5263.157895, 5277.044855, 5291.005291, 5305.039788,
-+    5319.148936, 5333.333333, 5347.593583, 5361.930295, 5376.344086, 5390.835580,
-+    5405.405405, 5420.054201, 5434.782609, 5449.591281, 5464.480874, 5479.452055,
-+    5494.505495, 5509.641873, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5059.801338, 5167.969357, 5280.863218, 5398.799546, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
 +    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
-+    5522.123894, 5537.413034, 5552.787072, 5568.246716, 5583.792684, 5599.425700,
-+    5615.146498, 5630.955819, 5646.854413, 5662.843038, 5678.922461, 5695.093458,
-+    5711.356813, 5727.713321, 5744.163782, 5760.709010, 5777.349826, 5794.087060,
-+    5810.921553, 5827.854154, 5844.885725, 5862.017135, 5879.249265, 5896.583006,
-+    5914.019258, 5931.558935, 5949.202959, 5966.952264, 5984.807796, 6002.770509,
-+    6020.841374, 6039.021369, 6057.311486, 6075.712728, 6094.226111, 6112.852665,
-+    6131.593428, 6150.449456, 6169.421814, 6188.511584, 6207.719857, 6227.047741,
-+    6246.496356, 6266.066838, 6285.760335, 6305.578011, 6325.521045, 6345.590628,
-+    6365.787970, 6386.114295, 6406.570842, 6427.158866, 6447.879640, 6468.734450,
-+    6489.724603, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5627.959414, 5823.272091, 6032.628399, 6257.599499, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
@@ -371,40 +403,49 @@ index 0000000000..6d3b018313
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
-+    6500.000000, 6478.943434, 6458.022851, 6437.236940, 6416.584403, 6396.063961,
-+    6375.674350, 6355.414324, 6335.282651, 6315.278115, 6295.399516, 6275.645667,
-+    6256.015399, 6236.507556, 6217.120995, 6197.854589, 6178.707224, 6159.677801,
-+    6140.765234, 6121.968448, 6103.286385, 6084.717997, 6066.262249, 6047.918120,
-+    6029.684601, 6011.560694, 5993.545413, 5975.637784, 5957.836847, 5940.141650,
-+    5922.551253, 5905.064729, 5887.681159, 5870.399639, 5853.219271, 5836.139169,
-+    5819.158460, 5802.276278, 5785.491767, 5768.804083, 5752.212389, 5735.715861,
-+    5719.313682, 5703.005045, 5686.789151, 5670.665213, 5654.632449, 5638.690089,
-+    5622.837370, 5607.073539, 5591.397849, 5575.809565, 5560.307956, 5544.892301,
-+    5529.561889, 5514.316013, 5499.153976, 5484.075090, 5469.078671, 5454.164044,
-+    5439.330544, 5454.164044, 5469.078671, 5484.075090, 5499.153976, 5514.316013,
-+    5529.561889, 5544.892301, 5560.307956, 5575.809565, 5591.397849, 5607.073539,
-+    5622.837370, 5638.690089, 5654.632449, 5670.665213, 5686.789151, 5703.005045,
-+    5719.313682, 5735.715861, 5752.212389, 5768.804083, 5785.491767, 5802.276278,
-+    5819.158460, 5836.139169, 5853.219271, 5870.399639, 5887.681159, 5905.064729,
-+    5922.551253, 5940.141650, 5957.836847, 5975.637784, 5993.545413, 6011.560694,
-+    6029.684601, 6047.918120, 6066.262249, 6084.717997, 6103.286385, 6084.717997,
-+    6066.262249, 6047.918120, 6029.684601, 6011.560694, 5993.545413, 5975.637784,
-+    5957.836847, 5940.141650, 5922.551253, 5905.064729, 5887.681159, 5870.399639,
-+    5853.219271, 5836.139169, 5819.158460, 5802.276278, 5785.491767, 5768.804083,
-+    5752.212389, 5735.715861, 5719.313682, 5703.005045, 5686.789151, 5670.665213,
-+    5654.632449, 5638.690089, 5622.837370, 5607.073539, 5591.397849, 5575.809565,
-+    5560.307956, 5544.892301, 5529.561889, 5514.316013, 5499.153976, 5484.075090,
-+    5469.078671, 5454.164044, 5439.330544, 5424.577509, 5409.904286, 5395.310230,
-+    5380.794702, 5366.357069, 5351.996706, 5337.712995, 5323.505324, 5309.373086,
-+    5295.315682, 5281.332521, 5654.632449, 6084.717997, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6265.060241, 5892.351275, 5561.497326, 5265.822785, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5148.514851, 5430.809399, 5745.856354, 6099.706745, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6265.060241,
++    5892.351275, 5561.497326, 5265.822785, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5306.122449, 5652.173913, 6046.511628, 6500.000000,
 +    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
 +};
 diff --git a/src/plugins/nightlight/autotests/ambientpolicytest.cpp b/src/plugins/nightlight/autotests/ambientpolicytest.cpp
 new file mode 100644
-index 0000000000..daf0ed425e
+index 0000000000..c87c83a39f
 --- /dev/null
 +++ b/src/plugins/nightlight/autotests/ambientpolicytest.cpp
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,108 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -428,6 +469,7 @@ index 0000000000..daf0ed425e
 +    void targets();
 +    void trajectory();
 +    void limits();
++    void ramp();
 +    void compose();
 +};
 +
@@ -458,17 +500,49 @@ index 0000000000..daf0ed425e
 +void AmbientPolicyTest::limits()
 +{
 +    const AmbientModel model;
++    const double swing = 1e6 / model.warmestK - 1e6 / model.coolestK;
 +    AmbientPolicy policy(model);
 +    double previous = 6500;
 +    for (int i = 0; i < 2000; i++) {
 +        const double lux = (i * 7919) % 3000;
 +        const double kelvin = 1000 + (i * 104729) % 15000;
-+        const double out = policy.tick(false, true, lux, kelvin);
-+        QVERIFY(out >= model.warmestK - 1e-6);
-+        QVERIFY(out <= model.coolestK + 1e-6);
-+        QVERIFY(std::abs(1e6 / out - 1e6 / previous) <= model.rampMiredPerSecond * AmbientPolicy::tickSeconds + 1e-9);
-+        previous = out;
++        policy.sample(false, true, lux, kelvin);
++        for (int step = 0; step < 10; step++) {
++            const double out = policy.advance(AmbientPolicy::stepSeconds);
++            QVERIFY(out >= model.warmestK - 1e-6);
++            QVERIFY(out <= model.coolestK + 1e-6);
++            QVERIFY(std::abs(1e6 / out - 1e6 / previous) <= swing * AmbientPolicy::stepSeconds / model.rampSeconds + 1e-9);
++            previous = out;
++        }
 +    }
++}
++
++void AmbientPolicyTest::ramp()
++{
++    const AmbientModel model;
++    const int expectedSteps = int(std::round(model.rampSeconds / AmbientPolicy::stepSeconds));
++    AmbientPolicy policy(model);
++
++    // A change ramps over exactly rampSeconds, linear in mired, whatever its size.
++    policy.sample(false, true, 300, 3000);
++    QVERIFY(!policy.isSettled());
++    int steps = 0;
++    while (!policy.isSettled()) {
++        const double out = policy.advance(AmbientPolicy::stepSeconds);
++        steps++;
++        const double expected = 1e6 / 6500 + (1e6 / 5000 - 1e6 / 6500) * std::min(steps * AmbientPolicy::stepSeconds / model.rampSeconds, 1.0);
++        QVERIFY(std::abs(1e6 / out - expected) < 1e-6);
++    }
++    QCOMPARE(steps, expectedSteps);
++    QVERIFY(std::abs(policy.kelvin() - 5000) < 1e-6);
++
++    // Switching off returns to neutral in the same time.
++    policy.sample(true, true, 300, 3000);
++    for (steps = 0; !policy.isSettled(); steps++) {
++        policy.advance(AmbientPolicy::stepSeconds);
++    }
++    QCOMPARE(steps, expectedSteps);
++    QVERIFY(policy.isNeutral());
 +}
 +
 +void AmbientPolicyTest::compose()
@@ -570,7 +644,7 @@ index 40da7d4270..5779f58f07 100644
  public Q_SLOTS:
      /**
 diff --git a/src/plugins/nightlight/nightlightmanager.cpp b/src/plugins/nightlight/nightlightmanager.cpp
-index d8616c92a3..da5db9c9a0 100644
+index d8616c92a3..844a860182 100644
 --- a/src/plugins/nightlight/nightlightmanager.cpp
 +++ b/src/plugins/nightlight/nightlightmanager.cpp
 @@ -17,6 +17,8 @@
@@ -591,12 +665,14 @@ index d8616c92a3..da5db9c9a0 100644
  namespace KWin
  {
  
-@@ -65,6 +69,14 @@ NightLightManager::NightLightManager()
+@@ -65,6 +69,16 @@ NightLightManager::NightLightManager()
          QDBusConnection::sessionBus().asyncCall(message);
      });
  
 +    m_ambientTimer.setInterval(int(AmbientPolicy::tickSeconds * 1000));
 +    connect(&m_ambientTimer, &QTimer::timeout, this, &NightLightManager::ambientTick);
++    m_ambientRampTimer.setInterval(int(AmbientPolicy::stepSeconds * 1000));
++    connect(&m_ambientRampTimer, &QTimer::timeout, this, &NightLightManager::ambientStep);
 +    connect(this, &NightLightManager::inhibitedChanged, this, &NightLightManager::updateAmbient);
 +    if (LightSensor *sensor = workspace() ? workspace()->lightSensor() : nullptr) {
 +        connect(sensor, &LightSensor::availableChanged, this, &NightLightManager::updateAmbient);
@@ -606,19 +682,20 @@ index d8616c92a3..da5db9c9a0 100644
      m_configWatcher = KConfigWatcher::create(kwinApp()->config());
      connect(m_configWatcher.data(), &KConfigWatcher::configChanged, this, &NightLightManager::reconfigure);
  
-@@ -85,6 +97,11 @@ NightLightManager::NightLightManager()
+@@ -85,6 +99,12 @@ NightLightManager::NightLightManager()
              hardReset();
          } else {
              cancelAllTimers();
 +            // Not our screens while the session is inactive. Start again from
 +            // neutral when it comes back.
 +            m_ambientTimer.stop();
++            m_ambientRampTimer.stop();
 +            m_ambientPolicy.reset();
 +            updateAmbient();
          }
      });
      connect(kwinApp()->session(), &Session::awoke, this, &NightLightManager::hardReset);
-@@ -94,6 +111,9 @@ NightLightManager::NightLightManager()
+@@ -94,6 +114,9 @@ NightLightManager::NightLightManager()
  
  NightLightManager::~NightLightManager()
  {
@@ -628,7 +705,7 @@ index d8616c92a3..da5db9c9a0 100644
  }
  
  void NightLightManager::hardReset()
-@@ -106,8 +126,11 @@ void NightLightManager::hardReset()
+@@ -106,8 +129,11 @@ void NightLightManager::hardReset()
      if (isEnabled() && !isInhibited()) {
          setRunning(true);
          commitGammaRamps(currentTargetTemperature());
@@ -640,7 +717,7 @@ index d8616c92a3..da5db9c9a0 100644
  }
  
  void NightLightManager::reconfigure()
-@@ -115,6 +138,7 @@ void NightLightManager::reconfigure()
+@@ -115,6 +141,7 @@ void NightLightManager::reconfigure()
      cancelAllTimers();
      readConfig();
      resetAllTimers();
@@ -648,7 +725,7 @@ index d8616c92a3..da5db9c9a0 100644
  }
  
  void NightLightManager::toggle()
-@@ -229,6 +253,8 @@ void NightLightManager::readConfig()
+@@ -229,6 +256,8 @@ void NightLightManager::readConfig()
          m_darkLightScheduler.reset();
      }
  
@@ -657,7 +734,7 @@ index d8616c92a3..da5db9c9a0 100644
      m_dayTargetTemperature = std::clamp(settings->dayTemperature(), MIN_TEMPERATURE, DEFAULT_DAY_TEMPERATURE);
      m_nightTargetTemperature = std::clamp(settings->nightTemperature(), MIN_TEMPERATURE, DEFAULT_DAY_TEMPERATURE);
  }
-@@ -520,6 +546,20 @@ int NightLightManager::currentTargetTemperature() const
+@@ -520,6 +549,20 @@ int NightLightManager::currentTargetTemperature() const
  
  void NightLightManager::commitGammaRamps(int temperature)
  {
@@ -678,7 +755,7 @@ index d8616c92a3..da5db9c9a0 100644
      // TODO this list should ideally be filtered by workspace
      const QList<BackendOutput *> outputs = kwinApp()->outputBackend()->outputs();
      const QVector3D rgbFactors = sampleColorTemperature(temperature);
-@@ -527,7 +567,92 @@ void NightLightManager::commitGammaRamps(int temperature)
+@@ -527,7 +570,105 @@ void NightLightManager::commitGammaRamps(int temperature)
          output->setChannelFactors(rgbFactors);
      }
  
@@ -729,10 +806,23 @@ index d8616c92a3..da5db9c9a0 100644
 +    const auto kelvin = sensor ? sensor->colorTemperature() : std::nullopt;
 +    const bool valid = wanted && lux && kelvin;
 +
-+    m_ambientPolicy.tick(!wanted, valid, valid ? *lux : 0, valid ? *kelvin : 0);
-+    if (!wanted && m_ambientPolicy.isNeutral()) {
++    m_ambientPolicy.sample(!wanted, valid, valid ? *lux : 0, valid ? *kelvin : 0);
++    // A new target ramps at a finer step than the sampling.
++    if (!m_ambientPolicy.isSettled() && !m_ambientRampTimer.isActive()) {
++        m_ambientRampTimer.start();
++    }
++    if (!wanted && m_ambientPolicy.isSettled() && m_ambientPolicy.isNeutral()) {
 +        m_ambientPolicy.reset();
 +        m_ambientTimer.stop();
++        applyChannelFactors();
++    }
++}
++
++void NightLightManager::ambientStep()
++{
++    m_ambientPolicy.advance(AmbientPolicy::stepSeconds);
++    if (m_ambientPolicy.isSettled()) {
++        m_ambientRampTimer.stop();
 +    }
 +    applyChannelFactors();
 +}
@@ -773,7 +863,7 @@ index d8616c92a3..da5db9c9a0 100644
  
  void NightLightManager::setEnabled(bool enabled)
 diff --git a/src/plugins/nightlight/nightlightmanager.h b/src/plugins/nightlight/nightlightmanager.h
-index 0b347403cb..f7c5c4024b 100644
+index 0b347403cb..ef1538f2ee 100644
 --- a/src/plugins/nightlight/nightlightmanager.h
 +++ b/src/plugins/nightlight/nightlightmanager.h
 @@ -10,6 +10,7 @@
@@ -842,7 +932,7 @@ index 0b347403cb..f7c5c4024b 100644
  private:
      void readConfig();
      void hardReset();
-@@ -244,6 +282,11 @@ private:
+@@ -244,6 +282,12 @@ private:
      void updateTransitionTimings(const QDateTime &dateTime);
  
      void commitGammaRamps(int temperature);
@@ -851,10 +941,11 @@ index 0b347403cb..f7c5c4024b 100644
 +    bool ambientWanted() const;
 +    void updateAmbient();
 +    void ambientTick();
++    void ambientStep();
  
      void setEnabled(bool enabled);
      void setRunning(bool running);
-@@ -286,6 +329,13 @@ private:
+@@ -286,6 +330,14 @@ private:
      int m_nightTargetTemperature = DEFAULT_NIGHT_TEMPERATURE;
  
      int m_inhibitReferenceCount = 0;
@@ -864,6 +955,7 @@ index 0b347403cb..f7c5c4024b 100644
 +    bool m_ambientSensorHeld = false;
 +    AmbientPolicy m_ambientPolicy;
 +    QTimer m_ambientTimer;
++    QTimer m_ambientRampTimer;
 +    int m_appliedTemperature = DEFAULT_DAY_TEMPERATURE;
      KConfigWatcher::Ptr m_configWatcher;
  };

@@ -16,13 +16,13 @@ The display white point, as a colour temperature, follows half of the ambient li
 
 * It never goes warmer than 5000 K and never cooler than 6500 K, the panel's native white.
 * Below 50 lux the adaptation fades out, and at 5 lux or less it is off. In a dark room the screen is the main light and the sensor's colour reading gets noisy.
-* A 10 second median filter ignores short changes, such as a shadow or a phone screen near the sensor.
-* Changes move at 1 mired per second, so a full swing from 6500 K to 5000 K takes about 45 seconds. Turning it off returns to neutral in about 2 seconds.
+* A 10 second median filter ignores short changes, such as a shadow or a phone screen near the sensor, so a real change in the room shows up about 5 seconds later.
+* Every change, including turning it on or off, ramps smoothly over 2 seconds whatever its size. macOS does the same for True Tone and Night Shift on the M4 Pro.
 * Small changes under 2.5 mired are ignored so the screen doesn't wander.
 
 For example, at 250 lux under 5050 K light it settles near 5700 K, at 600 lux under 5400 K daylight near 5900 K, and under 2700 K or 4000 K lamps at the 5000 K limit.
 
-These are starting values. They will be replaced by measurements of macOS when those are done. The GNOME and KDE code share the same test vectors, so both desktops behave the same.
+The ramp time comes from a trace of macOS on the M4 Pro. How much it adapts and the lux limits are starting values until macOS has been measured under changing light. The GNOME and KDE code share the same test vectors, so both desktops behave the same.
 
 ## Night Light
 
