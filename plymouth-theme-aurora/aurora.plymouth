@@ -7,6 +7,7 @@ ModuleName=script
 # Images come from the distribution's spinner theme (its spinner, password
 # entry and watermark); initramfs generators copy ImageDir with the theme.
 ImageDir=/usr/share/plymouth/themes/spinner
-ScriptFile=/usr/share/plymouth/themes/aurora/aurora.script
+# Prepared before plymouthd starts, using this machine's live platform data.
+ScriptFile=/run/plymouth/aurora.script
 # The font initramfs generators copy for the script's text.
 Font=Cantarell 12

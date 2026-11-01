@@ -1,0 +1,4 @@
+FROM registry.fedoraproject.org/fedora:45
+RUN dnf -y install plymouth-plugin-script plymouth-plugin-label plymouth-theme-spinner \
+    xorg-x11-server-Xvfb /usr/bin/xwd ImageMagick python3 'font(cantarell)' \
+    && dnf clean all

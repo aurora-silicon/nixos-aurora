@@ -7,7 +7,7 @@
 #   size     256 px on Apple Retina panels, 128 px on other displays
 #            (aura: the Retina flag of the boot framebuffer, which every
 #            internal panel has and external monitors do not)
-#   place    ((width - size) / 2, (height - size) / 2), rounded down
+#   place    centre of the full panel, minus hidden notch rows, rounded down
 #
 # Coordinates are device pixels: the package runs Plymouth with DeviceScale=1,
 # because a scale of 2 would double the logo and allow only even positions.
@@ -51,7 +51,6 @@ for (i = 1; i < 1000; i++)
 entry_source = Image("entry.png");
 lock_source = Image("lock.png");
 bullet_source = Image("bullet.png");
-capslock_source = Image("capslock.png");
 
 # Images for scale s (1 or 2), made once.
 fun scaled(source, s)
@@ -69,7 +68,6 @@ for (s = 1; s <= 2; s++)
     entry_image[s] = scaled(entry_source, s);
     lock_image[s] = scaled(lock_source, s);
     bullet_image[s] = scaled(bullet_source, s);
-    capslock_image[s] = scaled(capslock_source, s);
     for (i = 0; i < throbber_count; i++)
       throbber_image[s][i] = scaled(throbber_source[i], s);
   }
@@ -92,6 +90,18 @@ fun retina(w, h)
 fun place_x(w, size)
   {
     return Math.Int((w - size) / 2);
+  }
+
+# The pre-start helper prepends numeric geometry from the live device tree.
+# The scanout below the notch starts notch rows down the physical panel.
+# Centre in the full panel first, then subtract that origin. Check both mode
+# dimensions so the full-height appledrm mode and other modes stay centred.
+fun place_logo_y(w, h, size)
+  {
+    if (aurora_notch_height > 0 && w == aurora_panel_width &&
+        h == aurora_panel_height - aurora_notch_height)
+      return Math.Int((aurora_panel_height - size) / 2) - aurora_notch_height;
+    return Math.Int((h - size) / 2);
   }
 
 # --------------------------------------------------------------- displays
@@ -161,14 +171,13 @@ fun layout(i)
         d.entry = Sprite();
         d.lock = Sprite();
         d.answer = Sprite();
-        d.capslock = Sprite();
       }
 
     # The logo, exactly where aura drew it.
     logo = logo_image[d.s];
     d.logo.SetImage(logo);
     d.logo.SetPosition(d.x + place_x(d.w, logo.GetWidth()),
-                       d.y + Math.Int((d.h - logo.GetHeight()) / 2), 1);
+                       d.y + place_logo_y(d.w, d.h, logo.GetHeight()), 1);
 
     # The distribution's branding, at the bottom like the stock splash.
     b = branding_image[d.s];
@@ -190,7 +199,6 @@ fun layout(i)
         d.entry.SetOpacity(0);
         d.lock.SetOpacity(0);
         d.answer.SetOpacity(0);
-        d.capslock.SetOpacity(0);
         d.throbber.SetOpacity(throbber_count > 0);
         y = spin;
         if (throbber_count > 0)
@@ -253,30 +261,23 @@ fun layout(i)
             else
               d.answer.SetOpacity(0);
           }
-        c = capslock_image[d.s];
-        if (c && Plymouth.GetCapslockState())
-          centre(d, d.capslock, c, y + e.GetHeight() + 8 * d.s, 3);
-        else
-          d.capslock.SetOpacity(0);
         d.text_y = y + e.GetHeight() + 8 * d.s;
-        if (c)
-          d.text_y += c.GetHeight();
       }
 
     centre(d, d.message, text_image(message_text, d.s, 12), d.text_y + 8 * d.s, 2);
 
     d.key = d.w + "x" + d.h + "@" + d.s + status + bullet_count + answer_text + message_text
-            + prompt_text + progress_text + Plymouth.GetCapslockState();
+            + prompt_text + progress_text;
     global.view[i] = d;
   }
 
 fun refresh()
   {
+    # Keyboard state is owned by Plymouth; this theme never polls it.
     for (i = 0; Window.GetWidth(i); i++)
       {
         key = Window.GetWidth(i) + "x" + Window.GetHeight(i) + "@" + (1 + retina(Window.GetWidth(i), Window.GetHeight(i)))
-              + status + bullet_count + answer_text + message_text + prompt_text + progress_text
-              + Plymouth.GetCapslockState();
+              + status + bullet_count + answer_text + message_text + prompt_text + progress_text;
         if (!view[i] || view[i].key != key || Window.GetX(i) != i * REGION)
           layout(i);
         d = view[i];
