@@ -7,13 +7,14 @@ import sys
 root = Path(sys.argv[1])
 # clang 22, upstream Make and Meson defaults must produce these exact images.
 expected = [
-    ('v2-t0', 0xc000, '2f6e5cc57c25e1a80720e514326e10a25c4afc013670aacce89d9a9dd3439aef'),
-    ('v3-t0', 0x10000, '5d26b2d170de7782f05268207e7fcb73eef3a4d240b5a4fd4f0a76d0b60fe12b'),
-    ('v3-t1', 0x10000, 'f49ebf15cdccdd9d76b15695157fe27dfef93087d406639de0e126fef81300bd'),
-    ('v4-t0', 0x12000, 'af6f7034ef40c897b22e8285138c839b0a568270c0fbb9521a43eb37e8a3020e'),
-    ('v5-t0', 0x10000, '96f2189d39d751266c12401345daca333055da48f76293e4dcdbdbd705cd2d1a'),
-    ('v5-t1', 0x12000, 'f5d516f3ce1ca8ebe850cf0428fff07e487662e7f7981b2991a0070449d82479'),
-    ('v5-t2', 0x12000, '931f33bb99e68c7d8fccb2bbe976ddd9914f7235a98851d9ab8a9a1ba515526d'),
+    ('v2-t0', 0xc000, '0db99c023d91e89e866d763229912e373cb0cfd5b91f46603df9d926ce036967'),
+    ('v3-t0', 0x10000, 'fc5219b2166e114fcd88898a8b2fb93fadfa8406dfb2c63c4d48c1b75adb49a9'),
+    ('v3-t1', 0x10000, '6d7f74406e93b9e0b6b6cf7bd630b5669a2e8b43a143d6abaaa85c1f93b02e34'),
+    ('v3-t2', 0x10000, '7bc2f5a30543331be6050ed2bb68198139e905b42c4622724b50cf8bf59e531a'),
+    ('v4-t0', 0x12000, 'adedf50ff0cb7ad8db539126585afab1d2fd83a82cd3ed2d3f7e0ec6d06723e2'),
+    ('v5-t0', 0x10000, 'aaa50276a9cc2320cb0ee6633319e82a54cf339018c03e22f33961a336bc61d1'),
+    ('v5-t1', 0x12000, '6490420bc7c0156686aface9057815849a4e4a823a0bef7a82f9274144c03343'),
+    ('v5-t2', 0x12000, '585f0a54c47078cb1c8c5928d7937dbcb99391aab53cec8f712af30c15071d5f'),
 ]
 for name, size, expected_hash in expected:
     files = list(root.rglob('avd-fw-' + name + '.bin'))
