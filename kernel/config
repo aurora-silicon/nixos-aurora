@@ -5517,6 +5517,8 @@ CONFIG_DRM_AMDGPU=m
 # Display Engine Configuration
 #
 CONFIG_DRM_AMD_DC=y
+CONFIG_DRM_AMD_DC_FP=y
+# CONFIG_DRM_AMD_SECURE_DISPLAY is not set
 # end of Display Engine Configuration
 
 # CONFIG_HSA_AMD is not set
