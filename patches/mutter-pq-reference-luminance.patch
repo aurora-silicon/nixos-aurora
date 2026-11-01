@@ -1,0 +1,178 @@
+From f12524efd332efa14d2361d5d380552339028995 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Sun, 1 Nov 2026 18:37:50 +1100
+Subject: [PATCH] backends: Take the PQ reference white from
+ PQ_REFERENCE_LUMINANCE
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+In BT.2100 mode mutter puts the reference white at the PQ default of
+203 cd/m² and, since it can't tell whether a sysfs backlight still works
+while the sink decodes PQ, drives the backlight to its maximum and dims
+with the reference white instead.
+
+Some built-in panels scale PQ with their backlight: the PQ level of
+their reference white shows at the white the backlight sets, and
+brighter levels use the headroom above it, up to the panel's peak.
+Apple's EDR panels work this way with a reference white at PQ 100
+cd/m². On them, the BT.2100 desktop came out about twice as bright as
+in SDR, or more after the forced maximum.
+
+A connector can report this with the immutable range property
+PQ_REFERENCE_LUMINANCE, in cd/m². When it is present, use it as the
+reference luminance of the output colour state in PQ, and keep the
+regular backlight as the brightness control in BT.2100 mode. Without
+it nothing changes.
+---
+ src/backends/meta-color-device.c                 | 13 +++++++++++++
+ src/backends/meta-output.h                       |  7 +++++++
+ src/backends/native/meta-kms-connector-private.h |  1 +
+ src/backends/native/meta-kms-connector.c         | 15 +++++++++++++++
+ src/backends/native/meta-kms-connector.h         |  3 +++
+ src/backends/native/meta-output-kms.c            | 13 ++++++++-----
+ 6 files changed, 47 insertions(+), 5 deletions(-)
+
+diff --git a/src/backends/meta-color-device.c b/src/backends/meta-color-device.c
+index 3eb29ca93..3003ef489 100644
+--- a/src/backends/meta-color-device.c
++++ b/src/backends/meta-color-device.c
+@@ -767,6 +767,19 @@ update_color_state (MetaColorDevice *color_device)
+     }
+ 
+   luminance = *clutter_eotf_get_default_luminance (eotf);
++
++  /* A sink that scales PQ with its backlight shows its reference white at
++   * the PQ level it reports, rather than at the PQ default. */
++  if (eotf.type == CLUTTER_EOTF_TYPE_NAMED &&
++      eotf.tf_name == CLUTTER_TRANSFER_FUNCTION_PQ)
++    {
++      MetaOutput *output = meta_monitor_get_main_output (monitor);
++      const MetaOutputInfo *output_info = meta_output_get_info (output);
++
++      if (output_info->pq_reference_luminance > 0.0f)
++        luminance.ref = output_info->pq_reference_luminance;
++    }
++
+   luminance.ref = luminance.ref * color_device->reference_luminance_factor;
+ 
+   color_state = clutter_color_state_params_new_from_primitives (clutter_context,
+diff --git a/src/backends/meta-output.h b/src/backends/meta-output.h
+index 3660b2b2f..b09f7e54d 100644
+--- a/src/backends/meta-output.h
++++ b/src/backends/meta-output.h
+@@ -159,6 +159,13 @@ typedef struct _MetaOutputInfo
+   uint64_t supported_rgb_ranges;
+ 
+   gboolean supports_vrr;
++
++  /*
++   * Signal luminance (cd/m²) of the PQ level the sink shows at the white
++   * set by its backlight, which keeps working while the sink decodes PQ.
++   * 0 when unknown: PQ is then taken as absolute.
++   */
++  float pq_reference_luminance;
+ } MetaOutputInfo;
+ 
+ gboolean meta_tile_info_equal (MetaTileInfo *a,
+diff --git a/src/backends/native/meta-kms-connector-private.h b/src/backends/native/meta-kms-connector-private.h
+index 16ecb1787..26d7cdd44 100644
+--- a/src/backends/native/meta-kms-connector-private.h
++++ b/src/backends/native/meta-kms-connector-private.h
+@@ -41,6 +41,7 @@ typedef enum _MetaKmsConnectorProp
+   META_KMS_CONNECTOR_PROP_HDR_OUTPUT_METADATA,
+   META_KMS_CONNECTOR_PROP_BROADCAST_RGB,
+   META_KMS_CONNECTOR_PROP_VRR_CAPABLE,
++  META_KMS_CONNECTOR_PROP_PQ_REFERENCE_LUMINANCE,
+   META_KMS_CONNECTOR_N_PROPS
+ } MetaKmsConnectorProp;
+ 
+diff --git a/src/backends/native/meta-kms-connector.c b/src/backends/native/meta-kms-connector.c
+index 5bdd246f0..94cb3157a 100644
+--- a/src/backends/native/meta-kms-connector.c
++++ b/src/backends/native/meta-kms-connector.c
+@@ -454,6 +454,10 @@ state_set_properties (MetaKmsConnectorState *state,
+   prop = &props[META_KMS_CONNECTOR_PROP_VRR_CAPABLE];
+   if (prop->prop_id)
+     state->vrr_capable = !!prop->value;
++
++  prop = &props[META_KMS_CONNECTOR_PROP_PQ_REFERENCE_LUMINANCE];
++  if (prop->prop_id)
++    state->pq_reference_luminance = (uint32_t) MIN (prop->value, 10000);
+ }
+ 
+ static MetaSubpixelOrder
+@@ -1083,6 +1087,12 @@ meta_kms_connector_state_changes (MetaKmsConnectorState *state,
+       return META_KMS_RESOURCE_CHANGE_FULL;
+     }
+ 
++  if (state->pq_reference_luminance != new_state->pq_reference_luminance)
++    {
++      meta_topic (META_DEBUG_KMS, "PQ reference luminance changed");
++      return META_KMS_RESOURCE_CHANGE_FULL;
++    }
++
+   if (state->privacy_screen_state != new_state->privacy_screen_state)
+     {
+       meta_topic (META_DEBUG_KMS, "privacy screen state changed");
+@@ -1593,6 +1603,11 @@ init_properties (MetaKmsConnector  *connector,
+           .name = "vrr_capable",
+           .type = DRM_MODE_PROP_RANGE,
+         },
++      [META_KMS_CONNECTOR_PROP_PQ_REFERENCE_LUMINANCE] =
++        {
++          .name = "PQ_REFERENCE_LUMINANCE",
++          .type = DRM_MODE_PROP_RANGE,
++        },
+     },
+     .dpms_enum = {
+       [META_KMS_CONNECTOR_DPMS_ON] =
+diff --git a/src/backends/native/meta-kms-connector.h b/src/backends/native/meta-kms-connector.h
+index 3a7d7601f..4a05956bd 100644
+--- a/src/backends/native/meta-kms-connector.h
++++ b/src/backends/native/meta-kms-connector.h
+@@ -85,6 +85,9 @@ typedef struct _MetaKmsConnectorState
+   } underscan;
+ 
+   gboolean vrr_capable;
++
++  /* cd/m², 0 when the connector has no PQ_REFERENCE_LUMINANCE */
++  uint32_t pq_reference_luminance;
+ } MetaKmsConnectorState;
+ 
+ META_EXPORT_TEST
+diff --git a/src/backends/native/meta-output-kms.c b/src/backends/native/meta-output-kms.c
+index c4b5a7460..037d673a0 100644
+--- a/src/backends/native/meta-output-kms.c
++++ b/src/backends/native/meta-output-kms.c
+@@ -421,12 +421,13 @@ meta_output_kms_create_backlight (MetaOutput  *output,
+         meta_color_device_get_reference_luminance_factor (color_device);
+     }
+ 
+-  /* Unfortunately we don't know if a sysfs backlight actually works in
+-   * HDR modes. Ideally a new KMS backlight API would allow us to get this
+-   * information and react accordingly. Until then, we force the ref-white
+-   * backlight.
++  /* Unless the connector says so with PQ_REFERENCE_LUMINANCE, we don't know
++   * if a sysfs backlight actually works in HDR modes. Without it, we force
++   * the ref-white backlight. With it, the backlight sets the luminance of
++   * the reference white in PQ too, so it stays the brightness control.
+    */
+-  if (color_mode == META_COLOR_MODE_BT2100)
++  if (color_mode == META_COLOR_MODE_BT2100 &&
++      output_info->pq_reference_luminance <= 0.0f)
+     {
+       return META_BACKLIGHT (meta_backlight_ref_white_new (backend,
+                                                            monitor,
+@@ -494,6 +495,8 @@ meta_output_kms_new (MetaGpuKms        *gpu_kms,
+     meta_kms_connector_type_from_drm (drm_connector_type);
+ 
+   output_info->supports_vrr = connector_state->vrr_capable;
++  output_info->pq_reference_luminance =
++    (float) connector_state->pq_reference_luminance;
+ 
+   crtcs = g_array_new (FALSE, FALSE, sizeof (MetaCrtc *));
+ 
+-- 
+2.54.0
+
