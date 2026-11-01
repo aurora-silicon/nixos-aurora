@@ -110,6 +110,10 @@ new_init = """    async _initFingerprintManagerProxy() {
                         forceChanged = false;
                         const previousType = this.readerType;
                         await this.checkReaderType();
+                        // Discovery already emitted the signal after a queued
+                        // readiness event. Don't reset the prompt twice.
+                        if (this.readerFound && this.readerType !== previousType)
+                            forceChanged = false;
                         // The reader may already have been visible before its
                         // templates. Retry PAM even if its scan type is unchanged.
                         if (notify && this.readerFound && this.readerType === previousType)

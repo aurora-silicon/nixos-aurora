@@ -144,6 +144,14 @@ async function run() {
     start(auth); await flush();
     assert(state.verified === 1, 'restore during pending query must work');
 
+    // If the pending reply itself discovers the restored reader, its normal
+    // change signal already resets authentication; don't force a second reset.
+    const foundBarrier = new Promise(resolve => { release = resolve; });
+    ({auth} = await scenario({device: true, barrier: foundBarrier}));
+    await flush(); state.templates = true; publish(); release(); await flush();
+    assert(state.resets.length === 1, 'a restore coalesced with discovery must reset once');
+    start(auth); await flush();
+
     // Recover from daemon disappearance/reappearance without a second marker.
     state.device = false;
     const proxy = state.proxies[0];
