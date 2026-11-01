@@ -100,12 +100,12 @@
   },
   "avd-fw": {
     "repository": "https://github.com/aurora-silicon/avd-fw",
-    "commit": "66c3911bbaebdca90a179aa74c7addde9b2963ce",
-    "version": "0.1-unstable-2026-11-01",
-    "source_url": "https://codeload.github.com/aurora-silicon/avd-fw/tar.gz/66c3911bbaebdca90a179aa74c7addde9b2963ce",
-    "archive_root": "avd-fw-66c3911bbaebdca90a179aa74c7addde9b2963ce",
-    "sha256": "b7353f5fefea60b2d3aa63a1424fade72c87f27159685c30234e1b310b97af88",
-    "nix_hash": "sha256-tzU/X+/qYLLTqmOhQk+t5yyH8nFZaFwwI04bMQuXr4g="
+    "commit": "6062e8516c0a751bc8e50f5d604a17395923189f",
+    "version": "0.1-unstable-2026-11-01.2",
+    "source_url": "https://codeload.github.com/aurora-silicon/avd-fw/tar.gz/6062e8516c0a751bc8e50f5d604a17395923189f",
+    "archive_root": "avd-fw-6062e8516c0a751bc8e50f5d604a17395923189f",
+    "sha256": "49a631c8ba0c87bac187376bc642acaad1f62791dde6ed285fbc2bad21d60cf0",
+    "nix_hash": "sha256-SaYxyLoMh7rBhzdrxkKsqtH2J5Hd5u0oX7wrrSHWDPA="
   },
   "upower-aurora": {
     "repository": "https://github.com/aurora-silicon/upower",
