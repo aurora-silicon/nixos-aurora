@@ -65,6 +65,20 @@
     # The theme draws in device pixels, so the logo matches aura's to the
     # pixel; Plymouth's own 2x scale on Retina panels would double it.
     boot.plymouth.extraConfig = lib.mkIf (config.boot.plymouth.theme == "aurora") "DeviceScale=1";
+    # Each boot supplies the live DT geometry, including image builds and
+    # rebuilds done on another machine. Keep the store and /etc immutable.
+    boot.initrd.systemd.services.plymouth-start.preStart = lib.mkIf
+      (config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora") (lib.mkAfter ''
+        PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
+          ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
+          ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
+      '');
+    systemd.services.plymouth-start.preStart = lib.mkIf
+      (config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora") ''
+        PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
+          ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
+          ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
+      '';
     hardware.graphics.enable = true;
     hardware.graphics.extraPackages = [ pkgs.aurora-rusticl pkgs.aurora-lavapipe ];
     services.desktopManager.plasma6.enable = config.aurora.desktop == "kde";
