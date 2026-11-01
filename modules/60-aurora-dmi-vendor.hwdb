@@ -1,0 +1,6 @@
+# Apple's firmware gives the vendor as "Apple Inc.". Name it by its brand, as
+# systemd's 20-dmi-id.hwdb does for LENOVO, so systemd-hostnamed and desktops
+# show "Apple MacBook Pro (16-inch, M4 Pro, Nov 2024)". The tables keep the
+# full name.
+dmi:*:svnAppleInc.:*
+ ID_VENDOR_FROM_DATABASE=Apple
