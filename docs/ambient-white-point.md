@@ -26,7 +26,7 @@ The lux points, fade times and fade shape come from macOS on the M4 Pro. How muc
 
 ## Night Light
 
-Night Light always wins. The screen gets the warmer of the two temperatures, so the ambient white point can never make the screen bluer than Night Light asks for, and the hand-over at sunset is smooth. A Night Light preview shows exactly the previewed temperature.
+Night Light always wins. The screen gets the warmer of the two temperatures, so the ambient white point can never make the screen bluer than Night Light asks for, and the hand-over at sunset is smooth. That holds during a Night Light preview too, so a preview's fade starts from what is on screen.
 
 ## Turning it on
 

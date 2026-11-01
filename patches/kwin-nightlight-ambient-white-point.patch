@@ -716,7 +716,7 @@ index 40da7d4270..5779f58f07 100644
  public Q_SLOTS:
      /**
 diff --git a/src/plugins/nightlight/nightlightmanager.cpp b/src/plugins/nightlight/nightlightmanager.cpp
-index d8616c92a3..844a860182 100644
+index d8616c92a3..1b9f77c02d 100644
 --- a/src/plugins/nightlight/nightlightmanager.cpp
 +++ b/src/plugins/nightlight/nightlightmanager.cpp
 @@ -17,6 +17,8 @@
@@ -806,7 +806,7 @@ index d8616c92a3..844a860182 100644
      m_dayTargetTemperature = std::clamp(settings->dayTemperature(), MIN_TEMPERATURE, DEFAULT_DAY_TEMPERATURE);
      m_nightTargetTemperature = std::clamp(settings->nightTemperature(), MIN_TEMPERATURE, DEFAULT_DAY_TEMPERATURE);
  }
-@@ -520,6 +549,20 @@ int NightLightManager::currentTargetTemperature() const
+@@ -520,6 +549,21 @@ int NightLightManager::currentTargetTemperature() const
  
  void NightLightManager::commitGammaRamps(int temperature)
  {
@@ -816,18 +816,19 @@ index d8616c92a3..844a860182 100644
 +
 +void NightLightManager::applyChannelFactors()
 +{
-+    // Night Light always wins: the ambient white point may make the screens
-+    // warmer than Night Light's current temperature, never cooler, and a
-+    // preview shows exactly the previewed temperature.
++    // Night Light always wins: the screens get the warmer of Night Light's
++    // current temperature and the ambient white point, so the ambient white
++    // point never makes them cooler than Night Light asks for, and Night
++    // Light's transitions, including a preview's, start from what is shown.
 +    int temperature = m_currentTemperature;
-+    if (!m_previewTimer && !m_ambientPolicy.isNeutral()) {
++    if (!m_ambientPolicy.isNeutral()) {
 +        temperature = composeTemperature(m_currentTemperature, ambientWhitePointTemperature());
 +    }
 +
      // TODO this list should ideally be filtered by workspace
      const QList<BackendOutput *> outputs = kwinApp()->outputBackend()->outputs();
      const QVector3D rgbFactors = sampleColorTemperature(temperature);
-@@ -527,7 +570,105 @@ void NightLightManager::commitGammaRamps(int temperature)
+@@ -527,7 +571,105 @@ void NightLightManager::commitGammaRamps(int temperature)
          output->setChannelFactors(rgbFactors);
      }
  

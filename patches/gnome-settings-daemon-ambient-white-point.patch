@@ -1389,7 +1389,7 @@ index 0000000..9e97260
 +/* The latest ambient reading, 0 when unknown. */
 +guint gsd_ambient_white_point_get_ambient_temperature (GsdAmbientWhitePoint *self);
 diff --git a/plugins/color/gsd-color-manager.c b/plugins/color/gsd-color-manager.c
-index aae10e4..6401f65 100644
+index aae10e4..8c022de 100644
 --- a/plugins/color/gsd-color-manager.c
 +++ b/plugins/color/gsd-color-manager.c
 @@ -28,6 +28,8 @@
@@ -1448,18 +1448,18 @@ index aae10e4..6401f65 100644
  }
  
 +/* Publish one effective temperature, which mutter applies to every output
-+ * through its Night Light path. Night Light always wins: the ambient white
-+ * point can make the screen warmer than neutral but never cooler than what
-+ * Night Light asks for, and a Night Light preview shows exactly the preview
-+ * temperature. A temperature set directly over D-Bus pauses the ambient
-+ * white point until it is toggled. */
++ * through its Night Light path. Night Light always wins: the screen gets the
++ * warmer of the Night Light and ambient temperatures, so the ambient white
++ * point never makes it cooler than Night Light asks for, and Night Light's
++ * fades, including a preview's, start from what is on screen. A temperature
++ * set directly over D-Bus pauses the ambient white point until it is
++ * toggled. */
 +static void
 +update_temperature (GsdColorManager *manager, gboolean night_changed)
 +{
 +        GsdAmbientWhitePoint *ambient = manager->ambient;
 +        gdouble night = gsd_night_light_get_temperature (manager->nlight);
 +        gdouble ambient_k = gsd_ambient_white_point_get_temperature (ambient);
-+        gboolean forced = gsd_night_light_get_forced (manager->nlight);
 +        gboolean available = gsd_ambient_white_point_get_available (ambient);
 +        guint color_temperature = gsd_ambient_white_point_get_ambient_temperature (ambient);
 +        gboolean active;
@@ -1472,8 +1472,8 @@ index aae10e4..6401f65 100644
 +                temperature = night_changed ? (guint) round (night)
 +                                            : gsd_color_state_get_temperature (manager->state);
 +        } else {
-+                active = !forced && gsd_ambient_white_point_get_active (ambient) && ambient_k < night;
-+                temperature = (guint) round (forced ? night : gsd_ambient_compose (night, ambient_k));
++                active = gsd_ambient_white_point_get_active (ambient) && ambient_k < night;
++                temperature = (guint) round (gsd_ambient_compose (night, ambient_k));
 +        }
 +
 +        if (manager->ambient_available != available) {
