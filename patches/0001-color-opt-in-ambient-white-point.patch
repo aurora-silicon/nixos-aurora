@@ -29,10 +29,10 @@ index 286ea80..a096a4e 100644
        <summary>If the night light mode is enabled</summary>
 diff --git a/plugins/color/ambient-policy-test.c b/plugins/color/ambient-policy-test.c
 new file mode 100644
-index 0000000..a86008d
+index 0000000..657e2b6
 --- /dev/null
 +++ b/plugins/color/ambient-policy-test.c
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,218 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include "gsd-ambient-policy.h"
 +#include <glib/gstdio.h>
@@ -66,6 +66,7 @@ index 0000000..a86008d
 +        /* Brightness and chip temperature never stand in for CCT. */
 +        write_value ("in_illuminance_raw", "5000");
 +        write_value ("in_temp_input", "5000");
++        write_value ("in_cct_input", "5000");
 +        g_assert_false (gsd_ambient_read_temperature (root, &value));
 +        write_value ("in_colortemp_raw", " 5200\n");
 +        g_assert_true (gsd_ambient_read_temperature (root, &value));
@@ -97,6 +98,86 @@ index 0000000..a86008d
 +        g_assert_false (gsd_ambient_read_temperature (root, &value));
 +        remove_value ("in_illuminance_raw");
 +        remove_value ("in_temp_input");
++        remove_value ("in_cct_input");
++}
++
++static void
++test_input_only (void)
++{
++        double value = -1;
++        const char *invalid[] = { "", "nan", "inf", "-1", "0", "999", "10001", "6500 K", "1e9999", "4000\n5000" };
++
++        /* A processed-only device needs neither raw nor scale/offset. */
++        write_value ("in_colortemp_input", " 5200.5\n");
++        g_assert_true (gsd_ambient_read_temperature (root, &value));
++        g_assert_cmpfloat (value, ==, 5200.5);
++        for (guint i = 0; i < G_N_ELEMENTS (invalid); i++) {
++                write_value ("in_colortemp_input", invalid[i]);
++                g_assert_false (gsd_ambient_read_temperature (root, &value));
++        }
++        write_value ("in_colortemp_input", "1000");
++        g_assert_true (gsd_ambient_read_temperature (root, &value));
++        g_assert_cmpfloat (value, ==, 1000);
++        write_value ("in_colortemp_input", "10000");
++        g_assert_true (gsd_ambient_read_temperature (root, &value));
++        g_assert_cmpfloat (value, ==, 10000);
++        remove_value ("in_colortemp_input");
++        g_assert_false (gsd_ambient_read_temperature (root, &value));
++}
++
++static void
++test_input_preferred (void)
++{
++        double value = -1;
++
++        write_value ("in_colortemp_input", "5500");
++        write_value ("in_colortemp_raw", "2590");
++        write_value ("in_colortemp_offset", "10");
++        write_value ("in_colortemp_scale", "2");
++        g_assert_true (gsd_ambient_read_temperature (root, &value));
++        g_assert_cmpfloat (value, ==, 5500);
++        /* A present but invalid input must fail, even with valid raw data. */
++        write_value ("in_colortemp_input", "broken");
++        g_assert_false (gsd_ambient_read_temperature (root, &value));
++        /* An unreadable processed channel must not fall back either. */
++        remove_value ("in_colortemp_input");
++        g_autofree char *input = g_build_filename (device, "in_colortemp_input", NULL);
++        g_assert_cmpint (g_mkdir (input, 0700), ==, 0);
++        g_assert_false (gsd_ambient_read_temperature (root, &value));
++        g_assert_cmpint (g_rmdir (input), ==, 0);
++        /* Removing input restores the original IIO raw conversion. */
++        g_assert_true (gsd_ambient_read_temperature (root, &value));
++        g_assert_cmpfloat (value, ==, 5200);
++        write_value ("in_colortemp_input", "5500");
++        write_value ("in_colortemp_raw", "broken");
++        write_value ("in_colortemp_offset", "broken");
++        write_value ("in_colortemp_scale", "broken");
++        g_assert_true (gsd_ambient_read_temperature (root, &value));
++        g_assert_cmpfloat (value, ==, 5500);
++        remove_value ("in_colortemp_input");
++        remove_value ("in_colortemp_raw");
++        remove_value ("in_colortemp_offset");
++        remove_value ("in_colortemp_scale");
++}
++
++static void
++test_input_ambiguity (void)
++{
++        double value = -1;
++        g_autofree char *second = g_build_filename (root, "iio:device1", NULL);
++        g_autofree char *second_input = g_build_filename (second, "in_colortemp_input", NULL);
++        g_autofree char *second_raw = g_build_filename (second, "in_colortemp_raw", NULL);
++
++        write_value ("in_colortemp_input", "5200");
++        g_assert_cmpint (g_mkdir (second, 0700), ==, 0);
++        g_assert_true (g_file_set_contents (second_input, "5500", -1, NULL));
++        g_assert_false (gsd_ambient_read_temperature (root, &value));
++        g_unlink (second_input);
++        g_assert_true (g_file_set_contents (second_raw, "5500", -1, NULL));
++        g_assert_false (gsd_ambient_read_temperature (root, &value));
++        g_unlink (second_raw);
++        g_rmdir (second);
++        remove_value ("in_colortemp_input");
 +}
 +
 +static void
@@ -158,6 +239,9 @@ index 0000000..a86008d
 +        device = g_build_filename (root, "iio:device0", NULL);
 +        g_mkdir (device, 0700);
 +        g_test_add_func ("/ambient/sensor-validation", test_sensor);
++        g_test_add_func ("/ambient/input-only", test_input_only);
++        g_test_add_func ("/ambient/input-preferred", test_input_preferred);
++        g_test_add_func ("/ambient/input-ambiguity", test_input_ambiguity);
 +        g_test_add_func ("/ambient/filter-and-fallback", test_policy);
 +        g_test_add_func ("/ambient/night-light-priority", test_priority);
 +        result = g_test_run ();
@@ -169,7 +253,7 @@ index 0000000..a86008d
 +}
 diff --git a/plugins/color/ambient-service-test.c b/plugins/color/ambient-service-test.c
 new file mode 100644
-index 0000000..3d26ad0
+index 0000000..6f80729
 --- /dev/null
 +++ b/plugins/color/ambient-service-test.c
 @@ -0,0 +1,149 @@
@@ -228,7 +312,7 @@ index 0000000..3d26ad0
 +        g_autoptr(GSettings) settings = g_settings_new ("org.gnome.settings-daemon.plugins.color");
 +        g_autofree char *root = g_dir_make_tmp ("ambient-service-XXXXXX", NULL);
 +        g_autofree char *device = g_build_filename (root, "iio:device0", NULL);
-+        g_autofree char *raw = g_build_filename (device, "in_colortemp_raw", NULL);
++        g_autofree char *input = g_build_filename (device, "in_colortemp_input", NULL);
 +        g_autoptr(GDBusNodeInfo) info = g_dbus_node_info_new_for_xml (
 +                "<node><interface name='org.gnome.Mutter.DisplayConfig'>"
 +                "<property name='NightLightSupported' type='b' access='read'/>"
@@ -236,7 +320,7 @@ index 0000000..3d26ad0
 +        guint registration, owner;
 +
 +        g_mkdir (device, 0700);
-+        g_file_set_contents (raw, "5000", -1, NULL);
++        g_file_set_contents (input, "5000", -1, NULL);
 +        connection = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, NULL);
 +        g_assert_nonnull (connection);
 +        registration = g_dbus_connection_register_object (connection, "/org/gnome/Mutter/DisplayConfig",
@@ -269,23 +353,23 @@ index 0000000..3d26ad0
 +        g_settings_set_boolean (settings, "ambient-white-point-enabled", TRUE);
 +        wait_active (TRUE);
 +        /* A disappearing sensor must clear the last reading. */
-+        g_unlink (raw);
++        g_unlink (input);
 +        wait_active (FALSE);
 +        g_assert_false (gsd_ambient_white_point_get_available (ambient));
-+        g_file_set_contents (raw, "5500", -1, NULL);
++        g_file_set_contents (input, "5500", -1, NULL);
 +        wait_active (TRUE);
 +        /* A stuck driver must not freeze the main loop or retain a stale
 +         * white point. A FIFO models a read that waits beyond the deadline. */
-+        g_unlink (raw);
-+        g_assert_cmpint (mkfifo (raw, 0600), ==, 0);
++        g_unlink (input);
++        g_assert_cmpint (mkfifo (input, 0600), ==, 0);
 +        wait_active_for (FALSE, 22);
 +        g_assert_false (gsd_ambient_white_point_get_available (ambient));
-+        int writer = open (raw, O_WRONLY | O_NONBLOCK);
++        int writer = open (input, O_WRONLY | O_NONBLOCK);
 +        g_assert_cmpint (writer, >=, 0);
 +        g_assert_cmpint (write (writer, "5000\n", 5), ==, 5);
 +        close (writer);
-+        g_unlink (raw);
-+        g_file_set_contents (raw, "5500", -1, NULL);
++        g_unlink (input);
++        g_file_set_contents (input, "5500", -1, NULL);
 +        wait_active (TRUE);
 +        g_bus_unown_name (owner);
 +        wait_active (FALSE);
@@ -303,7 +387,7 @@ index 0000000..3d26ad0
 +        }
 +        g_dbus_connection_unregister_object (connection, registration);
 +        g_object_unref (connection);
-+        g_unlink (raw);
++        g_unlink (input);
 +        g_rmdir (device);
 +        g_rmdir (root);
 +}
@@ -324,10 +408,10 @@ index 0000000..3d26ad0
 +}
 diff --git a/plugins/color/gsd-ambient-policy.c b/plugins/color/gsd-ambient-policy.c
 new file mode 100644
-index 0000000..06921e9
+index 0000000..540e64b
 --- /dev/null
 +++ b/plugins/color/gsd-ambient-policy.c
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,128 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include "gsd-ambient-policy.h"
 +#include <errno.h>
@@ -335,8 +419,9 @@ index 0000000..06921e9
 +#include <math.h>
 +#include <glib/gstdio.h>
 +
-+/* IIO's colortemp channel is Kelvin. Never substitute illuminance or die
-+ * temperature. A raw channel uses (raw + offset) * scale, as usual for IIO. */
++/* IIO's processed colortemp input is already Kelvin. Never substitute
++ * illuminance or die temperature. If input is absent, a raw channel uses
++ * (raw + offset) * scale, as usual for IIO. */
 +static gboolean
 +read_number (const char *directory, const char *name, double fallback,
 +             gboolean optional, double *value)
@@ -374,8 +459,10 @@ index 0000000..06921e9
 +                return FALSE;
 +        while ((name = g_dir_read_name (directory))) {
 +                g_autofree char *device = NULL;
++                g_autofree char *input_path = NULL;
 +                g_autofree char *raw_path = NULL;
 +                double raw, offset, scale;
++                gboolean processed;
 +                const char *suffix;
 +
 +                if (!g_str_has_prefix (name, "iio:device"))
@@ -388,19 +475,29 @@ index 0000000..06921e9
 +                if (*suffix)
 +                        continue;
 +                device = g_build_filename (root, name, NULL);
++                input_path = g_build_filename (device, "in_colortemp_input", NULL);
 +                raw_path = g_build_filename (device, "in_colortemp_raw", NULL);
-+                if (!g_file_test (raw_path, G_FILE_TEST_EXISTS))
++                processed = g_file_test (input_path, G_FILE_TEST_EXISTS);
++                if (!processed && !g_file_test (raw_path, G_FILE_TEST_EXISTS))
 +                        continue;
 +                /* Multiple sensors require an explicit future association policy.
 +                 * Do not select whichever directory happens to be enumerated first. */
 +                candidates++;
-+                if (candidates > 1 ||
-+                    !read_number (device, "in_colortemp_raw", 0, FALSE, &raw) ||
-+                    !read_number (device, "in_colortemp_offset", 0, TRUE, &offset) ||
-+                    !read_number (device, "in_colortemp_scale", 1, TRUE, &scale) ||
-+                    scale <= 0)
++                if (candidates > 1)
 +                        return FALSE;
-+                result = (raw + offset) * scale;
++                if (processed) {
++                        /* Do not scale processed values or hide a failed input
++                         * read by switching to a different representation. */
++                        if (!read_number (device, "in_colortemp_input", 0, FALSE, &result))
++                                return FALSE;
++                } else {
++                        if (!read_number (device, "in_colortemp_raw", 0, FALSE, &raw) ||
++                            !read_number (device, "in_colortemp_offset", 0, TRUE, &offset) ||
++                            !read_number (device, "in_colortemp_scale", 1, TRUE, &scale) ||
++                            scale <= 0)
++                                return FALSE;
++                        result = (raw + offset) * scale;
++                }
 +                if (!isfinite (result) || result < 1000 || result > 10000)
 +                        return FALSE;
 +        }

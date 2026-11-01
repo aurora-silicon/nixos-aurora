@@ -4,7 +4,7 @@
   "gsd_source": "https://gitlab.gnome.org/GNOME/gnome-settings-daemon",
   "new_code_license": "GPL-2.0-or-later",
   "default_enabled": false,
-  "patch_sha256": "d04ad193bc89b40e22d8c6844e819be6b687075f8b13befcca6e75fd628be8f0",
+  "patch_sha256": "e53af81daabc07711098ef1807416f47deca4716644d98093e85d274a70c0bce",
   "mutter_version": "50.4",
   "mutter_source_checks": [
     {

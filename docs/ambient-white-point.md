@@ -24,9 +24,13 @@ color service and adds no daemon, privileged helper or sysfs permissions.
 The optional CLI is a documentation file, outside PATH. Run it with `sh` or copy
 it to a user bin directory. GSettings works without the CLI.
 
-Exactly one readable IIO `in_colortemp_raw` channel is required. Kelvin is
-`(raw + offset) * scale`, with absent offset and scale defaulting to 0 and 1.
-Illuminance, die temperature and vendor RGB channels are never substitutes.
+Exactly one readable IIO color-temperature sensor is required. Prefer
+`in_colortemp_input`, which is already kelvin and needs no scale or offset.
+Only when it is absent, use `in_colortemp_raw` with `(raw + offset) * scale`,
+with absent offset and scale defaulting to 0 and 1. Invalid or unreadable input
+fails the sample rather than switching to raw. A device exposing both forms
+counts as one sensor. Multiple sensors remain ambiguous. `in_cct_input` is
+ignored. Illuminance, die temperature and vendor RGB channels are never substitutes.
 Samples must be 1000-10000 K, targets are 4000-6500 K, the deadband is 50 K,
 and each five-second sample changes the target by at most 100 K. Reads are
 asynchronous and expire after 15 seconds, including suspend time. Opt-out,
@@ -37,7 +41,9 @@ guarantee. The compositor temperature property can affect multiple displays.
 
 ## Hardware lane qualification
 
-These are proposed steps for a separately authorized hardware run on J616s.
+Hardware qualification waits for the colour lead's kernel change exposing
+`in_colortemp_input` on J616s. These are proposed steps for a separately
+authorized hardware run after that change is available.
 No target has been accessed or deployed by this draft. Retain the previous package
 or NixOS generation before installation. Do not publish device paths, serials,
 private logs or user settings in the PR.
@@ -55,7 +61,8 @@ gsettings set "$schema" ambient-white-point-enabled false
 ```
 
 Read the real sensor through IIO with the same ordinary permissions as GSD.
-This reports channel counts and Kelvin values without writing sysfs or changing
+Read processed kelvin directly, without applying raw metadata.
+This reports channel counts and kelvin values without writing sysfs or changing
 permissions. Missing, ambiguous or unreadable CCT means the sensor path is
 unqualified. Record that result and continue the supported fallback checks.
 
@@ -63,16 +70,12 @@ unqualified. Record that result and continue the supported fallback checks.
 python3 - <<'PYTHON'
 from pathlib import Path
 import math
-channels = list(Path('/sys/bus/iio/devices').glob('iio:device*/in_colortemp_raw'))
+channels = list(Path('/sys/bus/iio/devices').glob('iio:device*/in_colortemp_input'))
 print('CCT channel count', len(channels))
 for channel in channels:
     try:
-        def value(name, default):
-            p = channel.parent / name
-            return float(p.read_text()) if p.exists() else default
-        scale = value('in_colortemp_scale', 1)
-        kelvin = (float(channel.read_text()) + value('in_colortemp_offset', 0)) * scale
-        print('Kelvin', kelvin, 'valid', scale > 0 and math.isfinite(kelvin) and 1000 <= kelvin <= 10000)
+        kelvin = float(channel.read_text())
+        print('Kelvin', kelvin, 'valid', math.isfinite(kelvin) and 1000 <= kelvin <= 10000)
     except (OSError, ValueError) as error:
         print('CCT unavailable', type(error).__name__)
 PYTHON
