@@ -88,6 +88,24 @@ let
     compilerTools = mesaCompilerTools;
   };
 in {
+  plymouth = prev.plymouth.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./plymouth/0001-ply-terminal-Keep-terminal-input-nonblocking.patch)
+    ];
+    doCheck = true;
+    postCheck = (old.postCheck or "") + ''
+      # Meson runs checks from the build directory; headers live in the source.
+      $CC -D_GNU_SOURCE -Wall -Wextra -Werror \
+        -I. -I.. -I../src/libply -I../src/libply-splash-core \
+        ${stableFile ./plymouth/test-terminal-input.c} -o test-terminal-input \
+        -Lsrc/libply-splash-core -Lsrc/libply \
+        -Wl,-rpath,"$PWD/src/libply-splash-core" \
+        -Wl,-rpath,"$PWD/src/libply" \
+        -lply-splash-core -lply
+      timeout 15s ./test-terminal-input
+      echo 'Plymouth terminal-input PTY regression passed'
+    '';
+  });
   docker_29 = prev.docker_29.override { buildGoModule = dockerPolicyBuilder; };
   docker = final.docker_29;
   aurora-logos = final.callPackage ./logos/package.nix { };
