@@ -54,11 +54,13 @@
     boot.initrd.verbose = lib.mkDefault false;
     boot.kernelParams = [ "quiet" "rd.udev.log_level=3" "udev.log_level=3" "systemd.show_status=auto" ];
     # Desktop images boot to a splash; first boot asks for the disk password
-    # on it, as every later boot does. The spinner theme needs no ACPI BGRT
-    # firmware logo. Plymouth runs in the systemd initrd.
+    # on it, as every later boot does. The Aurora theme draws the logo aura
+    # shows, at the same place, with the spinner below it, so the logo stays
+    # still from power-on to the greeter. Plymouth runs in the systemd initrd.
     boot.plymouth.enable = lib.mkDefault (config.aurora.desktop != "minimal");
     boot.plymouth.package = lib.mkDefault pkgs.plymouth;
-    boot.plymouth.theme = lib.mkDefault "spinner";
+    boot.plymouth.themePackages = [ pkgs.plymouth-theme-aurora ];
+    boot.plymouth.theme = lib.mkDefault "aurora";
     hardware.graphics.enable = true;
     hardware.graphics.extraPackages = [ pkgs.aurora-rusticl pkgs.aurora-lavapipe ];
     services.desktopManager.plasma6.enable = config.aurora.desktop == "kde";

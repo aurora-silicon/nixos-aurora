@@ -228,8 +228,9 @@
         kdeSshAtBoot = kdeWith { aurora.openssh.startAtBoot = true; };
         # Graphical first boot: each failed expectation is reported by name.
         desktopExpectations = {
-          "desktop images boot with the spinner splash" = kde.boot.plymouth.enable && gnome.boot.plymouth.enable
-            && kde.boot.plymouth.theme == "spinner" && gnome.boot.plymouth.theme == "spinner";
+          "desktop images boot with the Aurora splash" = kde.boot.plymouth.enable && gnome.boot.plymouth.enable
+            && kde.boot.plymouth.theme == "aurora" && gnome.boot.plymouth.theme == "aurora"
+            && lib.all (c: lib.any (p: (p.pname or "") == "plymouth-theme-aurora") c.boot.plymouth.themePackages) [ kde gnome ];
           "every profile selects the patched Plymouth" = lib.all (c:
             c.boot.plymouth.package.drvPath == pkgs.plymouth.drvPath
             && patchedWith "0001-ply-terminal-Keep-terminal-input-nonblocking.patch" c.boot.plymouth.package

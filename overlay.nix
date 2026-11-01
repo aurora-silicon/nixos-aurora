@@ -109,6 +109,7 @@ in {
   docker_29 = prev.docker_29.override { buildGoModule = dockerPolicyBuilder; };
   docker = final.docker_29;
   aurora-logos = final.callPackage ./logos/package.nix { };
+  plymouth-theme-aurora = final.callPackage ./plymouth-theme-aurora/package.nix { };
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [
