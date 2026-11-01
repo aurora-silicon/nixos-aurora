@@ -127,6 +127,16 @@ in {
     patches = (old.patches or [ ]) ++ [
       (stableFile ./patches/iio-sensor-proxy-ambient-colour-temperature.patch)
     ];
+    # Run the integration tests, which include one for the colour channel.
+    mesonFlags = (old.mesonFlags or [ ]) ++ [ (final.lib.mesonBool "tests" true) ];
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
+      final.gobject-introspection
+      final.umockdev
+      (final.python3.withPackages (p: [ p.dbus-python p.python-dbusmock p.pygobject3 p.psutil ]))
+    ];
+    checkInputs = (old.checkInputs or [ ]) ++ [ final.umockdev ];
+    nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.dbus ];
+    doCheck = true;
   });
   # Opt-in ambient white point in the colour plugin
   # (org.gnome.settings-daemon.plugins.color ambient-white-point-enabled, off
