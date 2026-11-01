@@ -1,0 +1,37 @@
+AArch64 NixOS AVD userspace validation
+
+FFmpeg 8.1 + request series b57fbbe50c9b2656fad86a1a7eeabfd2b2a50935.
+mpv 41f6a645068483470267271e1d09966ca3b9f413 + the unchanged DRM import patch.
+
+Compiler/install/integration transcript: build-logs/avd-nixos-aarch64-build.log.gz
+Final Linux repository suite: build-logs/avd-nixos-linux-tests.log.gz
+
+Passed:
+- ffmpeg-avd -hwaccels lists v4l2request.
+- H264, HEVC, VP9 and AV1 request hwaccels are compiled.
+- mpv-avd --hwdec=help lists direct and copy request modes for those codecs.
+- ffmpeg-avd, ffprobe-avd and mpv-avd are AArch64 ELF executables.
+- Every FFmpeg dependency resolves under the private FFmpeg store library directory.
+- A profile combining stock FFmpeg/mpv and both candidates builds without collisions.
+- The configured NixOS udev rule set passes verification: 94 files, 0 failures.
+- Its actual 70-uaccess.rules tags media and video4linux with uaccess.
+- Final Linux repository suite: 206 run, 198 passed, 8 skipped.
+
+The unchanged FFmpeg runtime output was imported from an earlier successful
+component build only after verifying its closure SHA-256, NAR hash, exact output
+path and derivation identity. The missing development output was rebuilt normally;
+mpv was built normally. A later repository-test environment lacked GNU cmp; the
+final rerun explicitly provided diffutils and Git and passed. Earlier infrastructure
+and packaging failures remain in the private worker evidence. Logs redact builder
+paths and dependency links unrelated to these packages. No reference device was
+accessed and no physical AVD performance or zero-copy result is claimed.
+
+Program store paths:
+/nix/store/kidy4xpc8jf0h9xnmpj6q5y43dr9jy74-ffmpeg-avd-8.1
+  sha256-NcPYl71uvEsp4f/OYW5H/QCUIQuykZ1o6x0AHjg0R90=
+/nix/store/p3rdnzqg2xdb82wf2y0ajx767k29jc3r-mpv-avd-0.41.0-41f6a645
+  sha256-8l7W0uzIM19DEtrnEw5WNE/DCfCRg8wnFXu12t3up2Q=
+
+Complete runtime closure:
+7741edc3b93b5baa5970ed9af471bf0219b42e13274deab8a03e2d99f1cc71cf  runtime-closure.nar.gz
+Bytes: 122907411
