@@ -1,0 +1,339 @@
+# Aurora boot splash.
+#
+# aura (the bootloader) draws the Aurora logo on a black screen and U-Boot
+# leaves it there. This script draws the same image at the same place, so the
+# logo does not move or change size from power-on to the login screen:
+#
+#   size     256 px on Apple Retina panels, 128 px on other displays
+#            (aura: the Retina flag of the boot framebuffer, which every
+#            internal panel has and external monitors do not)
+#   place    ((width - size) / 2, (height - size) / 2), rounded down
+#
+# Coordinates are device pixels: the package runs Plymouth with DeviceScale=1,
+# because a scale of 2 would double the logo and allow only even positions.
+# Everything else (spinner, text, password entry, distribution branding) is
+# scaled by this script instead, by 2 on Retina panels.
+#
+# The distribution's own branding goes at the bottom, as on the stock splash:
+# the watermark the distribution ships for Plymouth's spinner theme (ImageDir
+# is that theme, so initramfs generators copy it), or nothing without one.
+
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
+
+# Every display gets its own region of the sprite canvas and its own sprites.
+REGION = 32768;
+
+# ----------------------------------------------------------------- images
+
+# The logo images live beside this script; ImageDir is the spinner theme.
+logo_image[1] = Image("../aurora/aurora-logo-128.png");
+logo_image[2] = Image("../aurora/aurora-logo-256.png");
+
+branding_source = Image("watermark.png");
+
+throbber_count = 0;
+for (i = 1; i < 1000; i++)
+  {
+    if (i < 10)
+      name = "throbber-000" + i + ".png";
+    else if (i < 100)
+      name = "throbber-00" + i + ".png";
+    else
+      name = "throbber-0" + i + ".png";
+    frame = Image(name);
+    if (!frame)
+      break;
+    throbber_source[throbber_count] = frame;
+    throbber_count++;
+  }
+
+entry_source = Image("entry.png");
+lock_source = Image("lock.png");
+bullet_source = Image("bullet.png");
+capslock_source = Image("capslock.png");
+
+# Images for scale s (1 or 2), made once.
+fun scaled(source, s)
+  {
+    if (!source)
+      return NULL;
+    if (s == 1)
+      return source;
+    return source.Scale(source.GetWidth() * s, source.GetHeight() * s);
+  }
+
+for (s = 1; s <= 2; s++)
+  {
+    branding_image[s] = scaled(branding_source, s);
+    entry_image[s] = scaled(entry_source, s);
+    lock_image[s] = scaled(lock_source, s);
+    bullet_image[s] = scaled(bullet_source, s);
+    capslock_image[s] = scaled(capslock_source, s);
+    for (i = 0; i < throbber_count; i++)
+      throbber_image[s][i] = scaled(throbber_source[i], s);
+  }
+
+# --------------------------------------------------------------- geometry
+
+# aura's choice between the 128 and 256 px logo. Plymouth cannot see the
+# Retina flag or which connector is internal, so it goes by the mode: Apple's
+# internal panels are at least 2304 px wide and none is 16:9 except the iMac's
+# 4480x2520; external monitors aura drives are 16:9 or narrower.
+fun retina(w, h)
+  {
+    if (w < 2304 || h < 1440)
+      return 0;
+    if (w * 9 == h * 16 && w != 4480)
+      return 0;
+    return 1;
+  }
+
+fun place_x(w, size)
+  {
+    return Math.Int((w - size) / 2);
+  }
+
+# --------------------------------------------------------------- displays
+
+mode = Plymouth.GetMode();
+status = "normal";
+message_text = "";
+prompt_text = "";
+bullet_count = 0;
+answer_text = "";
+progress_text = "";
+frame_number = 0;
+
+if (mode == "updates")
+  title_text = "Installing Updates...";
+else if (mode == "system-upgrade")
+  title_text = "Upgrading System...";
+else if (mode == "firmware-upgrade")
+  title_text = "Upgrading Firmware...";
+else if (mode == "system-reset")
+  title_text = "Resetting System...";
+else
+  title_text = "";
+
+fun text_image(text, s, size)
+  {
+    if (text == "")
+      return NULL;
+    return Image.Text(text, 1, 1, 1, 1, "Cantarell " + size * s);
+  }
+
+fun centre(d, sprite, image, y, z)
+  {
+    if (!image)
+      {
+        sprite.SetOpacity(0);
+        return;
+      }
+    sprite.SetImage(image);
+    sprite.SetPosition(d.x + place_x(d.w, image.GetWidth()), d.y + y, z);
+    sprite.SetOpacity(1);
+  }
+
+# Lay out display i again when its mode, origin or the splash state changed.
+fun layout(i)
+  {
+    local.d = view[i];
+    d.w = Window.GetWidth(i);
+    d.h = Window.GetHeight(i);
+    d.x = i * REGION;
+    d.y = 0;
+    if (Window.GetX(i) != d.x || Window.GetY(i) != d.y)
+      {
+        Window.SetX(i, d.x);
+        Window.SetY(i, d.y);
+      }
+    d.s = 1 + retina(d.w, d.h);
+    if (!d.logo)
+      {
+        d.logo = Sprite();
+        d.branding = Sprite();
+        d.throbber = Sprite();
+        d.title = Sprite();
+        d.progress = Sprite();
+        d.message = Sprite();
+        d.prompt = Sprite();
+        d.entry = Sprite();
+        d.lock = Sprite();
+        d.answer = Sprite();
+        d.capslock = Sprite();
+      }
+
+    # The logo, exactly where aura drew it.
+    logo = logo_image[d.s];
+    d.logo.SetImage(logo);
+    d.logo.SetPosition(d.x + place_x(d.w, logo.GetWidth()),
+                       d.y + Math.Int((d.h - logo.GetHeight()) / 2), 1);
+
+    # The distribution's branding, at the bottom like the stock splash.
+    b = branding_image[d.s];
+    if (b)
+      centre(d, d.branding, b, Math.Int(d.h * 0.96 - b.GetHeight() * 0.96), 1);
+
+    # Below the logo: the spinner, or the password entry while it is asked.
+    below = Math.Int((d.h + logo.GetHeight()) / 2) + 32 * d.s;
+    spin = Math.Int(d.h * 0.7);
+    if (spin < below)
+      spin = below;
+    d.spin_y = spin;
+
+    centre(d, d.title, text_image(title_text, d.s, 15), Math.Int(d.h * 0.382), 2);
+
+    if (status == "normal")
+      {
+        d.prompt.SetOpacity(0);
+        d.entry.SetOpacity(0);
+        d.lock.SetOpacity(0);
+        d.answer.SetOpacity(0);
+        d.capslock.SetOpacity(0);
+        d.throbber.SetOpacity(throbber_count > 0);
+        y = spin;
+        if (throbber_count > 0)
+          y += throbber_image[d.s][0].GetHeight();
+        p = text_image(progress_text, d.s, 12);
+        centre(d, d.progress, p, y + 8 * d.s, 2);
+        if (p)
+          y += p.GetHeight() + 8 * d.s;
+        d.text_y = y;
+      }
+    else
+      {
+        d.throbber.SetOpacity(0);
+        d.progress.SetOpacity(0);
+        prompt = text_image(prompt_text, d.s, 12);
+        centre(d, d.prompt, prompt, spin, 3);
+        y = spin;
+        if (prompt)
+          y += prompt.GetHeight() + 8 * d.s;
+        e = entry_image[d.s];
+        ex = place_x(d.w, e.GetWidth());
+        d.entry.SetImage(e);
+        d.entry.SetPosition(d.x + ex, d.y + y, 3);
+        d.entry.SetOpacity(1);
+        l = lock_image[d.s];
+        d.lock.SetImage(l);
+        d.lock.SetPosition(d.x + ex - l.GetWidth() - 8 * d.s,
+                           d.y + y + Math.Int((e.GetHeight() - l.GetHeight()) / 2), 3);
+        d.lock.SetOpacity(1);
+        d.entry_x = ex;
+        d.entry_y = y;
+        if (status == "password")
+          {
+            bullet = bullet_image[d.s];
+            fit = Math.Int((e.GetWidth() - 16 * d.s) / bullet.GetWidth());
+            n = Math.Min(bullet_count, fit);
+            for (k = 0; d.bullet[k] || k < n; k++)
+              {
+                if (!d.bullet[k])
+                  d.bullet[k] = Sprite();
+                d.bullet[k].SetImage(bullet);
+                d.bullet[k].SetPosition(d.x + ex + 8 * d.s + k * bullet.GetWidth(),
+                                        d.y + y + Math.Int((e.GetHeight() - bullet.GetHeight()) / 2), 4);
+                d.bullet[k].SetOpacity(k < n);
+              }
+            d.answer.SetOpacity(0);
+          }
+        else
+          {
+            for (k = 0; d.bullet[k]; k++)
+              d.bullet[k].SetOpacity(0);
+            a = text_image(answer_text, d.s, 12);
+            if (a)
+              {
+                d.answer.SetImage(a);
+                d.answer.SetPosition(d.x + ex + 8 * d.s,
+                                     d.y + y + Math.Int((e.GetHeight() - a.GetHeight()) / 2), 4);
+                d.answer.SetOpacity(1);
+              }
+            else
+              d.answer.SetOpacity(0);
+          }
+        c = capslock_image[d.s];
+        if (c && Plymouth.GetCapslockState())
+          centre(d, d.capslock, c, y + e.GetHeight() + 8 * d.s, 3);
+        else
+          d.capslock.SetOpacity(0);
+        d.text_y = y + e.GetHeight() + 8 * d.s;
+        if (c)
+          d.text_y += c.GetHeight();
+      }
+
+    centre(d, d.message, text_image(message_text, d.s, 12), d.text_y + 8 * d.s, 2);
+
+    d.key = d.w + "x" + d.h + "@" + d.s + status + bullet_count + answer_text + message_text
+            + prompt_text + progress_text + Plymouth.GetCapslockState();
+    global.view[i] = d;
+  }
+
+fun refresh()
+  {
+    for (i = 0; Window.GetWidth(i); i++)
+      {
+        key = Window.GetWidth(i) + "x" + Window.GetHeight(i) + "@" + (1 + retina(Window.GetWidth(i), Window.GetHeight(i)))
+              + status + bullet_count + answer_text + message_text + prompt_text + progress_text
+              + Plymouth.GetCapslockState();
+        if (!view[i] || view[i].key != key || Window.GetX(i) != i * REGION)
+          layout(i);
+        d = view[i];
+        if (status == "normal" && throbber_count > 0)
+          {
+            t = throbber_image[d.s][Math.Int(frame_number / 2) % throbber_count];
+            d.throbber.SetImage(t);
+            d.throbber.SetPosition(d.x + place_x(d.w, t.GetWidth()), d.y + d.spin_y, 2);
+          }
+      }
+    global.frame_number++;
+  }
+
+Plymouth.SetRefreshFunction(refresh);
+
+# ----------------------------------------------------------------- events
+
+fun display_normal()
+  {
+    global.status = "normal";
+  }
+
+fun display_password(prompt, bullets)
+  {
+    global.status = "password";
+    global.prompt_text = prompt;
+    global.bullet_count = bullets;
+  }
+
+fun display_question(prompt, entry)
+  {
+    global.status = "question";
+    global.prompt_text = prompt;
+    global.answer_text = entry;
+  }
+
+fun display_message(text)
+  {
+    global.message_text = text;
+  }
+
+fun hide_message(text)
+  {
+    if (message_text == text)
+      global.message_text = "";
+  }
+
+fun system_update(progress)
+  {
+    global.progress_text = Math.Int(progress) + "%";
+  }
+
+Plymouth.SetDisplayNormalFunction(display_normal);
+Plymouth.SetDisplayPasswordFunction(display_password);
+Plymouth.SetDisplayQuestionFunction(display_question);
+Plymouth.SetDisplayMessageFunction(display_message);
+Plymouth.SetHideMessageFunction(hide_message);
+Plymouth.SetSystemUpdateFunction(system_update);
+
+refresh();

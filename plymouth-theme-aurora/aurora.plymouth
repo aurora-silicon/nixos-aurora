@@ -1,63 +1,12 @@
 [Plymouth Theme]
 Name=Aurora
-Description=The Aurora logo the bootloader shows, kept on screen with a spinner below it
-ModuleName=two-step
+Description=The Aurora logo the bootloader shows, kept in place, with the distribution's branding below
+ModuleName=script
 
-[two-step]
+[script]
+# Images come from the distribution's spinner theme (its spinner, password
+# entry and watermark); initramfs generators copy ImageDir with the theme.
+ImageDir=/usr/share/plymouth/themes/spinner
+ScriptFile=/usr/share/plymouth/themes/aurora/aurora.script
+# The font initramfs generators copy for the script's text.
 Font=Cantarell 12
-TitleFont=Cantarell Light 30
-ImageDir=/usr/share/plymouth/themes/aurora
-# aura draws its 256 px logo at ((width - 256) / 2, (height - 256) / 2) on a black
-# screen; the same image at the same place keeps the logo still from power-on to login.
-WatermarkHorizontalAlignment=.5
-WatermarkVerticalAlignment=.5
-HorizontalAlignment=.5
-VerticalAlignment=.7
-DialogHorizontalAlignment=.5
-DialogVerticalAlignment=.382
-TitleHorizontalAlignment=.5
-TitleVerticalAlignment=.382
-Transition=none
-TransitionDuration=0.0
-BackgroundStartColor=0x000000
-BackgroundEndColor=0x000000
-ProgressBarBackgroundColor=0x606060
-ProgressBarForegroundColor=0xffffff
-MessageBelowAnimation=true
-
-[boot-up]
-UseEndAnimation=false
-
-[shutdown]
-UseEndAnimation=false
-
-[reboot]
-UseEndAnimation=false
-
-[updates]
-SuppressMessages=true
-ProgressBarShowPercentComplete=true
-UseProgressBar=true
-Title=Installing Updates...
-SubTitle=Do not turn off your computer
-
-[system-upgrade]
-SuppressMessages=true
-ProgressBarShowPercentComplete=true
-UseProgressBar=true
-Title=Upgrading System...
-SubTitle=Do not turn off your computer
-
-[firmware-upgrade]
-SuppressMessages=true
-ProgressBarShowPercentComplete=true
-UseProgressBar=true
-Title=Upgrading Firmware...
-SubTitle=Do not turn off your computer
-
-[system-reset]
-SuppressMessages=true
-ProgressBarShowPercentComplete=true
-UseProgressBar=true
-Title=Resetting System...
-SubTitle=Do not turn off your computer
