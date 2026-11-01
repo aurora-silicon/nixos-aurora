@@ -88,7 +88,7 @@ def check(root):
     for branch in ('25.08', '26.08'):
         if not root.path(f'{data["flatpakGL"]}/refs/heads/runtime/org.freedesktop.Platform.GL.aurora/aarch64/{branch}').is_file():
             raise ValueError(f'Flatpak GL {branch} is missing')
-    for variant in ('v2-t0', 'v3-t0', 'v3-t1', 'v4-t0', 'v5-t0', 'v5-t1'):
+    for variant in ('v2-t0', 'v3-t0', 'v3-t1', 'v4-t0', 'v5-t0', 'v5-t1', 'v5-t2'):
         if not root.path(f'{data["avdFirmware"]}/lib/firmware/apple/avd-fw-{variant}.bin').is_file():
             raise ValueError(f'AVD firmware {variant} is missing')
     check_initrd(root.path(f'{root.system}/initrd'))
