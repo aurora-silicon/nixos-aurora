@@ -329,8 +329,16 @@
             && lib.hasInfix "layout=de\n" kdeGerman.environment.etc."aurora/keyboard".text;
           "the initrd unlock prompt waits for the console keymap" = lib.elem "systemd-vconsole-setup.service"
             imageProbe.config.boot.initrd.systemd.services.aurora-initrd-root.after;
+          "systemd-modules-load asks only for modules this kernel provides" = lib.all (c: let
+              conf = lib.splitString "\n" c.environment.etc."modules-load.d/nixos.conf".source.text;
+            in lib.elem "loop" conf && !(lib.elem "atkbd" conf) && !(lib.elem "cpufreq_schedutil" conf))
+            [ kde gnome minimal ];
         };
       in pkgs.runCommand "aurora-firstboot-image-evaluation" {
+        rootUnit = let
+          units = imageProbe.config.boot.initrd.systemd.units;
+        in lib.concatMapStrings (name: units.${name}.text)
+          (lib.filter (lib.hasPrefix "dev-disk-by\\x2duuid-") (lib.attrNames units));
         desktopFailures = lib.concatStringsSep "\n" (lib.attrNames (lib.filterAttrs (_: met: !met) desktopExpectations));
         stage2Preserved = if builtins.hasAttr "m1n1/boot.bin" imageProbe.config.boot.loader.grub.extraFiles
           || !(builtins.hasAttr "m1n1/boot.bin" (makeSystem "minimal").config.boot.loader.grub.extraFiles)
@@ -353,8 +361,11 @@
           exit 1
         fi
         case "$units" in
-          *'What=/dev/mapper/root'*) ;;
-          *) echo 'initrd sysroot must use the encrypted root mapper from boot start' >&2; exit 1 ;;
+          *'What=/dev/mapper/root'*) echo 'initrd sysroot must not wait for the mapper of a root that may stay plaintext' >&2; exit 1 ;;
+        esac
+        case "$rootUnit" in
+          *'JobRunningTimeoutSec=infinity'*) ;;
+          *) echo 'initrd root device must not time out during first-boot conversion' >&2; exit 1 ;;
         esac
         case "$units" in
           *'JobRunningTimeoutSec=infinity'*) ;;

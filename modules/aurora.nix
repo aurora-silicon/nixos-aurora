@@ -47,6 +47,10 @@
     # TPM drivers (its TPM 2.0 CRB interface would need ACPI). Do not ask the
     # systemd initrd for tpm-tis and tpm-crb.
     boot.initrd.systemd.tpm2.enable = lib.mkDefault false;
+    # nixpkgs always lists atkbd and the schedutil governor module; this
+    # kernel has no PS/2 driver and builds schedutil in.
+    environment.etc."modules-load.d/nixos.conf".source = lib.mkForce (pkgs.writeText "nixos.conf"
+      (lib.concatStringsSep "\n" (lib.subtractLists [ "atkbd" "cpufreq_schedutil" ] config.boot.kernelModules) + "\n"));
     boot.supportedFilesystems = [ "ext4" "btrfs" ];
     # Quiet by default: failures still reach the console, and systemd shows
     # status only when a unit fails or stalls.
