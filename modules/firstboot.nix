@@ -8,6 +8,14 @@ let
     root_subvolume=root
   '';
   xkb = config.services.xserver.xkb;
+  plasmaLogin = config.services.displayManager.plasma-login-manager.enable;
+  # On the first boot, the greeter waits for account setup and its final
+  # state write. A completed setup is skipped on later boots, but the greeter
+  # must still start.
+  greeterGate = {
+    after = [ "aurora-firstboot.service" ];
+    unitConfig.ConditionPathExists = "!/var/lib/aurora/firstboot/pending";
+  };
 in {
   options.aurora.firstboot.passwordHooks = lib.mkOption {
     type = lib.types.bool;
@@ -134,7 +142,9 @@ in {
     # the rekey sets aurora.firstboot.passwordHooks = false in owner.nix, so
     # the next rebuild removes them.
     environment.etc."aurora/password-hooks" = lib.mkIf config.aurora.firstboot.passwordHooks {
-      text = "sddm sddm-autologin gdm-password\n";
+      text = lib.concatStringsSep " " (lib.optionals plasmaLogin [ "plasmalogin" "plasmalogin-autologin" ]
+        ++ lib.optionals config.services.displayManager.sddm.enable [ "sddm" "sddm-autologin" ]
+        ++ lib.optional config.services.displayManager.gdm.enable "gdm-password") + "\n";
     };
     security.pam.services = lib.mkIf config.aurora.firstboot.passwordHooks (let
       pamExec = "${config.security.pam.package}/lib/security/pam_exec.so";
@@ -145,15 +155,20 @@ in {
         modulePath = pamExec;
         args = [ "quiet" "expose_authtok" hook ];
       };
+      gate = {
+        order = 0;
+        control = "requisite";
+        modulePath = pamExec;
+        args = [ "quiet" hook "--gate" ];
+      };
     in lib.mkMerge [
+      (lib.mkIf plasmaLogin {
+        plasmalogin.rules.auth.aurora-password-hook = signIn;
+        plasmalogin-autologin.rules.auth.aurora-password-gate = gate;
+      })
       (lib.mkIf config.services.displayManager.sddm.enable {
         sddm.rules.auth.aurora-password-hook = signIn;
-        sddm-autologin.rules.auth.aurora-password-gate = {
-          order = 0;
-          control = "requisite";
-          modulePath = pamExec;
-          args = [ "quiet" hook "--gate" ];
-        };
+        sddm-autologin.rules.auth.aurora-password-gate = gate;
       })
       (lib.mkIf config.services.displayManager.gdm.enable {
         gdm-password.rules.auth.aurora-password-hook = signIn;
@@ -234,12 +249,12 @@ in {
       (lib.filterAttrs (_: user: user.isNormalUser) config.users.users == {}) {
       environment.SYSTEMD_ETC_HOSTNAME = lib.mkForce "/etc/hostname";
     };
-    systemd.services.display-manager = lib.mkIf (config.aurora.desktop != "minimal") {
-      after = [ "aurora-firstboot.service" ];
-      # On the first boot, wait for account setup and its final state write.
-      # A completed setup is skipped on later boots, but the greeter must still start.
-      unitConfig.ConditionPathExists = "!/var/lib/aurora/firstboot/pending";
-    };
+    # Plasma Login's unit is plasmalogin.service, which NixOS also links as
+    # display-manager.service: a display-manager definition beside it would be
+    # replaced by that link. The GDM and SDDM modules define
+    # display-manager.service itself.
+    systemd.services.plasmalogin = lib.mkIf (config.aurora.desktop != "minimal" && plasmaLogin) greeterGate;
+    systemd.services.display-manager = lib.mkIf (config.aurora.desktop != "minimal" && !plasmaLogin) greeterGate;
     systemd.services."getty@" = {
       overrideStrategy = "asDropin";
       unitConfig.ConditionPathExists = "!/var/lib/aurora/firstboot/pending";

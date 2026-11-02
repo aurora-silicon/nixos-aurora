@@ -62,7 +62,9 @@
     hardware.graphics.enable = true;
     hardware.graphics.extraPackages = [ pkgs.aurora-rusticl pkgs.aurora-lavapipe ];
     services.desktopManager.plasma6.enable = config.aurora.desktop == "kde";
-    services.displayManager.sddm.enable = config.aurora.desktop == "kde";
+    # Plasma Login Manager, as on Fedora 44 and Aurora Alarm: its greeter runs
+    # on KWin Wayland at the display's scale.
+    services.displayManager.plasma-login-manager.enable = config.aurora.desktop == "kde";
     services.desktopManager.gnome.enable = config.aurora.desktop == "gnome";
     services.displayManager.gdm.enable = config.aurora.desktop == "gnome";
     # Every Aurora desktop image comes with a web browser, as Fedora and ALARM do.
@@ -81,10 +83,12 @@
     systemd.services.sshd-keygen = lib.mkIf (config.services.openssh.enable && config.services.openssh.generateHostKeys
       && !config.aurora.openssh.startAtBoot) { wantedBy = lib.mkForce [ ]; };
     # GDM keeps the splash until its greeter starts and replaces
-    # plymouth-quit.service; give SDDM the same role, so the splash is still up
-    # when first boot asks for the disk password. If SDDM fails,
-    # plymouth-quit.service still removes the splash.
-    systemd.services.display-manager = lib.mkIf (config.services.displayManager.sddm.enable && config.boot.plymouth.enable) {
+    # plymouth-quit.service; give Plasma Login the same role, so the splash is
+    # still up when first boot asks for the disk password. If Plasma Login
+    # fails, plymouth-quit.service still removes the splash. Its unit is
+    # plasmalogin.service; display-manager.service is only an alias of it, so
+    # a display-manager definition here would be a second, empty unit.
+    systemd.services.plasmalogin = lib.mkIf (config.services.displayManager.plasma-login-manager.enable && config.boot.plymouth.enable) {
       conflicts = [ "plymouth-quit.service" ];
       after = [ "plymouth-start.service" ];
       onFailure = [ "plymouth-quit.service" ];
@@ -94,7 +98,7 @@
     };
     # As with GDM: if multi-user.target wanted plymouth-quit.service, a
     # nixos-rebuild switch would stop the display manager to start it.
-    systemd.services.plymouth-quit = lib.mkIf (config.services.displayManager.sddm.enable && config.boot.plymouth.enable) {
+    systemd.services.plymouth-quit = lib.mkIf (config.services.displayManager.plasma-login-manager.enable && config.boot.plymouth.enable) {
       wantedBy = lib.mkForce [ ];
     };
     environment.systemPackages = [ pkgs.aurora-bless pkgs.git pkgs.cryptsetup pkgs.btrfs-progs ];

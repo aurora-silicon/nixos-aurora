@@ -215,11 +215,9 @@
         installs = packages: lib.any (package: package.pname or "" == "plasma-setup") packages;
         patchedWith = name: package: lib.any (patch: lib.hasSuffix "-${name}" (toString patch)) (package.patches or [ ]);
         launchAuth = lib.splitString "\n" gnome.security.pam.services.gdm-launch-environment.text;
-        autologinAuth = lib.splitString "\n" kde.security.pam.services.sddm-autologin.text;
-        lineOf = match: lib.lists.findFirstIndex match null autologinAuth;
-        setupAutologin = lineOf (line: lib.hasPrefix "auth sufficient " line && lib.hasInfix "pam_succeed_if.so" line
-          && lib.hasInfix "user = plasma-setup" line);
-        uidAutologin = lineOf (line: lib.hasInfix "pam_succeed_if.so" line && lib.hasInfix "uid >= 1000" line);
+        autologinAuth = lib.filter (lib.hasPrefix "auth ")
+          (lib.splitString "\n" kde.security.pam.services.plasmalogin-autologin.text);
+        greeter = kde.systemd.services.plasmalogin;
         kdeWith = module: (self.nixosConfigurations.aurora-kde.extendModules { modules = [ module ]; }).config;
         # What the rekey writes into owner.nix once the password unlocks the disk.
         kdeRekeyed = kdeWith { aurora.firstboot.passwordHooks = false; };
@@ -267,13 +265,23 @@
           "Plasma Setup is patched for NixOS paths" = patchedWith "plasma-setup-nixos-paths.patch" plasmaSetupPackage;
           "the setup user is a system user with its sysusers home" = kde.users.users.plasma-setup.isSystemUser
             && kde.users.users.plasma-setup.home == "/run/plasma-setup" && kde.users.groups ? plasma-setup;
-          "SDDM may log the setup user in automatically, and only it below UID 1000" = setupAutologin != null
-            && uidAutologin != null && setupAutologin < uidAutologin;
-          "SDDM reads Plasma Setup's autologin from /etc/sddm.conf.d" = kde.environment.etc ? "sddm.conf.d/00-nixos.conf";
+          "KDE signs in with Plasma Login Manager, whose greeter runs on KWin Wayland, not SDDM" =
+            kde.services.displayManager.plasma-login-manager.enable && !kde.services.displayManager.sddm.enable
+            && !gnome.services.displayManager.plasma-login-manager.enable
+            && !minimal.services.displayManager.plasma-login-manager.enable;
+          "Plasma Login is the display-manager.service alias and the only KDE greeter unit" =
+            lib.elem "display-manager.service" greeter.aliases && lib.elem "graphical.target" greeter.wantedBy
+            && !(kde.systemd.services ? display-manager);
+          "the KDE greeter waits for the disk step" = lib.elem "aurora-firstboot.service" greeter.after
+            && greeter.unitConfig.ConditionPathExists == "!/var/lib/aurora/firstboot/pending";
+          "Plasma Login may log the setup user in automatically: no UID floor" = autologinAuth != [ ]
+            && !(lib.any (lib.hasInfix "pam_succeed_if.so") autologinAuth);
+          "Plasma Login reads Plasma Setup's autologin from /etc/plasmalogin.conf.d" =
+            kde.environment.etc ? "plasmalogin.conf.d/00-nixos-defaults.conf";
           "Plasma Setup's autologin session exists" = lib.elem "plasma" kde.services.displayManager.sessionData.sessionNames;
           "the Nix build users are not counted as accounts" = kde.security.loginDefs.settings.UID_MAX < kde.ids.uids.nixbld;
-          "SDDM keeps the splash for the disk password, as GDM does" =
-            lib.elem "plymouth-quit.service" kde.systemd.services.display-manager.conflicts
+          "Plasma Login keeps the splash for the disk password, as GDM does" =
+            lib.elem "plymouth-quit.service" greeter.conflicts && lib.elem "plymouth-quit.service" greeter.onFailure
             && kde.systemd.services.plymouth-quit.wantedBy == [ ]
             && lib.elem "plymouth-quit.service" gnome.systemd.services.display-manager.conflicts;
           "GNOME Initial Setup runs on GNOME images only" = gnome.aurora.gnomeInitialSetup.enable
@@ -302,14 +310,16 @@
             && !(kde.environment.etc ? "aurora/desktop-account-setup")
             && !(minimal.environment.etc ? "aurora/desktop-account-setup");
           "the first password sign-in hooks are declared until the rekey" =
-            kde.security.pam.services.sddm.rules.auth ? aurora-password-hook
-            && kde.security.pam.services.sddm-autologin.rules.auth ? aurora-password-gate
+            kde.security.pam.services.plasmalogin.rules.auth ? aurora-password-hook
+            && kde.security.pam.services.plasmalogin-autologin.rules.auth ? aurora-password-gate
+            && lib.hasInfix "aurora-password-hook" kde.security.pam.services.plasmalogin.text
             && gnome.security.pam.services.gdm-password.rules.auth ? aurora-password-hook
-            && kde.environment.etc ? "aurora/password-hooks";
+            && kde.environment.etc."aurora/password-hooks".text == "plasmalogin plasmalogin-autologin\n"
+            && gnome.environment.etc."aurora/password-hooks".text == "gdm-password\n";
           "a rebuild after the rekey removes the hooks" =
-            !(kdeRekeyed.security.pam.services.sddm.rules.auth ? aurora-password-hook)
-            && !(kdeRekeyed.security.pam.services.sddm-autologin.rules.auth ? aurora-password-gate)
-            && !(lib.hasInfix "aurora-password-hook" kdeRekeyed.security.pam.services.sddm.text)
+            !(kdeRekeyed.security.pam.services.plasmalogin.rules.auth ? aurora-password-hook)
+            && !(kdeRekeyed.security.pam.services.plasmalogin-autologin.rules.auth ? aurora-password-gate)
+            && !(lib.hasInfix "aurora-password-hook" kdeRekeyed.security.pam.services.plasmalogin.text)
             && !(kdeRekeyed.environment.etc ? "aurora/password-hooks");
           "the console keymap follows the XKB layout unless set" = kde.console.keyMap == "us"
             && lib.hasSuffix "-xkb-console-keymap" (toString kdeGerman.console.keyMap)
