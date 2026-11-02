@@ -13,13 +13,17 @@ stdenvNoCC.mkDerivation {
   dontBuild = true;
   doCheck = true;
   nativeCheckInputs = [ python3 ];
+  propagatedBuildInputs = [ plymouth ];
   checkPhase = "python3 test_geometry.py .";
   installPhase = ''
     runHook preInstall
     d=$out/share/plymouth/themes/aurora
     install -Dm644 aurora.plymouth $d/aurora.plymouth
     substituteInPlace $d/aurora.plymouth \
-      --replace-fail "ImageDir=/usr/share/plymouth/themes/spinner" "ImageDir=${plymouth}/share/plymouth/themes/spinner"
+      --replace-fail "ImageDir=/usr/share/plymouth/themes/spinner" "ImageDir=/run/plymouth/themes/spinner"
+    # NixOS discovers dependent themes through /share/plymouth/themes paths.
+    # Keep that discovery while ImageDir uses the merged runtime theme tree.
+    echo '# NixOS dependent theme: /share/plymouth/themes/spinner' >> $d/aurora.plymouth
     install -Dm644 aurora.script $d/aurora.script
     install -Dm644 aurora-logo-128.png $d/aurora-logo-128.png
     install -Dm644 aurora-logo-256.png $d/aurora-logo-256.png

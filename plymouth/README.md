@@ -44,3 +44,10 @@ and [26.134.222](https://gitlab.freedesktop.org/plymouth/plymouth/-/tree/1aacf81
 Install the matching core and theme together and rebuild the initramfs or
 NixOS boot generation. Preserve the previous packages, configuration and
 initramfs or generation, and restore them together to roll back.
+
+The installed descriptor uses NixOS's merged `/run/plymouth/themes/spinner`
+directory, so the script can resolve both spinner images and Aurora's sibling
+logo PNGs. Its dependent-theme marker keeps NixOS's initrd asset discovery.
+Plymouth always prefixes image filenames with `ImageDir`; pointing at the
+core store output would miss Aurora's sibling directory on the real root.
+The geometry and script are still generated only into `/run` at startup.
