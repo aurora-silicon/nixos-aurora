@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('gl_payload', ROOT / 'flatpak-gl/validate-repository.py')
 validator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validator)
-COMMIT = 'c208afc352e9d4c10ee71c883a369a9079dd7d84'
+COMMIT = 'b15472e4f0151f8b0ea7f9f3afd6f1d231272a64'
 
 
 class PayloadValidationTests(unittest.TestCase):
