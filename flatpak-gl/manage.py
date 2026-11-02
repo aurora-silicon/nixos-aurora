@@ -25,7 +25,9 @@ def flatpak(*args):
 
 
 def remotes():
-    return dict(line.split('\t', 1) for line in flatpak('remotes', '--columns=name,url').splitlines())
+    # With no remotes configured, flatpak prints a single empty line.
+    rows = (line.partition('\t') for line in flatpak('remotes', '--columns=name,url').splitlines() if line.strip())
+    return {name: url for name, _, url in rows}
 
 
 def enable(repo, commit):
