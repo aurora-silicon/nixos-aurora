@@ -329,6 +329,10 @@
             && lib.hasInfix "layout=de\n" kdeGerman.environment.etc."aurora/keyboard".text;
           "the initrd unlock prompt waits for the console keymap" = lib.elem "systemd-vconsole-setup.service"
             imageProbe.config.boot.initrd.systemd.services.aurora-initrd-root.after;
+          "systemd-modules-load asks only for modules this kernel provides" = lib.all (c: let
+              conf = lib.splitString "\n" c.environment.etc."modules-load.d/nixos.conf".source.text;
+            in lib.elem "loop" conf && !(lib.elem "atkbd" conf) && !(lib.elem "cpufreq_schedutil" conf))
+            [ kde gnome minimal ];
         };
       in pkgs.runCommand "aurora-firstboot-image-evaluation" {
         rootUnit = let
