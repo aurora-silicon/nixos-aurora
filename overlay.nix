@@ -90,8 +90,10 @@ let
 in {
   plymouth = prev.plymouth.overrideAttrs (old: {
     version = "${old.version}-aurora2";
+    # Keep the upstream archive tag when only changing the carry release.
+    src = prev.plymouth.src;
     passthru = (old.passthru or { }) // { scriptKeyboardLifetime = 1; };
-    nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.xorg.xorgserver final.fontconfig final.dejavu_fonts ];
+    nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.xvfb final.fontconfig final.dejavu_fonts ];
     patches = (old.patches or [ ]) ++ [
       (stableFile ./plymouth/0001-ply-terminal-Keep-terminal-input-nonblocking.patch)
       (stableFile ./plymouth/0001-Fix-splash-keyboard-lifetime.patch)
