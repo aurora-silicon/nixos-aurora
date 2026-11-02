@@ -12,12 +12,14 @@
 #
 # This takes the greeter source file that holds that check from the installed
 # GNOME Shell, drops the check, and serves the copy to the login screen's
-# shell alone through a GResource overlay. When the check is not exactly as
-# expected, for example after a GNOME update, it changes nothing and the login
-# screen stays as GNOME ships it. Run it before the display manager starts.
+# shell alone through GResource overlays. The fingerprint manager also watches
+# the readiness marker and fprintd's bus owner, so a late restore can enable
+# fingerprint without holding up GDM. If either source differs from what is
+# expected, leave both resources untouched. Run before the display manager.
 set -eu
 
 res=/org/gnome/shell/gdm/authServicesLegacy.js
+manager=/org/gnome/shell/gdm/fingerprintManager.js
 out=/run/aurora-sep/greeter
 dropin=/run/systemd/user/org.gnome.Shell@gdm.service.d/aurora-sep-fingerprint.conf
 
@@ -28,8 +30,8 @@ log() {
 rm -rf "$out" "$dropin"
 [ "${1:-}" != stop ] || exit 0
 
-if ! command -v gresource >/dev/null; then
-    log "gresource is not installed (it comes with glib2-devel); the login screen stays as it is"
+if ! command -v gresource >/dev/null || ! command -v python3 >/dev/null; then
+    log "gresource (glib2-devel) or python3 is not installed; the login screen stays as it is"
     exit 0
 fi
 
@@ -37,7 +39,8 @@ lib=
 for f in /usr/lib64/gnome-shell/libshell-*.so /usr/lib/gnome-shell/libshell-*.so \
          /usr/lib/*/gnome-shell/libshell-*.so; do
     [ -f "$f" ] || continue
-    if gresource list "$f" 2>/dev/null | grep -qxF "$res"; then
+    if gresource list "$f" 2>/dev/null | grep -qxF "$res" &&
+       gresource list "$f" 2>/dev/null | grep -qxF "$manager"; then
         lib=$f
         break
     fi
@@ -48,38 +51,111 @@ if [ -z "$lib" ]; then
 fi
 
 install -d -m 0755 "$out"
-gresource extract "$lib" "$res" >"$out/stock.js"
-if ! awk '
-    state == 0 && $0 == "    _connectFingerprintManager() {" {
-        print
-        state = 1
-        next
+gresource extract "$lib" "$res" >"$out/stock-auth.js"
+gresource extract "$lib" "$manager" >"$out/stock-manager.js"
+if ! python3 - "$out" <<'PYTHON'
+import sys
+from pathlib import Path
+
+out = Path(sys.argv[1])
+auth = (out / 'stock-auth.js').read_text()
+manager = (out / 'stock-manager.js').read_text()
+old_auth = """    _connectFingerprintManager() {
+        if (!this._reauthOnly)
+            return;
+
+        this._fingerprintManager = FingerprintManager.getFingerprintManager();
+        this._fingerprintManager.connectObject(
+            'reader-type-changed', () => this._onFingerprintChanged(),
+            this);
     }
-    state == 1 {
-        if ($0 == "        if (!this._reauthOnly)") {
-            state = 2
-            next
+"""
+new_auth = old_auth.replace("        if (!this._reauthOnly)\n            return;\n\n", "")
+old_init = """    async _initFingerprintManagerProxy() {
+        try {
+            await this._fingerprintManagerProxy.init_async(
+                GLib.PRIORITY_DEFAULT, null);
+            await this.checkReaderType();
+        } catch (e) {
+            this._handleFingerprintError(e);
         }
-        state = 9
     }
-    state == 2 {
-        if ($0 == "            return;") {
-            state = 3
-            next
+"""
+new_init = """    async _initFingerprintManagerProxy() {
+        try {
+            await this._fingerprintManagerProxy.init_async(
+                GLib.PRIORITY_DEFAULT, null);
+
+            // aurora-sep-ready publishes this only after the sensor has attached
+            // and templates have been restored. Watching before checking closes
+            // the race with a restore during the initial fprintd query.
+            const readyFile = Gio.File.new_for_path('/run/aurora-sep/reader-restored');
+            this._auroraReadyMonitor = readyFile.monitor_file(Gio.FileMonitorFlags.NONE, null);
+            let restored = readyFile.query_exists(null);
+            let checking = false;
+            let checkAgain = false;
+            let forceChanged = false;
+            const refresh = async (force = false) => {
+                checkAgain = true;
+                forceChanged ||= force;
+                if (checking)
+                    return;
+                checking = true;
+                try {
+                    // Drain notifications received during a D-Bus query. This
+                    // runs only on events, with no timer or readiness polling.
+                    while (checkAgain) {
+                        checkAgain = false;
+                        const notify = forceChanged;
+                        forceChanged = false;
+                        const previousType = this.readerType;
+                        await this.checkReaderType();
+                        // Discovery already emitted the signal after a queued
+                        // readiness event. Don't reset the prompt twice.
+                        if (this.readerFound && this.readerType !== previousType)
+                            forceChanged = false;
+                        // The reader may already have been visible before its
+                        // templates. Retry PAM even if its scan type is unchanged.
+                        if (notify && this.readerFound && this.readerType === previousType)
+                            this.emit('reader-type-changed');
+                    }
+                } finally {
+                    checking = false;
+                }
+            };
+            this._auroraReadyMonitor.connect('changed', () => {
+                const exists = readyFile.query_exists(null);
+                if (exists && !restored)
+                    refresh(true);
+                restored = exists;
+            });
+            this._fingerprintManagerProxy.connect('notify::g-name-owner', () => {
+                if (this._fingerprintManagerProxy.g_name_owner)
+                    refresh();
+                else
+                    this._setFingerprintReaderType(FingerprintReaderType.NONE);
+            });
+            await refresh();
+        } catch (e) {
+            this._handleFingerprintError(e);
         }
-        state = 9
     }
-    { print }
-    END { exit state != 3 }
-' "$out/stock.js" >"$out/authServicesLegacy.js"; then
-    log "$lib does not have the expected check; the login screen stays as it is"
+"""
+# Fail closed on GNOME changes; publish neither overlay unless both match.
+if auth.count(old_auth) != 1 or manager.count(old_init) != 1:
+    sys.exit('unexpected GNOME fingerprint implementation')
+(out / 'authServicesLegacy.js').write_text(auth.replace(old_auth, new_auth))
+(out / 'fingerprintManager.js').write_text(manager.replace(old_init, new_init))
+PYTHON
+then
+    log "$lib does not have the expected fingerprint implementation; the login screen stays as it is"
     rm -rf "$out"
     exit 0
 fi
-rm -f "$out/stock.js"
-chmod 0644 "$out/authServicesLegacy.js"
+rm -f "$out/stock-auth.js" "$out/stock-manager.js"
+chmod 0644 "$out/authServicesLegacy.js" "$out/fingerprintManager.js"
 
 install -d -m 0755 "${dropin%/*}"
-printf '[Service]\nEnvironment=G_RESOURCE_OVERLAYS=%s=%s\n' \
-    "$res" "$out/authServicesLegacy.js" >"$dropin"
+printf '[Service]\nEnvironment=G_RESOURCE_OVERLAYS=%s=%s:%s=%s\n' \
+    "$res" "$out/authServicesLegacy.js" "$manager" "$out/fingerprintManager.js" >"$dropin"
 log "the login screen offers fingerprint ($res from $lib)"

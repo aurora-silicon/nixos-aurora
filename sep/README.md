@@ -84,6 +84,18 @@ enrollment flow once hardware qualification is complete. Module reload cannot
 repeat the secure enclave handoff; driver updates take effect after a full
 reboot.
 
+The opt-in greeter integration prepares GNOME Shell resource overlays before
+GDM starts, without waiting for SEP activation or template restoration.
+`aurora-sep-ready` publishes `/run/aurora-sep/reader-restored` after a successful
+restore (including unverified matching; PAM and the xART guard still decide
+whether a match is allowed). The greeter watches that marker and fprintd's bus
+owner and checks the reader again on changes. GNOME's reader-change path
+rebuilds the fingerprint mechanism and retries authentication for the selected
+user, preserving the entry text. This also handles a reader visible before its
+templates. There is no readiness polling or display-manager restart. If the
+installed GNOME sources differ from the expected implementation, neither
+overlay is enabled and the greeter keeps GNOME's default behaviour.
+
 Two choices are left to the owner. GNOME Shell offers fingerprint only on the
 lock screen; `aurora.sep.greeterFingerprint.enable = true;` also offers it at
 the login screen from the next boot (a fingerprint login cannot unlock the
@@ -108,3 +120,20 @@ fprintd to retain host records when deleting from the device fails.
 Keep the existing SEP OS identity and persistent state across this update.
 
 See the [controller-approved v4/v5 qualification plan](https://github.com/aurora-silicon/aurora-sep-userspace/blob/2799b51243708d0a551b67d902472319f132c417/docs/sep-v5-test-plan.md) before removing the kernel hold.
+
+### Greeter overlay verification
+
+Run `python3 test_greeter.py /path/to/gnome-shell/js/gdm node` (or pass the
+JavaScriptCore `jsc` binary). Use public GNOME Shell sources matching the
+installed resources. The late-reader tests were verified against GNOME Shell
+commit `9a753aa969709d351632dbefd23333681cc5b3c2` (GPL-2.0-or-later). The harness
+executes both generated overlays and the stock `authServices.js`, with GI,
+D-Bus, the file monitor and GDM's PAM endpoint replaced by deterministic fakes.
+On Linux it also checks the readiness helper's marker with a fake sysfs tree
+and `/dev/null`, including failure and unverified-matching cases.
+
+After installing an update, reboot to regenerate the overlays. Check the
+GDM critical chain to confirm it has no dependency on `aurora-sep-ready`, and
+check fprintd's journal for Claim/VerifyStart at the first greeter. Disabling
+the opt-in greeter unit (or NixOS option) and rebooting restores GNOME's stock
+login behaviour; password login remains available throughout SEP startup.

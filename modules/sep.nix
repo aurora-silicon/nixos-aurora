@@ -8,8 +8,8 @@ in {
     description = ''
       Offer fingerprint at the GNOME login screen as well as the lock screen.
       GNOME Shell only offers it on the lock screen, because a fingerprint
-      login cannot unlock the keyring. The login screen also waits for Touch ID
-      to come up, up to 90 s after boot.
+      login cannot unlock the keyring. Touch ID comes up independently of the
+      login screen, which offers fingerprint when the reader is restored.
     '';
   };
 
@@ -106,12 +106,10 @@ in {
       systemd.services.aurora-sep-greeter-fingerprint = {
         description = "Offer fingerprint at the GNOME login screen";
         documentation = [ "file://${pkgs.aurora-sep}/share/doc/aurora-sep/README.md" ];
-        # The login screen asks fprintd for the reader once, as it comes up.
-        wants = [ "aurora-sep-ready.service" ];
-        after = [ "aurora-sep-ready.service" ];
+        # Only prepare resources here; the overlay watches late template restore.
         before = [ "display-manager.service" ];
         wantedBy = [ "display-manager.service" ];
-        path = [ pkgs.coreutils pkgs.gnugrep pkgs.gawk pkgs.glib.dev ];
+        path = [ pkgs.coreutils pkgs.gnugrep pkgs.python3 pkgs.glib.dev ];
         environment.AURORA_SEP_GNOME_SHELL = "${pkgs.gnome-shell}";
         serviceConfig = {
           Type = "oneshot";

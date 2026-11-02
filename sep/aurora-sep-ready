@@ -78,12 +78,14 @@ attr() {
 
 ready() {
     log "Touch ID is ready after $(elapsed) s: $*"
+    notify_greeter
     pam_hint
     exit 0
 }
 
 unverified() {
     log "Touch ID is restored, matching UNVERIFIED, after $(elapsed) s: $*"
+    notify_greeter
     pam_hint
     exit 0
 }
@@ -111,6 +113,13 @@ failed() {
 # The enclave refused (or the driver could not find) a Touch ID file this
 # boot: start the rebuild, once per boot.
 run_dir=${AURORA_SEP_RUN:-/run/aurora-sep}
+# The marker contains no template data. It is a per-boot event for the
+# greeter, not a gate on the display manager. Clear it on a new activation.
+rm -f "$run_dir/reader-restored"
+notify_greeter() {
+    (umask 022; mkdir -p "$run_dir" && : >"$run_dir/reader-restored") ||
+        log "could not notify the greeter of the fingerprint restore"
+}
 repair_checked=
 repair_started=
 repair_once() {
