@@ -93,6 +93,10 @@ let
     patches = [ (stableFile ./0002-mpv-request-drm-import.patch) ];
     strictDeps = true;
     nativeBuildInputs = [ pkg-config meson ninja python3 wayland-scanner ];
+    # TOOLS/*.py run at build time through /usr/bin/env, which the sandbox lacks.
+    postPatch = ''
+      patchShebangs --build TOOLS
+    '';
     buildInputs = [ ffmpeg-avd libdrm systemd libva libplacebo libglvnd libgbm wayland
       wayland-protocols libxkbcommon libdisplay-info lcms2 libass luajit zlib
       gnutls dav1d libpulseaudio alsa-lib ];
