@@ -67,6 +67,9 @@ class CheckBasicsTests(unittest.TestCase):
             write(u / 'share/applications/kcm_networkmanagement.desktop')
             for name in ('Next', 'Air', 'Horos', 'Altai', 'Kokkini', 'Canopee', 'Cluster', 'Flow', 'Mountain'):
                 write(u / f'share/wallpapers/{name}/contents/images/1920x1080.png')
+            # systemctl enable plasmalogin.service links its Alias=.
+            write(root / 'usr/lib/systemd/system/plasmalogin.service', '[Service]\nExecStart=/usr/bin/plasmalogin\n')
+            link(e / 'systemd/system/display-manager.service', '/usr/lib/systemd/system/plasmalogin.service')
         return root
 
     def boot(self):
@@ -179,6 +182,38 @@ class CheckBasicsTests(unittest.TestCase):
     def test_stub_must_name_the_boot_uuid(self):
         self.assert_fails('minimal', lambda root: write(self.base / 'esp/EFI/BOOT/grub.cfg', PREAMBLE),
                           'by UUID on the startup disk')
+
+    def test_kde_with_sddm_fails(self):
+        def mutate(root):
+            write(root / 'usr/lib/systemd/system/sddm.service', '[Service]\nExecStart=/usr/bin/sddm\n')
+            (root / 'etc/systemd/system/display-manager.service').unlink()
+            link(root / 'etc/systemd/system/display-manager.service', '/usr/lib/systemd/system/sddm.service')
+        self.assert_fails('kde', mutate, 'the display manager is sddm.service, not Plasma Login')
+
+    def test_kde_without_a_display_manager_fails(self):
+        self.assert_fails('kde', lambda root: (root / 'etc/systemd/system/display-manager.service').unlink(),
+                          'no display manager is enabled')
+
+    def test_nixos_plasma_login_alias_is_followed_into_the_store(self):
+        # NixOS: display-manager.service -> plasmalogin.service (aliases=),
+        # which links the package's unit; /etc/systemd/system is in the store.
+        root = self.base / 'root'
+        system, units = '/nix/store/aaaa-nixos-system', '/nix/store/cccc-system-units'
+        unit = '/nix/store/dddd-plasma-login-manager/lib/systemd/system/plasmalogin.service'
+        link(root / system.lstrip('/') / 'etc', '/nix/store/bbbb-etc/etc')
+        link(root / 'nix/store/bbbb-etc/etc/systemd/system', units)
+        write(root / unit.lstrip('/'), '[Service]\nExecStart=plasmalogin\n')
+        link(root / units.lstrip('/') / 'plasmalogin.service', unit)
+        link(root / units.lstrip('/') / 'display-manager.service', 'plasmalogin.service')
+        result = self.check('--profile', 'kde', '--root', str(root), '--system', system)
+        self.assertIn('greeter: ok', result.stdout)
+        # A generic display-manager.service unit, as NixOS's GDM and SDDM use.
+        generic = '/nix/store/eeee-unit-display-manager.service/display-manager.service'
+        (root / units.lstrip('/') / 'display-manager.service').unlink()
+        write(root / generic.lstrip('/'), '[Service]\nExecStart=sddm\n')
+        link(root / units.lstrip('/') / 'display-manager.service', generic)
+        result = self.check('--profile', 'kde', '--root', str(root), '--system', system)
+        self.assertIn('greeter: FAIL: the display manager is display-manager.service, not Plasma Login', result.stdout)
 
     def test_nixos_system_closure_is_read_through_store_links(self):
         root = self.base / 'root'

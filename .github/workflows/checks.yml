@@ -43,11 +43,13 @@ jobs:
       - name: Inspect KDE graphical login configuration
         run: |
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.defaultUnit
+          nix eval --json .#nixosConfigurations.aurora-kde.config.services.displayManager.plasma-login-manager.enable
           nix eval --json .#nixosConfigurations.aurora-kde.config.services.displayManager.sddm.enable
-          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.wantedBy
-          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.after
-          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.requires
-          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.unitConfig.ConditionPathExists
+          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.aliases
+          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.wantedBy
+          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.after
+          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.requires
+          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.unitConfig.ConditionPathExists
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.blacklistedKernelModules
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.initrd.availableKernelModules
   fex-overlay:
