@@ -247,7 +247,7 @@ class TrackerTests(unittest.TestCase):
     def tracking(self):
         return {'schema': 1, 'branch': 'auto/track-sources', 'sources': {
             'aura': {'repository': 'aurora-silicon/aura', 'branch': 'main', 'merge': 'auto'},
-            'kernel-aurora': {'repository': 'aurora-silicon/linux', 'branch': 'integration/aurora',
+            'kernel-aurora': {'repository': 'aurora-silicon/linux', 'branch': 'aurora-wip',
                               'merge': 'auto-same-version'},
             'mesa-aurora': {'repository': 'aurora-silicon/mesa', 'branch': 'aurora-wip', 'merge': 'manual'}}}
 
