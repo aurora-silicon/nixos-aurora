@@ -9,7 +9,7 @@
     },
     "kernel-aurora": {
       "repository": "aurora-silicon/linux",
-      "branch": "aurora-wip",
+      "branch": "integration/aurora",
       "merge": "auto-same-version"
     },
     "mesa-aurora": {
