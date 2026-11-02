@@ -46,12 +46,12 @@
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",
-    "commit": "a270b2e2d705ed521b07d008aac45283c75fb986",
+    "commit": "b9b2d0c82cbb46025e586b2dc9f2cae644d29999",
     "version": "10",
-    "source_url": "https://codeload.github.com/aurora-silicon/alsa-ucm-conf-asahi/tar.gz/a270b2e2d705ed521b07d008aac45283c75fb986",
-    "archive_root": "alsa-ucm-conf-asahi-a270b2e2d705ed521b07d008aac45283c75fb986",
-    "sha256": "7b5cd23b7ee22cd1c69c4d3b090f5140f7f04fb53d3578349101c8e916faf261",
-    "nix_hash": "sha256-e1zSO37iLNHGnE07CQ9RQPfwT7U9NXg0kQHI6Rb68mE="
+    "source_url": "https://codeload.github.com/aurora-silicon/alsa-ucm-conf-asahi/tar.gz/b9b2d0c82cbb46025e586b2dc9f2cae644d29999",
+    "archive_root": "alsa-ucm-conf-asahi-b9b2d0c82cbb46025e586b2dc9f2cae644d29999",
+    "sha256": "e627e2a78edc263696cb2bd9b1b438b49de27af704e55a277e049f699bdb29e8",
+    "nix_hash": "sha256-5ifip47cJjaWyyvZsbQ4tJ3ievcE5VonfgSfaZvbKeg="
   },
   "aurora-audio": {
     "repository": "https://github.com/aurora-silicon/asahi-audio",
