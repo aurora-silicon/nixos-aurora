@@ -35,7 +35,7 @@
     boot.initrd.availableKernelModules = [
       "apple-mailbox" "apple_nvmem_spmi" "nvme_apple" "pinctrl-apple-gpio"
       "macsmc" "macsmc-power" "macsmc-input" "macsmc-hwmon" "macsmc-reboot"
-      "i2c-pasemi-platform" "tps6598x" "sn201202x" "apple-dart" "dwc3"
+      "i2c-pasemi-platform" "tps6598x" "sn201202x" "thunderbolt_apple" "apple-dart" "dwc3"
       "dwc3-of-simple" "xhci-pci" "pcie-apple" "gpio_macsmc" "phy-apple-atc"
       "nvmem_apple_efuses" "spi-apple" "spi-hid-apple" "spi-hid-apple-of"
       "rtc-macsmc" "spmi-apple-controller" "apple-dockchannel" "dockchannel-hid"
