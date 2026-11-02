@@ -4,9 +4,11 @@
 # branding at the bottom. The script reads its spinner, entry and watermark
 # images from the spinner theme; boot.plymouth's initrd copies that theme
 # because the theme file names it, with boot.plymouth.logo as its watermark.
+assert lib.assertMsg ((plymouth.scriptKeyboardLifetime or 0) >= 1)
+  "Aurora requires Plymouth script keyboard lifetime capability >= 1";
 stdenvNoCC.mkDerivation {
   pname = "plymouth-theme-aurora";
-  version = "1";
+  version = "1-4";
   src = ./.;
   dontBuild = true;
   doCheck = true;

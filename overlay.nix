@@ -89,11 +89,17 @@ let
   };
 in {
   plymouth = prev.plymouth.overrideAttrs (old: {
+    version = "${old.version}-aurora2";
+    passthru = (old.passthru or { }) // { scriptKeyboardLifetime = 1; };
+    nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.xorg.xorgserver final.fontconfig final.dejavu_fonts ];
     patches = (old.patches or [ ]) ++ [
       (stableFile ./plymouth/0001-ply-terminal-Keep-terminal-input-nonblocking.patch)
+      (stableFile ./plymouth/0001-Fix-splash-keyboard-lifetime.patch)
     ];
     doCheck = true;
     postCheck = (old.postCheck or "") + ''
+      export FONTCONFIG_FILE=${final.makeFontsConf { fontDirectories = [ final.dejavu_fonts ]; }}
+      bash ${stableFile ./plymouth/check-keyboard-lifetime.sh} "$PWD/.." "$PWD" ${./plymouth}
       # Meson runs checks from the build directory; headers live in the source.
       $CC -D_GNU_SOURCE -Wall -Wextra -Werror \
         -I. -I.. -I../src/libply -I../src/libply-splash-core \
