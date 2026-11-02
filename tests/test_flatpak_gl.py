@@ -43,6 +43,18 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(all('--no-deps' in args and '--no-related' in args
                             for args in calls if args[0] == 'install'))
 
+    def test_a_host_without_remotes_adds_ours(self):
+        # A fresh install has no remotes; flatpak then prints one empty line.
+        for listing, action in (('\n', 'remote-add'), ('aurora-gl\tfile:///old\n\n', 'remote-modify')):
+            calls = []
+            def flatpak(*args):
+                calls.append(args)
+                return listing if args[0] == 'remotes' else ''
+            with self.subTest(listing=listing):
+                with patch.object(manager.repository, 'validate'), patch.object(manager, 'flatpak', side_effect=flatpak):
+                    manager.enable(self.root, COMMIT)
+                self.assertEqual([args[0] for args in calls][:2], ['remotes', action])
+
 
 class CleanupTests(unittest.TestCase):
     def test_an_administrators_replacement_remote_keeps_its_runtimes(self):
