@@ -265,6 +265,8 @@
           "Plasma Setup's unit, D-Bus helper, tmpfiles and polkit files are installed" = installs kde.systemd.packages
             && installs kde.services.dbus.packages && installs kde.systemd.tmpfiles.packages && installs kde.environment.systemPackages;
           "Plasma Setup is patched for NixOS paths" = patchedWith "plasma-setup-nixos-paths.patch" plasmaSetupPackage;
+          "Plasma Setup's autostart entry is not executable" =
+            kde.systemd.tmpfiles.settings.plasma-setup-xdg-autostart."/run/plasma-setup/.config/autostart/*.desktop".z.mode == "0640";
           "the setup user is a system user with its sysusers home" = kde.users.users.plasma-setup.isSystemUser
             && kde.users.users.plasma-setup.home == "/run/plasma-setup" && kde.users.groups ? plasma-setup;
           "KDE signs in with Plasma Login Manager, whose greeter runs on KWin Wayland, not SDDM" =
@@ -329,6 +331,12 @@
             && lib.hasInfix "layout=de\n" kdeGerman.environment.etc."aurora/keyboard".text;
           "the initrd unlock prompt waits for the console keymap" = lib.elem "systemd-vconsole-setup.service"
             imageProbe.config.boot.initrd.systemd.services.aurora-initrd-root.after;
+          "NetworkManager's dispatcher stays on the bus until NetworkManager stops" = lib.all (c: let
+              dispatcher = c.systemd.services.NetworkManager-dispatcher;
+            in lib.elem "NetworkManager.service" dispatcher.before
+              && dispatcher.serviceConfig.ExecStart
+                == [ "" "${c.networking.networkmanager.package}/libexec/nm-dispatcher --persist" ])
+            [ kde gnome minimal ];
           "systemd-modules-load asks only for modules this kernel provides" = lib.all (c: let
               conf = lib.splitString "\n" c.environment.etc."modules-load.d/nixos.conf".source.text;
             in lib.elem "loop" conf && !(lib.elem "atkbd" conf) && !(lib.elem "cpufreq_schedutil" conf))
