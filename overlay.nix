@@ -91,6 +91,7 @@ in {
   plymouth = prev.plymouth.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       (stableFile ./plymouth/0001-ply-terminal-Keep-terminal-input-nonblocking.patch)
+      (stableFile ./plymouth/0001-systemd-units-Start-plymouthd-without-waiting-for-coldplug.patch)
     ];
     doCheck = true;
     postCheck = (old.postCheck or "") + ''
