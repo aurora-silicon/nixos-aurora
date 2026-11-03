@@ -1,0 +1,1 @@
+nixos-test: unlock OK, login prompt OK, report 61.7 s after start, enter sent at 45.9 s

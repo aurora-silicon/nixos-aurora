@@ -1,0 +1,49 @@
+UEFI firmware (version edk2-stable202408-prebuilt.qemu.org built at 16:28:50 on Sep 12 2024)
+ArmTrngLib could not be correctly initialized.
+Error: Image at 000BFDB6000 start failed: 00000001
+Error: Image at 000BFD6D000 start failed: Not Found
+Error: Image at 000BFCBA000 start failed: Unsupported
+Error: Image at 000BFC3F000 start failed: Not Found
+Error: Image at 000BFB65000 start failed: Aborted
+Tpm2SubmitCommand - Tcg2 - Not Found
+Tpm2GetCapabilityPcrs fail!
+Tpm2SubmitCommand - Tcg2 - Not Found
+Image type X64 can't be loaded on AARCH64 UEFI system.
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x4,0x0)
+BdsDxe: starting Boot0001 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x4,0x0)
+error: fs/fshelp.c:find_file:260:file `/grub/arm64-efi/efi_uga.mod' not found.
+P+q6E616D65\[18t7[32766;32766H[6n8[!p]104\[0m[?7h[1G[0J]3008;start=f25cd1f2d1ec40afa24295306f9692aa;user=root;hostname=aurora-vm;machineid=1db83c3a87ba4ad8840526cd71d3180b;bootid=d62393b688a440efb6c7b9acc83f8c11;pid=1;pidfdid=2;comm=systemd;type=boot\AURORA-UNLOCK-OK /dev/mapper/cryptroot
+After=systemd-vconsole-setup.service systemd-udevd.service dracut-pre-trigger.service
+J [    1.359887] aurora-vm systemd[1]: Expecting device /dev/mapper/cryptroot...
+J [    1.377798] aurora-vm systemd[1]: Starting Coldplug the Apple display before the other devices...
+J [    1.387122] aurora-vm systemd[1]: Finished Coldplug the Apple display before the other devices.
+J [    1.387488] aurora-vm systemd[1]: Starting Show Plymouth Boot Screen...
+J [    1.389873] aurora-vm systemd[1]: Starting Coldplug All udev Devices...
+J [    1.408337] aurora-vm systemd[1]: Started Show Plymouth Boot Screen.
+J [    1.408464] aurora-vm systemd[1]: Started Forward Password Requests to Plymouth Directory Watch.
+J [    1.500092] aurora-vm systemd[1]: Finished Coldplug All udev Devices.
+J [    1.569137] aurora-vm systemd[1]: Starting Cryptography Setup for cryptroot...
+J [    4.176121] aurora-vm systemd[1]: Started Forward Password Requests to Plymouth.
+J [   38.183578] aurora-vm systemd[1]: Found device /dev/mapper/cryptroot.
+J [   38.184115] aurora-vm systemd[1]: Finished Cryptography Setup for cryptroot.
+J [   38.184667] aurora-vm systemd[1]: Reached target Initrd Root Device.
+J [   38.185463] aurora-vm systemd[1]: Starting File System Check on /dev/mapper/cryptroot...
+J [   38.212345] aurora-vm systemd[1]: Finished File System Check on /dev/mapper/cryptroot.
+J [   38.243704] aurora-vm systemd[1]: Reached target Initrd Root File System.
+J [   38.344052] aurora-vm systemd[1]: Reached target Initrd File Systems.
+J [   38.358589] aurora-vm systemd[1]: Reached target Initrd Default Target.
+J [   38.365170] aurora-vm systemd[1]: Stopped Coldplug All udev Devices.
+J [   38.768182] aurora-vm systemd[1]: Switching root.
+J [   40.570622] aurora-vm systemd[1]: systemd-cryptsetup@cryptroot.service: Deactivated successfully.
+J [   40.570626] aurora-vm systemd[1]: Stopped systemd-cryptsetup@cryptroot.service.
+J [   40.570630] aurora-vm systemd[1]: systemd-cryptsetup@cryptroot.service: Consumed 2.605s CPU time over 38.965s wall clock time, 3.9M memory peak.
+J [   40.570656] aurora-vm systemd[1]: Starting Coldplug All udev Devices...
+J [   40.712768] aurora-vm systemd[1]: Finished Coldplug All udev Devices.
+AURORA-REPORT-END
+[!p]104\[0m[?7h[1G[0J7[32766;32766H[6n8[!p]104\[0m[?7h[1G[0J7[32766;32766H[6n8]3008;start=1912e9a4d98b45cab6846b2bb946f9e7;user=root;hostname=aurora-vm;machineid=30f65de26d5f4060aa09184921a9d53b;bootid=d62393b688a440efb6c7b9acc83f8c11;pid=708;pidfdid=709;comm=(agetty);servicename=serial-getty@ttyAMA0.service;invocationid=198ed66fe5474980a6c320f808445b9a;type=service\P+q6E616D65\
+
+[1;32m<<< Welcome to NixOS 26.11.20261008.e7439b6 (aarch64) - ttyAMA0 >>>[0m
+
+Run 'nixos-help' for the NixOS manual.
+
+aurora-vm login: 

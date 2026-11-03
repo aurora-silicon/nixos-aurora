@@ -1,0 +1,55 @@
+{
+  "nodes": {
+    "base": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793693819,
+        "narHash": "sha256-AKbuU5NBRv4iQlIp6MS8q82dRwg6Q3l9XHKqS9Gq4dA=",
+        "path": "/Volumes/AuroraS500/work/plymouth-parity-20261103/nixos-base",
+        "type": "path"
+      },
+      "original": {
+        "path": "/Volumes/AuroraS500/work/plymouth-parity-20261103/nixos-base",
+        "type": "path"
+      }
+    },
+    "head": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793693901,
+        "narHash": "sha256-9+yXpKXHlDAWVPen4OPicqIt574mI1M55QWHTUHG9Pw=",
+        "path": "/Volumes/AuroraS500/work/neo-plymouth-20261103/nixos-aurora",
+        "type": "path"
+      },
+      "original": {
+        "path": "/Volumes/AuroraS500/work/neo-plymouth-20261103/nixos-aurora",
+        "type": "path"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1791456040,
+        "narHash": "sha256-H83yz/do+hjOO0uujHyH8RgtIQP2v7Mw+cLwcZK/xKc=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "e7439b6b14ad3cc35d05608ebca9bce01a25f5f8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "e7439b6b14ad3cc35d05608ebca9bce01a25f5f8",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "base": "base",
+        "head": "head",
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
