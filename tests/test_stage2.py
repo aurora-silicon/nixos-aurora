@@ -84,8 +84,11 @@ class InstallStage2Tests(unittest.TestCase):
         self.esp = root / 'esp'
         (self.esp / 'm1n1').mkdir(parents=True)
         (self.esp / 'aurora').mkdir()
-        self.stage1 = self.esp / 'aurora/stage1.bin'
-        self.stage1.write_bytes(b'stage 1 must never change')
+        # Both Stage 1 forms belong to the installer.
+        self.stage1 = {self.esp / 'aurora' / name: b'stage 1 must never change: ' + name.encode()
+                       for name in ('stage1.bin', 'stage1.macho')}
+        for path, data in self.stage1.items():
+            path.write_bytes(data)
         self.target = self.esp / 'm1n1/boot.bin'
         self.target.write_bytes(b'installed stage 2')
         self.source = root / 'stage2'
@@ -124,7 +127,8 @@ class InstallStage2Tests(unittest.TestCase):
         self.assertFalse((self.esp / 'm1n1/boot.bin.new').exists())
 
     def tearDown(self):
-        self.assertEqual(self.stage1.read_bytes(), b'stage 1 must never change')
+        for path, data in self.stage1.items():
+            self.assertEqual(path.read_bytes(), data)
 
     def test_changed_stage2_is_installed_and_the_previous_one_kept(self):
         result = self.run_install()
