@@ -52,6 +52,7 @@
         aura = pkgs.m1n1;
         uboot = pkgs.uboot-asahi;
         kernel = pkgs.linux-asahi.kernel;
+        userpages = pkgs.aurora-userpages;
         mesa = pkgs.mesa;
         rusticl = pkgs.aurora-rusticl;
         lavapipe = pkgs.aurora-lavapipe;
@@ -205,6 +206,34 @@
       # It needs the kernel, so the image workflow builds it next to the system.
       stage2 = imageProbe.config.system.build.auroraStage2;
       stage2-tools = imageProbe.config.system.build.auroraStage2Tools;
+      # Per-process 4K userspace pages are on in every profile; an owner can
+      # turn them off with user4k=off or aurora.userpages.enable = false.
+      userpages = let
+        inherit (nixpkgs) lib;
+        profiles = lib.attrValues self.nixosConfigurations;
+        kdeWith = module: (self.nixosConfigurations.aurora-kde.extendModules { modules = [ module ]; }).config;
+        optedOut = kdeWith { boot.kernelParams = [ "user4k=off" ]; };
+        disabled = kdeWith { aurora.userpages.enable = false; };
+        position = argument: lib.lists.findFirstIndex (value: value == argument) (-1);
+        expectations = {
+          "every profile boots with user4k=on and ships the launcher" = lib.all (value:
+            lib.elem "user4k=on" value.config.boot.kernelParams
+            && lib.elem value.pkgs.aurora-userpages value.config.environment.systemPackages) profiles;
+          "an owner's user4k=off follows user4k=on, so it wins" =
+            position "user4k=on" optedOut.boot.kernelParams >= 0
+            && position "user4k=on" optedOut.boot.kernelParams < position "user4k=off" optedOut.boot.kernelParams;
+          "aurora.userpages.enable = false leaves out both" = !(lib.elem "user4k=on" disabled.boot.kernelParams)
+            && !(lib.elem pkgs.aurora-userpages disabled.environment.systemPackages);
+          "the launcher builds from the kernel's own source" =
+            pkgs.aurora-userpages.src.outPath == pkgs.linux-asahi.kernel.src.outPath;
+        };
+      in pkgs.runCommand "aurora-userpages-evaluation" {
+        failures = lib.concatStringsSep "\n" (lib.attrNames (lib.filterAttrs (_: met: !met) expectations));
+      } ''
+        if [[ -n "$failures" ]]; then printf '%s\n' "$failures" >&2; exit 1; fi
+        ${pkgs.aurora-userpages}/bin/userpages --help > /dev/null
+        touch $out
+      '';
       firstboot-image = let
         inherit (nixpkgs) lib;
         kde = self.nixosConfigurations.aurora-kde.config;
@@ -265,6 +294,8 @@
           "Plasma Setup's unit, D-Bus helper, tmpfiles and polkit files are installed" = installs kde.systemd.packages
             && installs kde.services.dbus.packages && installs kde.systemd.tmpfiles.packages && installs kde.environment.systemPackages;
           "Plasma Setup is patched for NixOS paths" = patchedWith "plasma-setup-nixos-paths.patch" plasmaSetupPackage;
+          "Plasma Setup's autostart entry is not executable" =
+            kde.systemd.tmpfiles.settings.plasma-setup-xdg-autostart."/run/plasma-setup/.config/autostart/*.desktop".z.mode == "0640";
           "the setup user is a system user with its sysusers home" = kde.users.users.plasma-setup.isSystemUser
             && kde.users.users.plasma-setup.home == "/run/plasma-setup" && kde.users.groups ? plasma-setup;
           "KDE signs in with Plasma Login Manager, whose greeter runs on KWin Wayland, not SDDM" =
@@ -329,9 +360,26 @@
             && lib.hasInfix "layout=de\n" kdeGerman.environment.etc."aurora/keyboard".text;
           "the initrd unlock prompt waits for the console keymap" = lib.elem "systemd-vconsole-setup.service"
             imageProbe.config.boot.initrd.systemd.services.aurora-initrd-root.after;
+          "NetworkManager's dispatcher stays on the bus until NetworkManager stops" = lib.all (c: let
+              dispatcher = c.systemd.services.NetworkManager-dispatcher;
+            in lib.elem "NetworkManager.service" dispatcher.before
+              && dispatcher.serviceConfig.ExecStart
+                == [ "" "${c.networking.networkmanager.package}/libexec/nm-dispatcher --persist" ])
+            [ kde gnome minimal ];
           "systemd-modules-load asks only for modules this kernel provides" = lib.all (c: let
               conf = lib.splitString "\n" c.environment.etc."modules-load.d/nixos.conf".source.text;
             in lib.elem "loop" conf && !(lib.elem "atkbd" conf) && !(lib.elem "cpufreq_schedutil" conf))
+            [ kde gnome minimal ];
+          # dbus-broker logs "Ignoring duplicate name" for each service file
+          # it reads a second time (modules/dbus.nix).
+          "each bus reads every D-Bus service directory once" = lib.all (c: let
+              sw = toString c.system.path;
+              linked = map toString (lib.concatMap (output: output.paths) c.system.path.chosenOutputs);
+              dirs = c.environment.etc."dbus-1".source.busServiceDirectories or { system = [ ]; session = [ sw ]; };
+              once = list: list == lib.unique list && !(lib.any (p: p != sw && lib.elem p linked) list);
+            in once dirs.system && once dirs.session && lib.elem sw dirs.system && !(lib.elem sw dirs.session)
+              && lib.any (line: lib.hasPrefix "XDG_DATA_DIRS " line && lib.hasInfix "/run/current-system/sw/share" line)
+                (lib.splitString "\n" c.environment.etc."pam/environment".text))
             [ kde gnome minimal ];
         };
       in pkgs.runCommand "aurora-firstboot-image-evaluation" {

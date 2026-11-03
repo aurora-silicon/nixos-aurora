@@ -20,10 +20,25 @@ in {
     default = true;
     description = "Allow malcontent's optional daemons to handle SIGTERM and stop promptly.";
   };
+  options.aurora.systemFixes.nmDispatcherPersist = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = "Keep NetworkManager's dispatcher running until NetworkManager has stopped.";
+  };
   config = lib.mkMerge [
     (lib.mkIf config.aurora.systemFixes.malcontentSignal {
       systemd.units = lib.genAttrs (map (name: "${name}.service")
         (daemons ++ [ "malcontent-webd-update" ])) signalFix;
+    })
+    (lib.mkIf (config.aurora.systemFixes.nmDispatcherPersist && config.networking.networkmanager.enable) {
+      # NetworkManager dispatches dns-change and connectivity-change events
+      # while it stops. The dispatcher exits after 10 s idle, and once shutdown
+      # is queued systemd refuses to start it, so its D-Bus activation fails on
+      # every shutdown. NetworkManager issue 1643.
+      systemd.services.NetworkManager-dispatcher = {
+        before = [ "NetworkManager.service" ];
+        serviceConfig.ExecStart = [ "" "${config.networking.networkmanager.package}/libexec/nm-dispatcher --persist" ];
+      };
     })
     {
       # Only contributes ordering when this optional swapfile unit exists.
