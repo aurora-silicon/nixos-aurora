@@ -12,6 +12,9 @@ filesystems the installer writes):
              no partition number in the core, no lookup without a hint
   network    NetworkManager is enabled; desktops ship its settings UI
   lid        logind still suspends on lid close; sleep is not masked
+  touchid    sudo, polkit and the lock screen offer a fingerprint, the login
+             screen, the console login, su and ssh ask for the password;
+             a short press of the power button suspends
   GL         factory images leave Mesa driver selection automatic
   greeter    KDE signs in with Plasma Login, whose greeter runs on KWin
              Wayland at the display's scale (SDDM's Xorg greeter drew at 1x)
@@ -237,6 +240,247 @@ def check_greeter(root, profile):
     return None
 
 
+# Touch ID: where PAM offers a fingerprint, and what the power button does.
+FINGERPRINT_SERVICES = ('sudo', 'polkit-1')
+PASSWORD_SERVICES = ('login', 'su', 'su-l', 'sshd')
+LOCK_SCREENS = {'gnome': ('gdm-fingerprint',), 'kde': ('kde-fingerprint',)}
+# The login screen and the lock screen's password prompt.
+PASSWORD_PROMPTS = {'gnome': ('gdm-password',), 'kde': ('plasmalogin', 'kde')}
+PAM_ACTIONS = {
+    'required': {'success': 'ok', 'default': 'bad'},
+    'requisite': {'success': 'ok', 'default': 'die'},
+    'sufficient': {'success': 'done', 'default': 'ignore'},
+    'optional': {'success': 'ok', 'default': 'ignore'},
+}
+
+
+def authselect_expression(text, features):
+    value, op, negate = None, None, False
+    for token in re.findall(r'not|and|or|"[^"]*"', text):
+        if token == 'not':
+            negate = not negate
+        elif token in ('and', 'or'):
+            op = token
+        else:
+            this = (token.strip('"') in features) != negate
+            negate = False
+            value = this if value is None else (value and this if op == 'and' else value or this)
+    return bool(value)
+
+
+def authselect_template(text, features):
+    """A profile file as authselect writes it for these features."""
+    lines = []
+    for line in text.splitlines():
+        found = re.search(r'\{(continue|stop) if ([^}]*)\}', line)
+        if found:
+            if (found[1] == 'continue') != authselect_expression(found[2], features):
+                break
+            continue
+        found = re.search(r'\{(include|exclude) if ([^}]*)\}', line)
+        if found:
+            if authselect_expression(found[2], features) != (found[1] == 'include'):
+                continue
+            line = line[:found.start()] + line[found.end():]
+        line = re.sub(r'\{imply [^}]*\}', '', line)
+        line = re.sub(r'\{if ((?:not )?"[^"]*"(?: (?:and|or) (?:not )?"[^"]*")*):([^}]*)\}',
+                      lambda m: (m[2].split('|') + [''])[0 if authselect_expression(m[1], features) else 1], line)
+        lines.append(line)
+    return '\n'.join(lines) + '\n'
+
+
+def authselect_files(root, extra):
+    """/etc/authselect files for the selected profile with extra features."""
+    conf = root.text(f'{root.etc}/authselect/authselect.conf')
+    if not conf:
+        return {}
+    words = [word for word in conf.split() if not word.startswith('#')]
+    profile, features = words[0], set(words[1:]) | set(extra)
+    for base in (f'{root.etc}/authselect/{profile}', f'/usr/share/authselect/vendor/{profile}',
+                 f'/usr/share/authselect/default/{profile}'):
+        if root.path(base).is_dir() and root.path(f'{base}/system-auth').is_file():
+            break
+    else:
+        return {}
+    files = {}
+    for name in ('system-auth', 'password-auth', 'fingerprint-auth', 'smartcard-auth', 'postlogin'):
+        text = root.text(f'{base}/{name}')
+        if text is not None:
+            files[name] = authselect_template(text, features)
+    return files
+
+
+def pam_auth_rows(text):
+    rows = []
+    for line in text.replace('\\\n', ' ').splitlines():
+        line = line.split('#', 1)[0].strip()
+        if line.startswith('@include'):
+            rows.append(('include', line.split()[1], []))
+            continue
+        found = re.match(r'-?auth\s+(\[[^\]]*\]|\S+)\s+(\S+)\s*(.*)', line)
+        if found:
+            rows.append((found[1], found[2], found[3].split()))
+    return rows
+
+
+def pam_service(root, name, generated):
+    """The text of a PAM service as Linux-PAM finds it."""
+    if name.startswith('/'):
+        return root.text(name)
+    for directory in (f'{root.etc}/pam.d', '/usr/lib/pam.d'):
+        path = root.path(f'{directory}/{name}')
+        if path.is_file():
+            target = os.path.basename(str(path))
+            if '/authselect/' in str(path) and target in generated:
+                return generated[target]
+            return path.read_text(errors='replace')
+    return None
+
+
+def pam_entries(root, name, generated, depth=0):
+    text = pam_service(root, name, generated)
+    if text is None or depth > 20:
+        return None
+    entries = []
+    for control, module, args in pam_auth_rows(text):
+        if control == 'include':
+            entries += pam_entries(root, module, generated, depth + 1) or []
+        elif control == 'substack':
+            entries.append(('substack', pam_entries(root, module, generated, depth + 1) or [], []))
+        else:
+            entries.append((control, module, args))
+    return entries
+
+
+def succeed_if_service(args, service):
+    """pam_succeed_if's answer for a test of the service name, else None."""
+    words = [arg for arg in args if arg not in ('quiet', 'quiet_fail', 'quiet_success', 'use_uid', 'debug', 'audit')]
+    if len(words) != 3 or words[0] != 'service':
+        return None
+    op, value = words[1], words[2]
+    return {'in': service in value.split(':'), 'notin': service not in value.split(':'),
+            '=': service == value, '!=': service != value}.get(op)
+
+
+def pam_paths(entries, service):
+    """Every sequence of modules an authentication can run."""
+    paths = []
+
+    def run(index, seen):
+        if index >= len(entries):
+            paths.append(seen)
+            return
+        control, module, args = entries[index]
+        if control == 'substack':
+            for sub in pam_paths(module, service):
+                run(index + 1, seen + sub)
+            return
+        name = os.path.basename(module)
+        outcomes = [True, False]
+        if name == 'pam_succeed_if.so' and succeed_if_service(args, service) is not None:
+            outcomes = [succeed_if_service(args, service)]
+        elif name == 'pam_permit.so':
+            outcomes = [True]
+        elif name in ('pam_deny.so', 'pam_debug.so'):
+            outcomes = [False]
+        actions = PAM_ACTIONS.get(control) or dict(item.split('=', 1) for item in control.strip('[]').split() if '=' in item)
+        for ok in outcomes:
+            action = actions.get('success' if ok else 'default', actions.get('default', 'ignore'))
+            if action in ('done', 'die'):
+                paths.append(seen + (name,))
+            elif action.isdigit():
+                run(index + 1 + int(action), seen + (name,))
+            else:
+                run(index + 1, seen + (name,))
+    run(0, ())
+    return paths
+
+
+def pam_flat(entries):
+    for control, module, args in entries:
+        if control == 'substack':
+            yield from pam_flat(module)
+        else:
+            yield control, module, args
+
+
+def pam_fingerprint(root, service, generated):
+    """None when the service is absent, else (fingerprint offered, password after it).
+
+    The password only stays usable when a failed or absent fingerprint moves on:
+    pam_fprintd must be sufficient (or a [...] control that ignores failure).
+    """
+    entries = pam_entries(root, service, generated)
+    if entries is None:
+        return None
+    paths = pam_paths(entries, service)
+    offered = [path for path in paths if 'pam_fprintd.so' in path]
+    controls = [control for control, module, _ in pam_flat(entries) if os.path.basename(module) == 'pam_fprintd.so']
+    tolerant = all(control == 'sufficient' or (control.startswith('[') and
+                   dict(item.split('=', 1) for item in control.strip('[]').split() if '=' in item).get('default') == 'ignore')
+                   for control in controls)
+    fallback = tolerant and any('pam_unix.so' in path[path.index('pam_fprintd.so'):] for path in offered)
+    return bool(offered), fallback
+
+
+def config_value(texts, section, key):
+    value = None
+    for text in texts:
+        current = None
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith('['):
+                current = line
+            elif current == section and re.match(rf'{key}\s*=', line):
+                value = line.split('=', 1)[1].strip()
+    return value
+
+
+def logind_texts(root):
+    files = [root.path(f'{root.etc}/systemd/logind.conf'), root.path('/usr/lib/systemd/logind.conf'),
+             root.path(f'{root.usr}/lib/systemd/logind.conf')]
+    dropins = {}
+    for directory in ('/usr/lib/systemd/logind.conf.d', f'{root.usr}/lib/systemd/logind.conf.d',
+                      f'{root.etc}/systemd/logind.conf.d'):
+        path = root.path(directory)
+        if path.is_dir():
+            for item in path.glob('*.conf'):
+                dropins[item.name] = item
+    texts = [path.read_text(errors='replace') for path in dict.fromkeys(files) if path.is_file()]
+    return texts + [dropins[name].read_text(errors='replace') for name in sorted(dropins) if dropins[name].is_file()]
+
+
+def check_touchid(root, profile):
+    # Fedora turns authselect's with-fingerprint on once on a Mac with a sensor.
+    generated = authselect_files(root, ['with-fingerprint'])
+    problems = []
+    expect = [(name, True) for name in FINGERPRINT_SERVICES + LOCK_SCREENS.get(profile, ())]
+    expect += [(name, False) for name in PASSWORD_SERVICES + PASSWORD_PROMPTS.get(profile, ())]
+    for name, wanted in expect:
+        result = pam_fingerprint(root, name, generated)
+        if result is None:
+            if wanted or name == 'login':
+                problems.append(f'PAM service {name} is missing')
+            continue
+        offered, fallback = result
+        if offered != wanted:
+            problems.append(f'{name} {"does not offer" if wanted else "offers"} a fingerprint')
+        elif wanted and name in FINGERPRINT_SERVICES and not fallback:
+            problems.append(f'{name} has no password after the fingerprint')
+    logind = logind_texts(root)
+    for key, wanted in (('HandlePowerKey', 'suspend'), ('HandlePowerKeyLongPress', 'poweroff')):
+        value = config_value(logind, '[Login]', key)
+        if value != wanted:
+            problems.append(f'logind {key}={value or "(default)"}, not {wanted}')
+    if profile == 'kde':
+        texts = [root.text(f'{root.etc}/xdg/powerdevilrc') or '']
+        for group in ('AC', 'Battery', 'LowBattery'):
+            value = config_value(texts, f'[{group}][SuspendAndShutdown]', 'PowerButtonAction')
+            if value != '1':
+                problems.append(f'Plasma {group} power button action is {value or "the logout screen"}, not suspend')
+    return '; '.join(problems) or None
+
+
 def boot_reader(args):
     if args.boot_dir:
         base = Path(args.boot_dir)
@@ -334,6 +578,7 @@ def main():
             checks.append(('logos', check_logos(root)))
         checks.append(('network', check_network(root, args.profile)))
         checks.append(('lid', check_lid(root)))
+        checks.append(('touchid', check_touchid(root, args.profile)))
         checks.append(('greeter', check_greeter(root, args.profile)))
     if args.esp:
         checks.append(('boot', check_boot(args)))

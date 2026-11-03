@@ -67,7 +67,7 @@ The factory-record reader and the sealed-record rebuild are Erik Bourget's
 work. Read XART-SAFETY.md for persistent identity ownership constraints and
 OS-IDENTITY.md for running Linux beside macOS.
 
-## Readiness and choices
+## Readiness
 
 On a Mac with a reader, `aurora-sep-ready.service` opens `/dev/sep-bio` before
 fprintd starts, which restores the enrolled fingerprints. It reports Touch ID
@@ -77,20 +77,46 @@ blocked it logs the reason and the documented `xart_guard=0` opt-out and fails
 the unit; when that cannot be told yet it logs "matching UNVERIFIED".
 
 The Aurora libfprint build keeps the full upstream driver set and adds the SEP
-biometric interface. This package does not edit PAM, replace password login or
-change the power-button action; `security.pam.services.<name>.fprintAuth`
-chooses which PAM services accept a fingerprint. Use the desktop's fingerprint
-enrollment flow once hardware qualification is complete. Module reload cannot
-repeat the secure enclave handoff; driver updates take effect after a full
-reboot.
+biometric interface. Module reload cannot repeat the secure enclave handoff;
+driver updates take effect after a full reboot.
 
-Two choices are left to the owner. GNOME Shell offers fingerprint only on the
-lock screen; `aurora.sep.greeterFingerprint.enable = true;` also offers it at
-the login screen from the next boot (a fingerprint login cannot unlock the
-keyring). The Touch ID sensor is the power button, and outside GNOME a short
-press powers off; `services.logind.settings.Login.HandlePowerKey = "suspend";`
-makes it suspend instead, as `share/doc/aurora-sep/logind-aurora-sep.conf` in
-the package describes.
+## Where Touch ID is used
+
+Enrol a finger in GNOME Settings > Users or in KDE System Settings > Users
+(or with `fprintd-enroll`). Touch ID is then offered here:
+
+| Where | Accepts |
+|---|---|
+| Lock screen | a fingerprint or the password |
+| `sudo`, polkit authentication dialogs | a fingerprint or the password |
+| Login screen (GDM, Plasma Login) | the password |
+| Text console login, `su`, ssh | the password |
+
+With `services.fprintd.enable`, nixpkgs defaults every PAM service's
+`fprintAuth` to on, which also puts the fingerprint in front of the console
+login, `su` and Plasma Login (through `login`). `modules/sep.nix` turns that
+default off and sets `security.pam.services.<name>.fprintAuth` explicitly:
+on for `sudo` and `polkit-1`, off for `login`, `su` and `sshd`.
+`fprintAuth` adds `pam_fprintd` as `sufficient`, ahead of the password. The
+lock screens use `gdm-fingerprint` and `kde-fingerprint` as GDM's and
+Plasma's modules define them. Set `fprintAuth` on a service to change it.
+
+The login screen asks for the password because a session started with a
+fingerprint cannot unlock the keyring or KWallet; GNOME can offer fingerprint
+there as well with `aurora.sep.greeterFingerprint.enable = true;`.
+
+## Power button
+
+The Touch ID sensor is the power button. A short press suspends and a 5 s
+press powers off (`services.logind.settings.Login.HandlePowerKey` and
+`HandlePowerKeyLongPress`, set with `lib.mkDefault`) at the console, on the
+login screens and on minimal installs. GNOME sessions handle the button
+themselves (power-button-action, suspend by default). In Plasma sessions
+PowerDevil handles it, and `/etc/xdg/powerdevilrc` makes a short press
+suspend; holding the button for a second opens the logout screen. Plasma
+users change it in System Settings > Power Management.
+
+## SELinux
 
 NixOS does not support SELinux, so there is no policy module. The Fedora
 package's `aurora-sep-selinux` labels `/dev/sep-bio` and lets fprintd read the
