@@ -16,14 +16,28 @@ let
         echo 'Invalid Apple EFI partition identity' >&2; exit 1;
       }
       uuid=''${uuid,,}
+      device=/dev/disk/by-partuuid/$uuid
       destination=/run/aurora-firmware
-      mkdir -p "$destination" /run/aurora-esp
+      mkdir -p "$destination"
       if [ ! -s "$destination/vendorfw/.vendorfw.manifest" ]; then
-        udevadm wait --timeout=60 "/dev/disk/by-partuuid/$uuid"
-        mount -t vfat -o ro "/dev/disk/by-partuuid/$uuid" /run/aurora-esp
-        trap 'umount /run/aurora-esp' EXIT
-        test -s /run/aurora-esp/vendorfw/firmware.cpio
-        (cd "$destination"; cpio --quiet --extract --no-absolute-filenames < /run/aurora-esp/vendorfw/firmware.cpio)
+        udevadm wait --timeout=60 "$device"
+        # The installed system mounts the ESP read-write, and the kernel
+        # refuses a second, read-only mount of it, so a retry there reads it
+        # in place.
+        esp=$(findmnt --noheadings --first-only --output TARGET --source "$device" || true)
+        if [ -z "$esp" ]; then
+          esp=/run/aurora-esp
+          mkdir -p "$esp"
+          mount -t vfat -o ro "$device" "$esp"
+          trap 'umount /run/aurora-esp' EXIT
+        fi
+        if [ ! -s "$esp/vendorfw/firmware.cpio" ]; then
+          # Nothing to hand off; peripherals are still admitted.
+          echo '<4>Aurora: the ESP has no vendor firmware; admitting peripherals without it' >&2
+          exit 0
+        fi
+        # Unconditional, so a retry replaces what a failed attempt left behind.
+        (cd "$destination"; cpio --quiet --extract --unconditional --no-absolute-filenames < "$esp/vendorfw/firmware.cpio")
       fi
     '';
   };
@@ -36,6 +50,12 @@ let
       # the keyboard and the other peripherals are still admitted below.
       status=0
       ${extractFirmware}/bin/aurora-extract-vendor-firmware || status=$?
+      if [[ "$status" != 0 && "''${1:-initrd}" != runtime ]]; then
+        # The installed system's aurora-vendor-firmware.service retries the
+        # handoff and reports its result.
+        echo '<4>Aurora: vendor firmware handoff failed; the installed system will retry it' >&2
+        status=0
+      fi
       export AURORA_FIRMWARE_ROOT="$destination/vendorfw"
       export AURORA_ADMIT_BLUETOOTH=0
       if [[ "''${1:-initrd}" == runtime ]]; then

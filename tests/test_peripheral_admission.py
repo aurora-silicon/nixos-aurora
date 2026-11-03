@@ -77,3 +77,54 @@ class PeripheralAdmissionTests(unittest.TestCase):
         self.assertIn('exit "$status"', loader[admit:loader.index("\n  };")])
         # The extraction step owns the early exit for boots without an ESP.
         self.assertNotIn("exit 0", loader[:loader.index("\n  };")])
+
+    def extract(self, root, esp):
+        """Runs the module's extraction script with the ESP mounted at esp."""
+        module = (ROOT / "modules/firmware.nix").read_text()
+        block = module.split('name = "aurora-extract-vendor-firmware";', 1)[1]
+        text = block.split("text = ''\n", 1)[1].split("\n    '';", 1)[0].replace("''${", "${")
+        text = text.replace("/sys/firmware/devicetree/base/chosen/asahi,efi-system-partition",
+                            str(root / "property")).replace("/run/aurora-firmware", str(root / "destination"))
+        (root / "property").write_bytes(b"5A1E0001-0000-4000-8000-00000000E5B0\0")
+        tools = root / "bin"
+        tools.mkdir()
+        for name, body in (("udevadm", "exit 0"), ("findmnt", f'echo "{esp}"'),
+                           ("mount", 'echo "mount $*" >> "$AURORA_TEST_CALLS"; exit 32'),
+                           ("cpio", 'echo "cpio $*" >> "$AURORA_TEST_CALLS"; mkdir -p vendorfw; '
+                                    "cat > vendorfw/.vendorfw.manifest")):
+            (tools / name).write_text(f"#!/bin/sh\n{body}\n")
+            (tools / name).chmod(0o755)
+        calls = root / "calls"
+        calls.touch()
+        env = dict(os.environ, PATH=f'{tools}:{os.environ["PATH"]}', AURORA_TEST_CALLS=str(calls))
+        result = subprocess.run(["bash", "-euo", "pipefail", "-c", text], env=env, capture_output=True)
+        return result, calls.read_text().splitlines()
+
+    def test_runtime_retry_reads_the_mounted_esp(self):
+        # The installed system has the ESP mounted read-write at /boot, and a
+        # second, read-only mount is refused, so the retry reads it in place.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "esp/vendorfw").mkdir(parents=True)
+            (root / "esp/vendorfw/firmware.cpio").write_bytes(b"fixture")
+            result, calls = self.extract(root, root / "esp")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(calls, ["cpio --quiet --extract --unconditional --no-absolute-filenames"])
+            self.assertEqual((root / "destination/vendorfw/.vendorfw.manifest").read_bytes(), b"fixture")
+
+    def test_esp_without_vendor_firmware_is_not_a_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "esp").mkdir()
+            result, calls = self.extract(root, root / "esp")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(b"the ESP has no vendor firmware; admitting peripherals without it", result.stderr)
+            self.assertEqual(calls, [])
+
+    def test_initrd_leaves_the_result_to_the_installed_system(self):
+        module = (ROOT / "modules/firmware.nix").read_text()
+        loader = module.split('name = "aurora-load-vendor-firmware";', 1)[1]
+        loader = loader[:loader.index("\n  };")]
+        defer = loader.index('"$status" != 0 && "\'\'${1:-initrd}" != runtime')
+        self.assertLess(loader.index("aurora-extract-vendor-firmware || status=$?"), defer)
+        self.assertIn("status=0", loader[defer:loader.index("/bin/aurora-peripheral-admission")])
