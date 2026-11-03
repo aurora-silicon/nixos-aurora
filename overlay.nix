@@ -208,6 +208,15 @@ in {
       grep -q test_macsmc_kernel_time_charge_units aurora-registered-tests.txt
     '';
   });
+  # FEX from Aurora's fork in place of nixpkgs' (fex.nix).
+  fex = final.callPackage ./fex.nix { fex = prev.fex; pin = pins.fex-emu; };
+  # Aurora's Steam: nixpkgs' steam FHS environment around the native ARM64
+  # launcher (steam/package.nix) in place of Valve's x86 bootstrap.
+  steam-unwrapped = final.callPackage ./steam/package.nix {
+    src = source "aurora-steam-native";
+    inherit (pins.aurora-steam-native) commit;
+  };
+  steam = final.callPackage ./steam/fhs.nix { };
   # The userpages launcher, from the kernel's own source: it uses that tree's
   # private PR_AURORA_* prctl numbers.
   aurora-userpages = final.stdenv.mkDerivation {

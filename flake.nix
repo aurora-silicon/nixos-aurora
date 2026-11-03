@@ -53,6 +53,8 @@
         uboot = pkgs.uboot-asahi;
         kernel = pkgs.linux-asahi.kernel;
         userpages = pkgs.aurora-userpages;
+        fex = pkgs.fex;
+        steam = pkgs.steam;
         mesa = pkgs.mesa;
         rusticl = pkgs.aurora-rusticl;
         lavapipe = pkgs.aurora-lavapipe;

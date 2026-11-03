@@ -1,0 +1,16 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Steam
+GenericName=Game Client
+Comment=Play and manage your Steam games (native ARM64 client)
+Exec=steam %U
+TryExec=steam
+Icon=steam
+Terminal=false
+Categories=Game;
+MimeType=x-scheme-handler/steam;x-scheme-handler/steamlink;
+StartupNotify=true
+StartupWMClass=Steam
+PrefersNonDefaultGPU=true
+X-KDE-RunOnDiscreteGpu=true
