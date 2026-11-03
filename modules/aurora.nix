@@ -1,7 +1,7 @@
 { config, lib, pkgs, ... }:
 {
   imports = [ ./ane.nix ./firmware.nix ./platform.nix ./audio.nix ./system-fixes.nix
-    ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix
+    ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix ./dbus.nix
     ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix
     ./userpages.nix ];
   options.aurora.desktop = lib.mkOption {

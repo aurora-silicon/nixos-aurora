@@ -370,6 +370,17 @@
               conf = lib.splitString "\n" c.environment.etc."modules-load.d/nixos.conf".source.text;
             in lib.elem "loop" conf && !(lib.elem "atkbd" conf) && !(lib.elem "cpufreq_schedutil" conf))
             [ kde gnome minimal ];
+          # dbus-broker logs "Ignoring duplicate name" for each service file
+          # it reads a second time (modules/dbus.nix).
+          "each bus reads every D-Bus service directory once" = lib.all (c: let
+              sw = toString c.system.path;
+              linked = map toString (lib.concatMap (output: output.paths) c.system.path.chosenOutputs);
+              dirs = c.environment.etc."dbus-1".source.busServiceDirectories or { system = [ ]; session = [ sw ]; };
+              once = list: list == lib.unique list && !(lib.any (p: p != sw && lib.elem p linked) list);
+            in once dirs.system && once dirs.session && lib.elem sw dirs.system && !(lib.elem sw dirs.session)
+              && lib.any (line: lib.hasPrefix "XDG_DATA_DIRS " line && lib.hasInfix "/run/current-system/sw/share" line)
+                (lib.splitString "\n" c.environment.etc."pam/environment".text))
+            [ kde gnome minimal ];
         };
       in pkgs.runCommand "aurora-firstboot-image-evaluation" {
         rootUnit = let
