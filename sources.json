@@ -174,5 +174,14 @@
         "version": "1.31.1"
       }
     }
+  },
+  "aurora-touchid-rearm": {
+    "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
+    "commit": "f73bf267eed958d47a63a7a49c46e669d70f5c75",
+    "version": "1",
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-sep-userspace/tar.gz/f73bf267eed958d47a63a7a49c46e669d70f5c75",
+    "archive_root": "aurora-sep-userspace-f73bf267eed958d47a63a7a49c46e669d70f5c75",
+    "sha256": "c2b6e6f477322ac8fec1476ef37e659318d0c76e122b1c33a2d099bc66f43350",
+    "nix_hash": "sha256-wrbm9HcyKsj+wUdu835lkxjQx24SKxwzotCZvGb0M1A="
   }
 }
