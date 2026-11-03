@@ -20,13 +20,15 @@ import updatelib as lib  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 NIX = True
 # Source key -> the flake package the CI matrix builds.
-RECIPES = {'kernel-aurora': 'kernel', 'aura': 'aura', 'mesa-aurora': 'mesa'}
+RECIPES = {'kernel-aurora': 'kernel', 'aura': 'aura', 'mesa-aurora': 'mesa',
+           'fex-emu': 'fex', 'aurora-steam-native': 'steam'}
 KINDS = {'kernel-aurora': 'kernel', 'mesa-aurora': 'mesa'}
 CI_WORKFLOWS = ['checks.yml']
 PATCH_PATHS = [r'sources\.json', r'kernel/provenance\.json', r'locks/aura\.Cargo\.lock', r'overlay\.nix',
                r'mesa\.nix']
 # Files that record a source commit outside sources.json.
-COMMIT_FILES = {'kernel-aurora': ['kernel/provenance.json'], 'aura': [], 'mesa-aurora': []}
+COMMIT_FILES = {'kernel-aurora': ['kernel/provenance.json'], 'aura': [], 'mesa-aurora': [],
+                'fex-emu': [], 'aurora-steam-native': []}
 # Where each Rust source's lock comes from inside its archive.
 CARGO_LOCKS = {'aura': ('rust/Cargo.lock', 'locks/aura.Cargo.lock')}
 

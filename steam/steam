@@ -1,0 +1,31 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Aurora's `steam`: Valve's native ARM64 Linux Steam client, started in a
+# 4 KiB page process tree (aurora-steam-native). The first start installs the
+# client for the current user from Valve's CDN, checked against Valve's
+# manifest; nothing from Valve is shipped in this package.
+set -euo pipefail
+lib=@LIBDIR@
+userpages=${AURORA_USERPAGES_LAUNCHER:-@USERPAGES@}
+export AURORA_USERPAGES_LAUNCHER=$userpages
+fail() {
+	echo "steam: $*" >&2
+	if [ ! -t 2 ] && command -v notify-send >/dev/null 2>&1; then
+		notify-send -a Steam "Steam cannot start" "$*" 2>/dev/null || :
+	fi
+	exit 2
+}
+[ -x "$userpages" ] || fail "the 4 KiB page launcher $userpages is missing (install aurora-userpages)"
+if ! "$userpages" 4k true 2>/dev/null; then
+	fail "this kernel was started without 4 KiB process pages; @USER4K_HINT@"
+fi
+if [ -z "${AURORA_STEAM_ROOT:-}" ]; then
+	root=$(readlink -f -- "$HOME/.steam/root" 2>/dev/null || true)
+	if [ -z "$root" ] || [ ! -x "$root/steamrtarm64/steam" ]; then
+		[ ! -e "$HOME/.steam/root" ] || fail "$HOME/.steam/root is not a native ARM64 Steam client; move it aside to install one"
+		echo "steam: installing Valve's native ARM64 client for $USER" >&2
+		python3 "$lib/install-steam-arm64.py" \
+			--prefix "${XDG_STATE_HOME:-$HOME/.local/state}/aurora-steam-native/prefix"
+	fi
+fi
+exec "$lib/bin/steam-native4k" "$@"
