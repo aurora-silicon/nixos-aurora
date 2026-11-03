@@ -37,7 +37,10 @@ let
   '';
 in {
   boot.loader.grub.font = lib.mkDefault null;
-  boot.loader.grub.splashImage = lib.mkDefault null;
+  # grub.nix sets its NixOS wallpaper with mkDefault, so a plain mkDefault
+  # null would conflict with it; one step stronger still loses to a
+  # configuration's own setting.
+  boot.loader.grub.splashImage = lib.mkOverride 999 null;
   boot.loader.grub.timeoutStyle = lib.mkDefault "hidden";
   boot.loader.timeout = lib.mkDefault 1;
 
