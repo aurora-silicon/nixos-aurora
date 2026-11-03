@@ -179,6 +179,9 @@
               "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
               "the Type-C port controllers find their USB4 router in the initrd" =
                 lib.all (m: lib.elem m config.boot.initrd.availableKernelModules) [ "tps6598x" "thunderbolt_apple" ];
+              "the display chain and its PMP come up before the root is unlocked" =
+                lib.all (m: lib.elem m config.boot.initrd.availableKernelModules)
+                  [ "apple-pmp" "mux-apple-display-crossbar" "appledrm" ];
               "PipeWire and WirePlumber use the pinned audio and UCM profiles" =
                 lib.elem value.pkgs.asahi-audio config.services.pipewire.configPackages
                 && lib.elem value.pkgs.asahi-audio config.services.pipewire.wireplumber.configPackages
