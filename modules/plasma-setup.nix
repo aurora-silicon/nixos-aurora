@@ -43,6 +43,13 @@ in {
     # The setup user's home with the wizard's autostart entry, recreated in
     # /run at every boot.
     systemd.tmpfiles.packages = [ package ];
+    # plasma-setup-tmpfiles.conf sets every file in that home to 0750, and
+    # systemd-xdg-autostart-generator warns about an executable entry on every
+    # boot until setup completes. Mode adjustments run in file name order, so
+    # this name must sort after plasma-setup-tmpfiles.conf.
+    systemd.tmpfiles.settings.plasma-setup-xdg-autostart."/run/plasma-setup/.config/autostart/*.desktop".z = {
+      mode = "0640";
+    };
     # The package's sysusers.d entry: u plasma-setup - "Plasma Setup" /run/plasma-setup /bin/sh
     users.users.plasma-setup = {
       isSystemUser = true;
