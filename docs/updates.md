@@ -42,7 +42,8 @@ including the MacBook Neo.
   unchanged file is left alone. A changed one is written to `boot.bin.new`, verified, the previous file is
   kept as `m1n1/boot.bin.old` and the new one renamed into place. Any refusal leaves the ESP unchanged and
   fails the bootloader install loudly.
-- Stage 1 (`aurora/stage1.bin` and the boot object) is never written; it belongs to the installer.
+- Stage 1 (`aurora/stage1.bin`, `aurora/stage1.macho` and the boot object) is never written; it belongs
+  to the installer.
 - The Apple Silicon module's own copy (`boot.loader.grub.extraFiles`, an unchecked overwrite with no
   backup) is removed on installed systems. `aurora.stage2.enable = false` stops Stage 2 updates entirely.
 

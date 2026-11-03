@@ -8,7 +8,7 @@ installer=${3:?built nixos-install path required}
 aura=${4:?built Aura path required}
 grub=${5:?built GRUB EFI path required}
 [[ $desktop =~ ^(kde|gnome|minimal)$ && $system == /nix/store/* && -x $system/bin/switch-to-configuration ]]
-[[ -x $installer/bin/nixos-install && -s $aura/share/aura/stage1/aura-raw.bin ]]
+[[ -x $installer/bin/nixos-install && -s $aura/share/aura/stage1/aura-raw.bin && -s $aura/share/aura/stage1/aura-boot.macho ]]
 [[ -x $grub/bin/grub-mkimage && -d $grub/lib/grub/arm64-efi ]]
 [[ $(id -u) == 0 && $(uname -m) == aarch64 ]]
 profile=nixos-$desktop
@@ -77,6 +77,8 @@ install -d -m 0755 "$target/usr/lib/aurora" "$target/etc/nixos" "$target/boot/ef
 printf 'aurora-btrfs-v1\n' > "$target/usr/lib/aurora/image-format"
 touch "$target/var/lib/aurora/firstboot/pending"
 install -Dm644 "$aura/share/aura/stage1/aura-raw.bin" "$target/boot/efi/aurora/stage1.bin"
+# The installer boots this Mach-O form of the same Stage 1 on M4 and later Macs.
+install -Dm644 "$aura/share/aura/stage1/aura-boot.macho" "$target/boot/efi/aurora/stage1.macho"
 revision=$(git -C "$root" rev-parse HEAD)
 # What /etc/nixos follows: the testing or stable channel ref (moved only once
 # the signed cache holds that commit's outputs), or "pinned" to this commit.

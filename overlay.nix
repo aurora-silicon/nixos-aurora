@@ -345,6 +345,7 @@ in {
       mkdir -p stage1
       cp build/aura.bin stage1/aura-raw.bin
       cp build/aura.macho stage1/aura.macho
+      cp build/aura-boot.macho stage1/aura-boot.macho
       make clean
       make $makeFlags ESP_STAGE2=1
     '';
