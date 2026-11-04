@@ -507,6 +507,42 @@ in {
       patchShebangs $out/libexec/speakerguardd/use-feedback-guard
     '';
   };
+  # speakerguardd 1.0 (the v2 branch): a new program, packaged beside the 0.1
+  # daemon above. modules/speakerguardd-v2.nix installs it and holds the
+  # opt-in that makes it the speaker protection (aurora.speakerguardd.v2).
+  speakerguardd-v2 = let
+    # The crates this package ships; the rig and benchmark crates stay out.
+    crates = [ "-p" "sgv2-core" "-p" "sgv2-lv2" "-p" "sgv2-supervisor" "-p" "aurora-speaker-tuning" ];
+  in rustPackage "speakerguardd-v2" ./locks/speakerguardd-v2.Cargo.lock {
+    cargoBuildFlags = crates;
+    cargoTestFlags = crates;
+    postInstall = ''
+      mkdir -p $out/libexec/speakerguardd-v2 $out/lib/lv2/sgv2.lv2 $out/lib/systemd/system
+      mv $out/bin/speakerguardd $out/libexec/speakerguardd-v2/speakerguardd
+      mv $out/lib/libsgv2_lv2.so $out/lib/lv2/sgv2.lv2/libsgv2_lv2.so
+      rm -f $out/lib/*.rlib $out/lib/*.a
+      cp crates/sgv2-lv2/lv2/sgv2.lv2/*.ttl $out/lib/lv2/sgv2.lv2/
+      # Every plugin the bundle names must be the library installed beside it.
+      if grep -ho 'lv2:binary <[^>]*>' $out/lib/lv2/sgv2.lv2/*.ttl | grep -v '<libsgv2_lv2.so>'; then
+        echo 'The sgv2 bundle names a library this package does not install' >&2; exit 1
+      fi
+      # The upstream unit, under its own name so it installs beside the 0.1 unit.
+      substitute packaging/systemd/speakerguardd.service $out/lib/systemd/system/speakerguardd-v2.service \
+        --replace-fail "ExecStart=/usr/bin/speakerguardd" "ExecStart=$out/libexec/speakerguardd-v2/speakerguardd"
+      if grep -Eq '^(OnFailure|OnSuccess)=|speakersafetyd' $out/lib/systemd/system/speakerguardd-v2.service; then
+        echo 'The speakerguardd 1.0 unit must not chain to another daemon' >&2; exit 1
+      fi
+      install -Dm644 -t $out/share/licenses/speakerguardd-v2 LICENSE crates/aurora-speaker-tuning/LICENSE-aurora-audio-dsp
+    '';
+    meta = {
+      description = "In-graph speaker protection for Apple Silicon Macs (speakerguardd 1.0, preview)";
+      homepage = "https://github.com/aurora-silicon/speakerguardd/tree/v2";
+      # aurora-speaker-tuning is based on aurora-audio-dsp by saku, also MIT.
+      license = final.lib.licenses.mit;
+      platforms = [ "aarch64-linux" ];
+      mainProgram = "aurora-speaker-tuning";
+    };
+  };
   bankstown-lv2 = prev.bankstown-lv2.overrideAttrs (old: {
     src = source "bankstown";
     version = pins.bankstown.version;

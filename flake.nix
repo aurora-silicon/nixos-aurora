@@ -74,6 +74,7 @@
         fex-mesa = pkgs.aurora-fex-mesa;
         flatpak-gl = pkgs.aurora-flatpak-gl;
         speakerguardd = pkgs.speakerguardd;
+        speakerguardd-v2 = pkgs.speakerguardd-v2;
         mutter = pkgs.mutter;
         speakersafetyd = pkgs.speakersafetyd;
         bankstown = pkgs.bankstown-lv2;
@@ -96,6 +97,39 @@
             && lib.hasInfix "After=var-swap-swapfile.swap" unit.text) profiles;
       in assert lib.assertMsg valid "Aurora clean-boot packaging parity failed";
         pkgs.runCommandNoCC "aurora-clean-boot-defaults" { } "touch $out";
+
+      # speakerguardd 1.0 is opt-in: installed, it changes nothing; replaceLegacy
+      # masks the 0.1 daemon and speakersafetyd and starts the 1.0 unit.
+      speakerguardd-v2-opt-in = let
+        inherit (nixpkgs) lib;
+        probe = extra: ((makeSystem "minimal").extendModules { modules = [ extra ]; }).config;
+        off = probe { };
+        installed = probe { aurora.speakerguardd.v2.enable = true; };
+        on = probe { aurora.speakerguardd.v2.replaceLegacy = true; };
+        has = c: builtins.elem pkgs.speakerguardd-v2 c.environment.systemPackages
+          && builtins.elem pkgs.speakerguardd-v2 c.systemd.packages;
+        # A packaged unit with no settings has no entry in systemd.units.
+        unit = c: name: c.systemd.units."${name}.service" or { enable = true; wantedBy = [ ]; };
+        enabled = c: name: (unit c name).enable;
+        wanted = c: builtins.elem "multi-user.target" (unit c "speakerguardd-v2").wantedBy;
+      in assert lib.assertMsg (!has off && !wanted off)
+           "speakerguardd 1.0 must not be installed by default";
+         assert lib.assertMsg (has installed && !wanted installed
+             && enabled installed "speakersafetyd" && enabled installed "speakerguardd")
+           "installing speakerguardd 1.0 must leave the current protection running and its own unit off";
+         assert lib.assertMsg (has on && wanted on
+             && !enabled on "speakersafetyd" && !enabled on "speakerguardd")
+           "replaceLegacy must mask the 0.1 daemon and speakersafetyd and start speakerguardd 1.0";
+         pkgs.runCommand "speakerguardd-v2-package-check" { } ''
+           p=${pkgs.speakerguardd-v2}
+           test -x $p/libexec/speakerguardd-v2/speakerguardd
+           test -x $p/bin/aurora-speaker-tuning
+           test -f $p/lib/lv2/sgv2.lv2/manifest.ttl
+           test -f $p/lib/lv2/sgv2.lv2/libsgv2_lv2.so
+           grep -qx "ExecStart=$p/libexec/speakerguardd-v2/speakerguardd" $p/lib/systemd/system/speakerguardd-v2.service
+           test ! -e $p/bin/speakerguardd
+           touch $out
+         '';
 
       ane-packaging = let
         firmware = pkgs.runCommand "ane-test-firmware" { } ''
