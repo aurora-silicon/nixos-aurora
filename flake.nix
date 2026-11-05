@@ -98,35 +98,44 @@
       in assert lib.assertMsg valid "Aurora clean-boot packaging parity failed";
         pkgs.runCommandNoCC "aurora-clean-boot-defaults" { } "touch $out";
 
-      # speakerguardd 1.0 is opt-in: installed, it changes nothing; replaceLegacy
-      # masks the 0.1 daemon and speakersafetyd and starts the 1.0 unit.
-      speakerguardd-v2-opt-in = let
+      # speakerguardd 1.0 is installed on every Mac with the fleet gate on both
+      # stacks; enable = false removes it and its gate.
+      speakerguardd-v2-gated = let
         inherit (nixpkgs) lib;
         probe = extra: ((makeSystem "minimal").extendModules { modules = [ extra ]; }).config;
-        off = probe { };
-        installed = probe { aurora.speakerguardd.v2.enable = true; };
-        on = probe { aurora.speakerguardd.v2.replaceLegacy = true; };
+        on = probe { };
+        off = probe { aurora.speakerguardd.v2.enable = false; };
         has = c: builtins.elem pkgs.speakerguardd-v2 c.environment.systemPackages
           && builtins.elem pkgs.speakerguardd-v2 c.systemd.packages;
-        # A packaged unit with no settings has no entry in systemd.units.
-        unit = c: name: c.systemd.units."${name}.service" or { enable = true; wantedBy = [ ]; };
-        enabled = c: name: (unit c name).enable;
-        wanted = c: builtins.elem "multi-user.target" (unit c "speakerguardd-v2").wantedBy;
-      in assert lib.assertMsg (!has off && !wanted off)
-           "speakerguardd 1.0 must not be installed by default";
-         assert lib.assertMsg (has installed && !wanted installed
-             && enabled installed "speakersafetyd" && enabled installed "speakerguardd")
-           "installing speakerguardd 1.0 must leave the current protection running and its own unit off";
-         assert lib.assertMsg (has on && wanted on
-             && !enabled on "speakersafetyd" && !enabled on "speakerguardd")
-           "replaceLegacy must mask the 0.1 daemon and speakersafetyd and start speakerguardd 1.0";
+        unit = c: name: c.systemd.units.${name} or { enable = true; wantedBy = [ ]; text = ""; };
+        wanted = c: name: builtins.elem "multi-user.target" (unit c name).wantedBy;
+        gate = "${pkgs.speakerguardd-v2}/libexec/speakerguardd-v2/speakerguardd-gate legacy";
+        gated = c: name: lib.hasInfix "ExecCondition=${gate}" (unit c "${name}.service").text;
+      in assert lib.assertMsg (has on && wanted on "speakerguardd-v2.service" && wanted on "speakerguardd-v2-seat.path")
+           "speakerguardd 1.0 must be installed and enabled by default";
+         assert lib.assertMsg ((unit on "speakersafetyd.service").enable && (unit on "speakerguardd.service").enable
+             && gated on "speakersafetyd" && gated on "speakerguardd")
+           "the older daemons must stay installed and enabled, behind the fleet gate";
+         assert lib.assertMsg (lib.hasInfix "use-feedback-guard" (unit on "speakersafetyd.service").text)
+           "the gate must not replace speakersafetyd's own ExecCondition";
+         assert lib.assertMsg (!has off && !wanted off "speakerguardd-v2.service"
+             && !gated off "speakersafetyd" && !gated off "speakerguardd")
+           "enable = false must remove speakerguardd 1.0 and its gate";
          pkgs.runCommand "speakerguardd-v2-package-check" { } ''
            p=${pkgs.speakerguardd-v2}
-           test -x $p/libexec/speakerguardd-v2/speakerguardd
+           lx=$p/libexec/speakerguardd-v2
+           test -x $lx/speakerguardd
+           test -x $lx/speakerguardd-provision
+           test -x $lx/speakerguardd-gate
            test -x $p/bin/aurora-speaker-tuning
            test -f $p/lib/lv2/sgv2.lv2/manifest.ttl
            test -f $p/lib/lv2/sgv2.lv2/libsgv2_lv2.so
-           grep -qx "ExecStart=$p/libexec/speakerguardd-v2/speakerguardd" $p/lib/systemd/system/speakerguardd-v2.service
+           test -f $p/share/speakerguardd/gate.json
+           grep -qx "ExecStart=$lx/speakerguardd \$SGV2_ARGS" $p/lib/systemd/system/speakerguardd-v2.service
+           grep -qx "ExecStart=$lx/speakerguardd-provision run" $p/lib/systemd/system/speakerguardd-v2-provision.service
+           test -f $p/lib/systemd/system/speakerguardd-v2-seat.path
+           test -f $p/lib/systemd/user/speakerguardd-v2-graph.service
+           grep -q "$p/share/speakerguardd/machines.json" $lx/speakerguardd-gate
            test ! -e $p/bin/speakerguardd
            touch $out
          '';

@@ -513,16 +513,23 @@ in {
   speakerguardd-v2 = let
     # The crates this package ships; the rig and benchmark crates stay out.
     crates = [ "-p" "sgv2-core" "-p" "sgv2-lv2" "-p" "sgv2-supervisor" "-p" "aurora-speaker-tuning" ];
+    units = [ "speakerguardd.service" "speakerguardd-provision.service" "speakerguardd-selfcheck.service"
+              "speakerguardd-seat.service" "speakerguardd-seat.path" ];
+    userUnits = [ "speakerguardd-session.service" "speakerguardd-graph.service" ];
   in rustPackage "speakerguardd-v2" ./locks/speakerguardd-v2.Cargo.lock {
     cargoBuildFlags = crates;
     cargoTestFlags = crates;
-    # The self-check and the session helper are Python; their shebangs are
-    # patched to this interpreter. The tools they call come from the units'
-    # path (modules/speakerguardd-v2.nix).
+    # Provisioning, the gate, the self-check and the session helper are
+    # Python; their shebangs are patched to this interpreter. The tools they
+    # call come from the units' path (modules/speakerguardd-v2.nix), except
+    # the gate's, which also runs as the older daemons' ExecCondition.
     buildInputs = [ final.python3 ];
+    nativeCheckInputs = [ final.python3 ];
+    postCheck = "python3 -I packaging/session/test_provision.py";
     postInstall = ''
-      mkdir -p $out/libexec/speakerguardd-v2 $out/lib/lv2/sgv2.lv2 $out/lib/systemd/system $out/lib/systemd/user
-      mv $out/bin/speakerguardd $out/libexec/speakerguardd-v2/speakerguardd
+      lx=$out/libexec/speakerguardd-v2
+      mkdir -p $lx $out/lib/lv2/sgv2.lv2 $out/lib/systemd/system $out/lib/systemd/user
+      mv $out/bin/speakerguardd $lx/speakerguardd
       mv $out/lib/libsgv2_lv2.so $out/lib/lv2/sgv2.lv2/libsgv2_lv2.so
       rm -f $out/lib/*.rlib $out/lib/*.a
       cp crates/sgv2-lv2/lv2/sgv2.lv2/*.ttl $out/lib/lv2/sgv2.lv2/
@@ -530,31 +537,43 @@ in {
       if grep -ho 'lv2:binary <[^>]*>' $out/lib/lv2/sgv2.lv2/*.ttl | grep -v '<libsgv2_lv2.so>'; then
         echo 'The sgv2 bundle names a library this package does not install' >&2; exit 1
       fi
-      install -Dm755 packaging/session/speakerguardd-selfcheck packaging/session/speakerguardd-session -t $out/libexec/speakerguardd-v2
-      install -Dm644 packaging/session/wiring.py -t $out/libexec/speakerguardd-v2
-      install -Dm755 ${./packages/speakerguardd-v2/speakerguardd-v2-gate} $out/libexec/speakerguardd-v2/speakerguardd-v2-gate
-      patchShebangs --host $out/libexec/speakerguardd-v2
-      install -Dm644 packaging/session/machines.json -t $out/share/speakerguardd
-      # The per-machine graphs, as data: the opt-in's provisioning activates one.
+      for f in speakerguardd-provision speakerguardd-gate speakerguardd-selfcheck speakerguardd-session; do
+        install -Dm755 packaging/session/$f $lx/$f
+        substituteInPlace $lx/$f --replace-quiet /usr/share/speakerguardd/ $out/share/speakerguardd/
+      done
+      install -Dm644 packaging/session/wiring.py packaging/session/gen.py -t $lx
+      substituteInPlace $lx/speakerguardd-gate $lx/speakerguardd-provision \
+        --replace-fail 'default="aurora-speaker-tuning"' "default=\"$out/bin/aurora-speaker-tuning\""
+      substituteInPlace $lx/speakerguardd-gate --replace-fail '["amixer",' '["${final.alsa-utils}/bin/amixer",'
+      patchShebangs --host $lx
+      # The machine description and the fleet gate's data, unchanged from upstream.
+      install -Dm644 packaging/session/machines.json packaging/session/gate.json -t $out/share/speakerguardd
+      # The per-machine graphs, as reference data: provisioning generates the
+      # machine's own from the self-check's record.
       install -Dm644 packaging/pipewire/sgv2-*.conf -t $out/share/speakerguardd/pipewire
       install -Dm644 packaging/wireplumber/60-sgv2-*.conf -t $out/share/speakerguardd/wireplumber
       install -Dm644 packaging/etc/speakerguardd.conf.example docs/NEW-PLATFORM.md -t $out/share/doc/speakerguardd-v2
       # The upstream units, under their own names so they install beside the
-      # 0.1 unit. The self-check is a hard prerequisite of the supervisor.
-      substitute packaging/systemd/speakerguardd.service $out/lib/systemd/system/speakerguardd-v2.service \
-        --replace-fail "ExecStart=/usr/bin/speakerguardd " "ExecStart=$out/libexec/speakerguardd-v2/speakerguardd " \
-        --replace-fail "speakerguardd-selfcheck.service" "speakerguardd-v2-selfcheck.service"
-      substitute packaging/systemd/speakerguardd-selfcheck.service $out/lib/systemd/system/speakerguardd-v2-selfcheck.service \
-        --replace-fail "/usr/libexec/speakerguardd/speakerguardd-selfcheck" "$out/libexec/speakerguardd-v2/speakerguardd-selfcheck" \
-        --replace-fail "Before=speakerguardd.service" "Before=speakerguardd-v2.service" \
-        --replace-fail "RequiredBy=speakerguardd.service" "RequiredBy=speakerguardd-v2.service"
-      substitute packaging/systemd/speakerguardd-session.service $out/lib/systemd/user/speakerguardd-v2-session.service \
-        --replace-fail "ExecStart=/usr/libexec/speakerguardd-session " "ExecStart=$out/libexec/speakerguardd-v2/speakerguardd-session "
-      grep -qx 'Requires=speakerguardd-v2-selfcheck.service' $out/lib/systemd/system/speakerguardd-v2.service
-      grep -q '^After=.*speakerguardd-v2-selfcheck.service' $out/lib/systemd/system/speakerguardd-v2.service
-      if grep -Eq '^(OnFailure|OnSuccess)=|speakersafetyd|=speakerguardd\.service' \
-          $out/lib/systemd/system/speakerguardd-v2*.service $out/lib/systemd/user/speakerguardd-v2-session.service; then
-        echo 'A speakerguardd 1.0 unit chains to or names another daemon' >&2; exit 1
+      # 0.1 unit, with the programs where this package installs them.
+      rename() {
+        sed -e "s@/usr/libexec/speakerguardd/@$lx/@g" -e "s@^ExecStart=/usr/bin/speakerguardd @ExecStart=$lx/speakerguardd @" \
+            -e "s@/usr/share/speakerguardd/@$out/share/speakerguardd/@g" \
+            -e 's@\bspeakerguardd\(-[a-z]\+\)\?\.\(service\|path\)\b@speakerguardd-v2\1.\2@g' "$1" > "$2"
+      }
+      for u in ${toString units}; do rename packaging/systemd/$u $out/lib/systemd/system/''${u/speakerguardd/speakerguardd-v2}; done
+      for u in ${toString userUnits}; do rename packaging/systemd/$u $out/lib/systemd/user/''${u/speakerguardd/speakerguardd-v2}; done
+      sd=$out/lib/systemd/system
+      grep -qx "ExecStart=$lx/speakerguardd \$SGV2_ARGS" $sd/speakerguardd-v2.service
+      grep -qx 'Requires=speakerguardd-v2-provision.service speakerguardd-v2-selfcheck.service' $sd/speakerguardd-v2.service
+      grep -qx 'Requires=speakerguardd-v2-provision.service' $sd/speakerguardd-v2-selfcheck.service
+      grep -qx "ExecStart=$lx/speakerguardd-provision seat --unit speakerguardd-v2.service" $sd/speakerguardd-v2-seat.service
+      grep -qx "ExecStartPost=$lx/speakerguardd-provision activate --graph-unit speakerguardd-v2-graph.service" $sd/speakerguardd-v2-selfcheck.service
+      for u in speakerguardd-v2 speakerguardd-v2-provision speakerguardd-v2-selfcheck speakerguardd-v2-seat; do
+        grep -qx "ExecCondition=$lx/speakerguardd-gate v2" $sd/$u.service
+      done
+      if grep -Eq '^(OnFailure|OnSuccess)=|speakersafetyd|=speakerguardd\.service|/usr/' \
+          $sd/speakerguardd-v2* $out/lib/systemd/user/speakerguardd-v2*; then
+        echo 'A speakerguardd 1.0 unit chains to or names another daemon, or names a /usr path' >&2; exit 1
       fi
       install -Dm644 -t $out/share/licenses/speakerguardd-v2 LICENSE crates/aurora-speaker-tuning/LICENSE-aurora-audio-dsp
     '';
