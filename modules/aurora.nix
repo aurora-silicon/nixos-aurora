@@ -2,7 +2,7 @@
 {
   imports = [ ./ane.nix ./firmware.nix ./platform.nix ./audio.nix ./system-fixes.nix
     ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix ./dbus.nix
-    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix
+    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix
     ./userpages.nix ./boot-splash.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
