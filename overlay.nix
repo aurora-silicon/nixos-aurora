@@ -546,8 +546,10 @@ in {
         --replace-fail 'default="aurora-speaker-tuning"' "default=\"$out/bin/aurora-speaker-tuning\""
       substituteInPlace $lx/speakerguardd-gate --replace-fail '["amixer",' '["${final.alsa-utils}/bin/amixer",'
       patchShebangs --host $lx
-      # The machine description and the fleet gate's data, unchanged from upstream.
-      install -Dm644 packaging/session/machines.json packaging/session/gate.json -t $out/share/speakerguardd
+      # The fleet gate's data (qualified boards per protection unit), unchanged
+      # from upstream. Every per-board value is derived from the Mac's device
+      # tree and tuning at run time (wiring.py); no machine table is shipped.
+      install -Dm644 packaging/session/gate.json -t $out/share/speakerguardd
       # The per-machine graphs, as reference data: provisioning generates the
       # machine's own from the self-check's record.
       install -Dm644 packaging/pipewire/sgv2-*.conf -t $out/share/speakerguardd/pipewire

@@ -105,11 +105,17 @@
         probe = extra: ((makeSystem "minimal").extendModules { modules = [ extra ]; }).config;
         on = probe { };
         off = probe { aurora.speakerguardd.v2.enable = false; };
-        has = c: builtins.elem pkgs.speakerguardd-v2 c.environment.systemPackages
-          && builtins.elem pkgs.speakerguardd-v2 c.systemd.packages;
+        # The system's own build: its nixpkgs instance is not the flake's
+        # pkgs, so the store paths differ.
+        pkg = c: c.aurora.speakerguardd.v2.package;
+        has = c: (pkg c).pname == "speakerguardd-v2"
+          && builtins.elem (pkg c) c.environment.systemPackages
+          && builtins.elem (pkg c) c.systemd.packages;
         unit = c: name: c.systemd.units.${name} or { enable = true; wantedBy = [ ]; text = ""; };
         wanted = c: name: builtins.elem "multi-user.target" (unit c name).wantedBy;
-        gate = "${pkgs.speakerguardd-v2}/libexec/speakerguardd-v2/speakerguardd-gate legacy";
+        # A plain string: hasInfix cannot take a pattern that refers to a
+        # store path.
+        gate = builtins.unsafeDiscardStringContext "${pkg on}/libexec/speakerguardd-v2/speakerguardd-gate legacy";
         gated = c: name: lib.hasInfix "ExecCondition=${gate}" (unit c "${name}.service").text;
       in assert lib.assertMsg (has on) "speakerguardd 1.0 must be installed by default";
          assert lib.assertMsg (wanted on "speakerguardd-v2.service") "speakerguardd-v2.service must be wanted by multi-user.target";
@@ -136,7 +142,9 @@
            grep -qx "ExecStart=$lx/speakerguardd-provision run" $p/lib/systemd/system/speakerguardd-v2-provision.service
            test -f $p/lib/systemd/system/speakerguardd-v2-seat.path
            test -f $p/lib/systemd/user/speakerguardd-v2-graph.service
-           grep -q "$p/share/speakerguardd/machines.json" $lx/speakerguardd-gate
+           grep -q "$p/share/speakerguardd/gate.json" $lx/speakerguardd-gate
+           test -f $lx/wiring.py
+           test ! -e $p/share/speakerguardd/machines.json
            test ! -e $p/bin/speakerguardd
            touch $out
          '';
