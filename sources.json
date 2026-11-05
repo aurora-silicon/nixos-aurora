@@ -186,10 +186,10 @@
   },
   "fex-emu": {
     "repository": "https://github.com/aurora-silicon/fex",
-    "commit": "3f4ee4277f11b1986a5edf8ecc9c2c4169830bd4",
-    "source_url": "https://codeload.github.com/aurora-silicon/fex/tar.gz/3f4ee4277f11b1986a5edf8ecc9c2c4169830bd4",
-    "archive_root": "fex-3f4ee4277f11b1986a5edf8ecc9c2c4169830bd4",
-    "sha256": "628d5c16526cdf3f505dcd51bf6b9ec37c02c4b82b492ae6d1a8eec70cf239b8",
+    "commit": "c2c22c6a3654695ad436527ccaf95626b339ef11",
+    "source_url": "https://codeload.github.com/aurora-silicon/fex/tar.gz/c2c22c6a3654695ad436527ccaf95626b339ef11",
+    "archive_root": "fex-c2c22c6a3654695ad436527ccaf95626b339ef11",
+    "sha256": "48b6a8ea6b66fb6d625e0a29bde83ff942a78170648104e68a9791fb0d46fa3d",
     "version": "2610",
     "extra_sources": {
       "cpp-optparse": {
@@ -226,11 +226,11 @@
       },
       "rpmalloc": {
         "repository": "https://github.com/FEX-Emu/rpmalloc",
-        "commit": "09142d726429416bfa7b459151515fe3ab7622dd",
-        "source_url": "https://codeload.github.com/FEX-Emu/rpmalloc/tar.gz/09142d726429416bfa7b459151515fe3ab7622dd",
-        "archive_root": "rpmalloc-09142d726429416bfa7b459151515fe3ab7622dd",
-        "sha256": "3250fcc53532ed6161642b77f6179c7ba73173fb2130314aa7f019a574266ff6",
-        "nix_hash": "sha256-MlD8xTUy7WFhZCt39hece6cxc/shMDFKp/AZpXQmb/Y="
+        "commit": "ed227446afce6ff505b312bae1e10a3daaeeea39",
+        "source_url": "https://codeload.github.com/FEX-Emu/rpmalloc/tar.gz/ed227446afce6ff505b312bae1e10a3daaeeea39",
+        "archive_root": "rpmalloc-ed227446afce6ff505b312bae1e10a3daaeeea39",
+        "sha256": "f14761cc0c8976aed669475087021661f269699ef8297885b665eed4b764b087",
+        "nix_hash": "sha256-8UdhzAyJdq7WaUdQhwIWYfJpaZ74KXiFtmXu1LdksIc="
       },
       "Vulkan-Headers": {
         "repository": "https://github.com/KhronosGroup/Vulkan-Headers",
@@ -242,11 +242,11 @@
       },
       "vixl": {
         "repository": "https://github.com/FEX-Emu/vixl",
-        "commit": "585d860b12cdfc3a72f5fdad5e02e4d50a64c014",
-        "source_url": "https://codeload.github.com/FEX-Emu/vixl/tar.gz/585d860b12cdfc3a72f5fdad5e02e4d50a64c014",
-        "archive_root": "vixl-585d860b12cdfc3a72f5fdad5e02e4d50a64c014",
-        "sha256": "55804a95de0ac4741c9e52898e5bbfadafee2143f114fd9606d20b56970c6821",
-        "nix_hash": "sha256-VYBKld4KxHQcnlKJjlu/ra/uIUPxFP2WBtILVpcMaCE="
+        "commit": "6561d40650885ad24fbd0aa0cdb20ccb4808d444",
+        "source_url": "https://codeload.github.com/FEX-Emu/vixl/tar.gz/6561d40650885ad24fbd0aa0cdb20ccb4808d444",
+        "archive_root": "vixl-6561d40650885ad24fbd0aa0cdb20ccb4808d444",
+        "sha256": "03caa03990ee02c6d48781368332c4b9019ec2101addab3aa29eb359bb7d7653",
+        "nix_hash": "sha256-A8qgOZDuAsbUh4E2gzLEuQGewhAa3as6op6zWbt9dlM="
       },
       "unordered_dense": {
         "repository": "https://github.com/martinus/unordered_dense",
@@ -257,7 +257,7 @@
         "nix_hash": "sha256-qmjXfviEddtxC/ZHAX9cyxPO7G9V8976N+mVsEPrmQs="
       }
     },
-    "nix_hash": "sha256-Yo1cFlJs3z9QXc1Rv2uew3wCxLgrSSrm0ajuxwzyObg="
+    "nix_hash": "sha256-SLao6mtm+21iXgopveg/+UKngXBkgQTmipeR+w1G+j0="
   },
   "aurora-steam-native": {
     "repository": "https://github.com/aurora-silicon/aurora-steam-native",
