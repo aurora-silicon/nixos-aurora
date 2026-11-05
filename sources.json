@@ -19,21 +19,21 @@
   },
   "uboot-aurora": {
     "repository": "https://github.com/aurora-silicon/u-boot",
-    "commit": "d30213eadcaa886f4206d7661b61bc6cf7837828",
+    "commit": "279c4afa4bbaf600af1c2f493c75d8aadc206243",
     "version": "2026.07",
-    "source_url": "https://codeload.github.com/aurora-silicon/u-boot/tar.gz/d30213eadcaa886f4206d7661b61bc6cf7837828",
-    "archive_root": "u-boot-d30213eadcaa886f4206d7661b61bc6cf7837828",
-    "sha256": "67335b3fb832ab68bbde95e9f9b3808ace0fff96438786f34227dd5cdc9fe495",
-    "nix_hash": "sha256-ZzNbP7gyq2i73pXp+bOAis4P/5ZDh4bzQifdXNyf5JU="
+    "source_url": "https://codeload.github.com/aurora-silicon/u-boot/tar.gz/279c4afa4bbaf600af1c2f493c75d8aadc206243",
+    "archive_root": "u-boot-279c4afa4bbaf600af1c2f493c75d8aadc206243",
+    "sha256": "1b625dc543e7d4f9f6f88d89c8f7f96791a27da2fdfdfc2f21f636f23bbf2fe8",
+    "nix_hash": "sha256-G2JdxUPn1Pn2+I2JyPf5Z5GifaL9/fwvIfY28ju/L+g="
   },
   "mesa-aurora": {
     "repository": "https://github.com/aurora-silicon/mesa",
-    "commit": "05ddb00f5ca9d0e153d987fed6454f21902ee1c8",
+    "commit": "c1753704ed733e6e77fdf8ce6ac83fbf7c5e59d5",
     "version": "26.3.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/05ddb00f5ca9d0e153d987fed6454f21902ee1c8",
-    "archive_root": "mesa-05ddb00f5ca9d0e153d987fed6454f21902ee1c8",
-    "sha256": "1ef010b1765a82c649fab71938a9ce09b54d314dfc461c742c19b0f42d711b58",
-    "nix_hash": "sha256-HvAQsXZagsZJ+rcZOKnOCbVNMU38Rhx0LBmw9C1xG1g="
+    "source_url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/c1753704ed733e6e77fdf8ce6ac83fbf7c5e59d5",
+    "archive_root": "mesa-c1753704ed733e6e77fdf8ce6ac83fbf7c5e59d5",
+    "sha256": "108fbcb3c001a1c2f20122303969ab7a6835a7895d376d1074b623d21b995a2f",
+    "nix_hash": "sha256-EI+8s8ABocLyASIwOWmremg1p4ldN20QdLYj0huZWi8="
   },
   "speakerguardd": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
@@ -46,21 +46,21 @@
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",
-    "commit": "a270b2e2d705ed521b07d008aac45283c75fb986",
+    "commit": "c3fe4b4abc5cc7b6a3326b24431257a6a4d8f692",
     "version": "10",
-    "source_url": "https://codeload.github.com/aurora-silicon/alsa-ucm-conf-asahi/tar.gz/a270b2e2d705ed521b07d008aac45283c75fb986",
-    "archive_root": "alsa-ucm-conf-asahi-a270b2e2d705ed521b07d008aac45283c75fb986",
-    "sha256": "7b5cd23b7ee22cd1c69c4d3b090f5140f7f04fb53d3578349101c8e916faf261",
-    "nix_hash": "sha256-e1zSO37iLNHGnE07CQ9RQPfwT7U9NXg0kQHI6Rb68mE="
+    "source_url": "https://codeload.github.com/aurora-silicon/alsa-ucm-conf-asahi/tar.gz/c3fe4b4abc5cc7b6a3326b24431257a6a4d8f692",
+    "archive_root": "alsa-ucm-conf-asahi-c3fe4b4abc5cc7b6a3326b24431257a6a4d8f692",
+    "sha256": "98d67e96b5b4346672a65164c9c0c5f23015148444d4241fb90af9f11df1e449",
+    "nix_hash": "sha256-mNZ+lrW0NGZyplFkycDF8jAVFIRE1CQfuQr58R3x5Ek="
   },
   "aurora-audio": {
     "repository": "https://github.com/aurora-silicon/asahi-audio",
-    "commit": "d957fabbacbe7dd67b39f052b2ff21edea7ee038",
+    "commit": "f1d596b9efeede884b28e3ad81fff24b22ba97a3",
     "version": "4.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/asahi-audio/tar.gz/d957fabbacbe7dd67b39f052b2ff21edea7ee038",
-    "archive_root": "asahi-audio-d957fabbacbe7dd67b39f052b2ff21edea7ee038",
-    "sha256": "41487970377d5ebb9dd652b1d6311ce8002ca95bb02381eb5e620dd01ddd15b0",
-    "nix_hash": "sha256-QUh5cDd9Xrud1lKx1jEc6AAsqVuwI4HrXmIN0B3dFbA="
+    "source_url": "https://codeload.github.com/aurora-silicon/asahi-audio/tar.gz/f1d596b9efeede884b28e3ad81fff24b22ba97a3",
+    "archive_root": "asahi-audio-f1d596b9efeede884b28e3ad81fff24b22ba97a3",
+    "sha256": "474ef9dde74f7d7763e76d6da72eb4a318fda78dace4fda6c761043ced152676",
+    "nix_hash": "sha256-R0753edPfXdj521tpy60oxj9p42s5P2mx2EEPO0VJnY="
   },
   "aurora-bless": {
     "repository": "https://github.com/aurora-silicon/aurora-bless",
