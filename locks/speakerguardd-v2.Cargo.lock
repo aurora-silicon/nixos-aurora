@@ -16,6 +16,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sgv2-core",
+ "sgv2-lv2",
  "sha2",
  "tar",
 ]
