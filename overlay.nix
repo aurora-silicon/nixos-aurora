@@ -349,8 +349,8 @@ in {
       kernelLLVM.clang-unwrapped kernelLLVM.lld kernelLLVM.llvm final.buildPackages.python3
     ];
     makeFlags = [ "RELEASE=1" "CHAINLOADING=1" "BUILTIN_LOGO=aurora" "USE_CLANG=1" ];
-    # This pin carries the v1.0.0b4 release label in archive builds.
-    env = (old.env or { }) // { AURA_VERSION_TAG = "1.0.0b4"; };
+    # This pin carries the v1.0.0b5 release label in archive builds.
+    env = (old.env or { }) // { AURA_VERSION_TAG = "1.0.0b5"; };
     postBuild = ''
       mkdir -p stage1
       cp build/aura.bin stage1/aura-raw.bin
@@ -628,6 +628,26 @@ in {
       homepage = "https://github.com/aurora-silicon/camera-denoise";
       license = final.lib.licenses.mit;
       mainProgram = "aurora-camera-denoise";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
+  # The keyboard backlight that follows the ambient light sensor, a system
+  # service. modules/kbd-light.nix enables it and writes its settings.
+  aurora-kbd-light = final.stdenv.mkDerivation {
+    pname = "aurora-kbd-light";
+    version = pins.kbd-light.version;
+    src = source "kbd-light";
+    makeFlags = [ "PREFIX=${placeholder "out"}" "UNITDIR=${placeholder "out"}/lib/systemd/system" ];
+    postInstall = ''
+      substituteInPlace $out/lib/systemd/system/aurora-kbd-light.service \
+        --replace-fail "ExecStart=/usr/bin/aurora-kbd-light" "ExecStart=$out/bin/aurora-kbd-light"
+    '';
+    passthru.commit = pins.kbd-light.commit;
+    meta = {
+      description = "Keyboard backlight that follows the ambient light sensor";
+      homepage = "https://github.com/aurora-silicon/kbd-light";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-kbd-light";
       platforms = [ "aarch64-linux" ];
     };
   };

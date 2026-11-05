@@ -10,12 +10,12 @@
   },
   "aura": {
     "repository": "https://github.com/aurora-silicon/aura",
-    "commit": "8b15096337e97f934438e1e7f3e96182440351dc",
-    "version": "1.0.0b4",
-    "source_url": "https://codeload.github.com/aurora-silicon/aura/tar.gz/8b15096337e97f934438e1e7f3e96182440351dc",
-    "archive_root": "aura-8b15096337e97f934438e1e7f3e96182440351dc",
-    "sha256": "b3060777bb519cda245a0b16df3f669be110d3436835229f5f6c81a402f936f4",
-    "nix_hash": "sha256-swYHd7tRnNokWgsW3z9mm+EQ00NoNSKfX2yBpAL5NvQ="
+    "commit": "9a173ff5bf6264d56fdc4a6d2dae96ed482cb195",
+    "version": "1.0.0b5",
+    "source_url": "https://codeload.github.com/aurora-silicon/aura/tar.gz/9a173ff5bf6264d56fdc4a6d2dae96ed482cb195",
+    "archive_root": "aura-9a173ff5bf6264d56fdc4a6d2dae96ed482cb195",
+    "sha256": "87344973c2da62e8ee7b65a15d90e8be9639a3396e668595fb62c9222871c24a",
+    "nix_hash": "sha256-hzRJc8LaYujue2WhXZDovpY5ozluZoWV+2LJIihxwko="
   },
   "uboot-aurora": {
     "repository": "https://github.com/aurora-silicon/u-boot",
@@ -152,6 +152,15 @@
     "archive_root": "camera-denoise-a929985764bc03d1d3517c2a7e9b8dde918381b8",
     "sha256": "a64325767aff4555b6c6ca1caaded55ac814c0da474c1a47bbaf99dc81175fa0",
     "nix_hash": "sha256-pkMldnr/RVW2xsocqt7VWsgUwNpHTBpHu6+Z3IEXX6A="
+  },
+  "kbd-light": {
+    "repository": "https://github.com/aurora-silicon/kbd-light",
+    "commit": "727076b83eb65b0162317a9e2fa0ba850df1f5ca",
+    "version": "0.1.0",
+    "source_url": "https://codeload.github.com/aurora-silicon/kbd-light/tar.gz/727076b83eb65b0162317a9e2fa0ba850df1f5ca",
+    "archive_root": "kbd-light-727076b83eb65b0162317a9e2fa0ba850df1f5ca",
+    "sha256": "9419eea57c51fd4ccf83fe764bb85c18f9054d684d21415d189fa46fe568e88c",
+    "nix_hash": "sha256-lBnupXxR/UzPg/52S7hcGPkFTWhNIUFdGJ+kb+Vo6Iw="
   },
   "omarchy-ane-tools": {
     "repository": "https://github.com/joshuaswarren/omarchy-ane",
