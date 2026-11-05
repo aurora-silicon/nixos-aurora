@@ -12,7 +12,7 @@
 # Exit 0: start. Exit 1: skip the unit (systemd logs the condition).
 
 # Boards qualified on speakerguardd 1.0, by device-tree compatible.
-QUALIFIED="j616s j316s j413"
+QUALIFIED="j616s j316s"
 
 # An administrator may run 1.0 on a board that has not qualified, for
 # qualification itself, by naming the board in this file (one per line).

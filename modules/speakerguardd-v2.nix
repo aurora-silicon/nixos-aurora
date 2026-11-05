@@ -32,7 +32,7 @@ in {
         masks the 0.1 speakerguardd and speakersafetyd, so neither they nor
         their udev rules can start, and starts speakerguardd-v2.service at
         boot, with its self-check and session helper, on a qualified board
-        only (speakerguardd-v2-gate; J616s, J316s and J413 for now). Set it only on a machine
+        only (speakerguardd-v2-gate; J616s and J316s for now). Set it only on a machine
         that passed the 1.0 qualification
         (parity with macOS, fault injection, a clean boot log, and loudness
         and clarity against macOS); until then the machine keeps the
