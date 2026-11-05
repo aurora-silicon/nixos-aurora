@@ -111,8 +111,9 @@
         wanted = c: name: builtins.elem "multi-user.target" (unit c name).wantedBy;
         gate = "${pkgs.speakerguardd-v2}/libexec/speakerguardd-v2/speakerguardd-gate legacy";
         gated = c: name: lib.hasInfix "ExecCondition=${gate}" (unit c "${name}.service").text;
-      in assert lib.assertMsg (has on && wanted on "speakerguardd-v2.service" && wanted on "speakerguardd-v2-seat.path")
-           "speakerguardd 1.0 must be installed and enabled by default";
+      in assert lib.assertMsg (has on) "speakerguardd 1.0 must be installed by default";
+         assert lib.assertMsg (wanted on "speakerguardd-v2.service") "speakerguardd-v2.service must be wanted by multi-user.target";
+         assert lib.assertMsg (wanted on "speakerguardd-v2-seat.path") "speakerguardd-v2-seat.path must be wanted by multi-user.target";
          assert lib.assertMsg ((unit on "speakersafetyd.service").enable && (unit on "speakerguardd.service").enable
              && gated on "speakersafetyd" && gated on "speakerguardd")
            "the older daemons must stay installed and enabled, behind the fleet gate";
