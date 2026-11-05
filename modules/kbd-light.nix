@@ -23,7 +23,7 @@ in {
       description = ''
         Run aurora-kbd-light, which sets the keyboard backlight from the
         ambient light sensor the way macOS does: brightest in the dark, off in
-        daylight and with the lid closed. A level set from the desktop is
+        daylight, with the lid closed and while the displays sleep. A level set from the desktop is
         respected. Without a keyboard backlight the service does not start.
       '';
     };

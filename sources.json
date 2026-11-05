@@ -146,12 +146,12 @@
   },
   "kbd-light": {
     "repository": "https://github.com/aurora-silicon/kbd-light",
-    "commit": "ba25746dc9ee5e38b7b9347bac2fd364a21e3d2e",
+    "commit": "727076b83eb65b0162317a9e2fa0ba850df1f5ca",
     "version": "0.1.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/kbd-light/tar.gz/ba25746dc9ee5e38b7b9347bac2fd364a21e3d2e",
-    "archive_root": "kbd-light-ba25746dc9ee5e38b7b9347bac2fd364a21e3d2e",
-    "sha256": "fb08160a26743d9dc641c2d0a786a9b75370641964ea79c8a6478b34e9202550",
-    "nix_hash": "sha256-+wgWCiZ0PZ3GQcLQp4apt1NwZBlk6nnIpkeLNOkgJVA="
+    "source_url": "https://codeload.github.com/aurora-silicon/kbd-light/tar.gz/727076b83eb65b0162317a9e2fa0ba850df1f5ca",
+    "archive_root": "kbd-light-727076b83eb65b0162317a9e2fa0ba850df1f5ca",
+    "sha256": "9419eea57c51fd4ccf83fe764bb85c18f9054d684d21415d189fa46fe568e88c",
+    "nix_hash": "sha256-lBnupXxR/UzPg/52S7hcGPkFTWhNIUFdGJ+kb+Vo6Iw="
   },
   "omarchy-ane-tools": {
     "repository": "https://github.com/joshuaswarren/omarchy-ane",
