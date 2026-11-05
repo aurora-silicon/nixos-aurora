@@ -21,7 +21,8 @@
     hardware.asahi.enable = true;
     nixpkgs.hostPlatform = "aarch64-linux";
     # Keep Steam's GTK 2 runtime available with a warning, as in flake.nix.
-    # Remove this exception with the runtime dependency (see README.md).
+    # Remove this exception when Steam no longer needs GTK 2.
+    # https://github.com/NixOS/nixpkgs/issues/410814
     nixpkgs.config.problems.handlers."gtk+".broken = lib.mkDefault "warn";
     nix.settings.extra-substituters = [ "https://aurorasilicon.org/nixos-aurora/cache" ];
     nix.settings.extra-trusted-public-keys = [ (lib.removeSuffix "\n" (builtins.readFile ../keys/cache.pub)) ];

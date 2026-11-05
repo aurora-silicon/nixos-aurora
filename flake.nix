@@ -12,7 +12,8 @@
       pkgs = import nixpkgs {
         inherit system overlays;
         # Steam's ARM64 runtime includes GTK 2; retain its deprecation warning.
-        # Remove this exception with the runtime dependency (see README.md).
+        # Remove this exception when Steam no longer needs GTK 2.
+        # https://github.com/NixOS/nixpkgs/issues/410814
         config.problems.handlers."gtk+".broken = "warn";
       };
       makeSystem = desktop: nixpkgs.lib.nixosSystem {
