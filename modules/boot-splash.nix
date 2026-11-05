@@ -45,7 +45,7 @@ in {
   boot.loader.timeout = lib.mkDefault 1;
 
   boot.initrd.availableKernelModules = [ "appledrm" "mux-apple-display-crossbar" ];
-  boot.initrd.systemd.services.aurora-early-kms = lib.mkIf (config.boot.initrd.systemd.enable && config.boot.plymouth.enable) {
+  boot.initrd.systemd.services.aurora-early-kms = lib.mkIf config.boot.plymouth.enable {
     description = "Coldplug the Apple display before the other devices";
     unitConfig.DefaultDependencies = false;
     wantedBy = [ "sysinit.target" ];
@@ -55,5 +55,5 @@ in {
     serviceConfig.Type = "oneshot";
     serviceConfig.ExecStart = earlyKms;
   };
-  boot.initrd.systemd.storePaths = lib.mkIf (config.boot.initrd.systemd.enable && config.boot.plymouth.enable) [ earlyKms ];
+  boot.initrd.systemd.storePaths = lib.mkIf config.boot.plymouth.enable [ earlyKms ];
 }

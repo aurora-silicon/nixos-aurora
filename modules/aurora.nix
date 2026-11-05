@@ -20,6 +20,9 @@
   config = {
     hardware.asahi.enable = true;
     nixpkgs.hostPlatform = "aarch64-linux";
+    # Keep Steam's GTK 2 runtime available with a warning, as in flake.nix.
+    # Remove this exception with the runtime dependency (see README.md).
+    nixpkgs.config.problems.handlers."gtk+".broken = lib.mkDefault "warn";
     nix.settings.extra-substituters = [ "https://aurorasilicon.org/nixos-aurora/cache" ];
     nix.settings.extra-trusted-public-keys = [ (lib.removeSuffix "\n" (builtins.readFile ../keys/cache.pub)) ];
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
@@ -62,7 +65,6 @@
     # Quiet by default: failures still reach the console, and systemd shows
     # status only when a unit fails or stalls.
     boot.consoleLogLevel = lib.mkDefault 3;
-    boot.initrd.verbose = lib.mkDefault false;
     boot.kernelParams = [ "quiet" "rd.udev.log_level=3" "udev.log_level=3" "systemd.show_status=auto" ];
     # Desktop images boot to a splash; first boot asks for the disk password
     # on it, as every later boot does. The spinner theme needs no ACPI BGRT
