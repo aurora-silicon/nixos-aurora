@@ -516,8 +516,12 @@ in {
   in rustPackage "speakerguardd-v2" ./locks/speakerguardd-v2.Cargo.lock {
     cargoBuildFlags = crates;
     cargoTestFlags = crates;
+    # The self-check and the session helper are Python; their shebangs are
+    # patched to this interpreter. The tools they call come from the units'
+    # path (modules/speakerguardd-v2.nix).
+    buildInputs = [ final.python3 ];
     postInstall = ''
-      mkdir -p $out/libexec/speakerguardd-v2 $out/lib/lv2/sgv2.lv2 $out/lib/systemd/system
+      mkdir -p $out/libexec/speakerguardd-v2 $out/lib/lv2/sgv2.lv2 $out/lib/systemd/system $out/lib/systemd/user
       mv $out/bin/speakerguardd $out/libexec/speakerguardd-v2/speakerguardd
       mv $out/lib/libsgv2_lv2.so $out/lib/lv2/sgv2.lv2/libsgv2_lv2.so
       rm -f $out/lib/*.rlib $out/lib/*.a
@@ -526,11 +530,31 @@ in {
       if grep -ho 'lv2:binary <[^>]*>' $out/lib/lv2/sgv2.lv2/*.ttl | grep -v '<libsgv2_lv2.so>'; then
         echo 'The sgv2 bundle names a library this package does not install' >&2; exit 1
       fi
-      # The upstream unit, under its own name so it installs beside the 0.1 unit.
+      install -Dm755 packaging/session/speakerguardd-selfcheck packaging/session/speakerguardd-session -t $out/libexec/speakerguardd-v2
+      install -Dm644 packaging/session/wiring.py -t $out/libexec/speakerguardd-v2
+      install -Dm755 ${./packages/speakerguardd-v2/speakerguardd-v2-gate} $out/libexec/speakerguardd-v2/speakerguardd-v2-gate
+      patchShebangs --host $out/libexec/speakerguardd-v2
+      install -Dm644 packaging/session/machines.json -t $out/share/speakerguardd
+      # The per-machine graphs, as data: the opt-in's provisioning activates one.
+      install -Dm644 packaging/pipewire/sgv2-*.conf -t $out/share/speakerguardd/pipewire
+      install -Dm644 packaging/wireplumber/60-sgv2-*.conf -t $out/share/speakerguardd/wireplumber
+      install -Dm644 packaging/etc/speakerguardd.conf.example docs/NEW-PLATFORM.md -t $out/share/doc/speakerguardd-v2
+      # The upstream units, under their own names so they install beside the
+      # 0.1 unit. The self-check is a hard prerequisite of the supervisor.
       substitute packaging/systemd/speakerguardd.service $out/lib/systemd/system/speakerguardd-v2.service \
-        --replace-fail "ExecStart=/usr/bin/speakerguardd" "ExecStart=$out/libexec/speakerguardd-v2/speakerguardd"
-      if grep -Eq '^(OnFailure|OnSuccess)=|speakersafetyd' $out/lib/systemd/system/speakerguardd-v2.service; then
-        echo 'The speakerguardd 1.0 unit must not chain to another daemon' >&2; exit 1
+        --replace-fail "ExecStart=/usr/bin/speakerguardd " "ExecStart=$out/libexec/speakerguardd-v2/speakerguardd " \
+        --replace-fail "speakerguardd-selfcheck.service" "speakerguardd-v2-selfcheck.service"
+      substitute packaging/systemd/speakerguardd-selfcheck.service $out/lib/systemd/system/speakerguardd-v2-selfcheck.service \
+        --replace-fail "/usr/libexec/speakerguardd/speakerguardd-selfcheck" "$out/libexec/speakerguardd-v2/speakerguardd-selfcheck" \
+        --replace-fail "Before=speakerguardd.service" "Before=speakerguardd-v2.service" \
+        --replace-fail "RequiredBy=speakerguardd.service" "RequiredBy=speakerguardd-v2.service"
+      substitute packaging/systemd/speakerguardd-session.service $out/lib/systemd/user/speakerguardd-v2-session.service \
+        --replace-fail "ExecStart=/usr/libexec/speakerguardd-session " "ExecStart=$out/libexec/speakerguardd-v2/speakerguardd-session "
+      grep -qx 'Requires=speakerguardd-v2-selfcheck.service' $out/lib/systemd/system/speakerguardd-v2.service
+      grep -q '^After=.*speakerguardd-v2-selfcheck.service' $out/lib/systemd/system/speakerguardd-v2.service
+      if grep -Eq '^(OnFailure|OnSuccess)=|speakersafetyd|=speakerguardd\.service' \
+          $out/lib/systemd/system/speakerguardd-v2*.service $out/lib/systemd/user/speakerguardd-v2-session.service; then
+        echo 'A speakerguardd 1.0 unit chains to or names another daemon' >&2; exit 1
       fi
       install -Dm644 -t $out/share/licenses/speakerguardd-v2 LICENSE crates/aurora-speaker-tuning/LICENSE-aurora-audio-dsp
     '';
