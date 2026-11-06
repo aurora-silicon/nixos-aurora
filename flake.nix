@@ -53,6 +53,8 @@
         uboot = pkgs.uboot-asahi;
         kernel = pkgs.linux-asahi.kernel;
         userpages = pkgs.aurora-userpages;
+        fex = pkgs.fex;
+        steam = pkgs.steam;
         mesa = pkgs.mesa;
         rusticl = pkgs.aurora-rusticl;
         lavapipe = pkgs.aurora-lavapipe;
@@ -78,6 +80,7 @@
         neo-platform = pkgs.aurora-neo-platform-config;
         aurora-bless = pkgs.aurora-bless;
         camera-denoise = pkgs.aurora-camera-denoise;
+        kbd-light = pkgs.aurora-kbd-light;
       };
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;
@@ -179,6 +182,9 @@
               "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
               "the Type-C port controllers find their USB4 router in the initrd" =
                 lib.all (m: lib.elem m config.boot.initrd.availableKernelModules) [ "tps6598x" "thunderbolt_apple" ];
+              "the display chain and its PMP come up before the root is unlocked" =
+                lib.all (m: lib.elem m config.boot.initrd.availableKernelModules)
+                  [ "apple-pmp" "mux-apple-display-crossbar" "appledrm" ];
               "PipeWire and WirePlumber use the pinned audio and UCM profiles" =
                 lib.elem value.pkgs.asahi-audio config.services.pipewire.configPackages
                 && lib.elem value.pkgs.asahi-audio config.services.pipewire.wireplumber.configPackages
@@ -199,6 +205,9 @@
                 && config.services.pipewire.enable
                 && lib.elem value.pkgs.aurora-camera-denoise config.systemd.packages
                 && lib.elem "pipewire.service" config.systemd.user.services.aurora-camera-denoise.wantedBy;
+              "the keyboard backlight follows the light sensor from boot" = config.aurora.kbdLight.enable
+                && lib.elem value.pkgs.aurora-kbd-light config.systemd.packages
+                && lib.elem "multi-user.target" config.systemd.services.aurora-kbd-light.wantedBy;
               "Flatpak uses the Aurora repository" = config.services.flatpak.enable
                 && config.aurora.flatpak.enable
                 && config.aurora.flatpak.package.commit == pkgs.aurora-flatpak-gl.commit

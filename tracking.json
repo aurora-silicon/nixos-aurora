@@ -16,6 +16,16 @@
       "repository": "aurora-silicon/mesa",
       "branch": "aurora-wip",
       "merge": "auto"
+    },
+    "fex-emu": {
+      "repository": "aurora-silicon/fex",
+      "branch": "main",
+      "merge": "manual"
+    },
+    "aurora-steam-native": {
+      "repository": "aurora-silicon/aurora-steam-native",
+      "branch": "main",
+      "merge": "auto"
     }
   }
 }

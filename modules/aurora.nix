@@ -2,8 +2,8 @@
 {
   imports = [ ./ane.nix ./firmware.nix ./platform.nix ./audio.nix ./system-fixes.nix
     ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix ./dbus.nix
-    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix
-    ./userpages.nix ];
+    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix
+    ./userpages.nix ./boot-splash.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";
@@ -43,6 +43,12 @@
       "apple-rtkit-helper" "usb-storage" "xhci-plat-hcd" "usbhid" "hid_generic"
       "nvme" "virtio_blk" "virtio_pci" "uas" "sd_mod"
       "vfat" "dm-crypt" "btrfs" "ext4" "aop" "mt7932-fullmac" "mt7932_bt_pcie"
+      # The display chain and its PMP, as Fedora and ALARM carry them. On the M4
+      # Pro the T6041 display gate brings the external display processors up
+      # only once apple-pmp binds and gives up 20 s into the boot; with the
+      # chain only on an encrypted root it would wait for the passphrase and
+      # leave every external display off. udev loads them during coldplug.
+      "apple-pmp" "mux-apple-display-crossbar" "appledrm"
     ];
     # Apple silicon Macs have no TPM, and the shared distribution kernel has no
     # TPM drivers (its TPM 2.0 CRB interface would need ACPI). Do not ask the
