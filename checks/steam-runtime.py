@@ -3,12 +3,16 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
 
 CONFIG = json.loads(Path(sys.argv.pop(1)).read_text())
+# GitHub ARM runners execute the VM under TCG, including the first writable
+# copy of the real Proton tree. Native/KVM timings don't represent that cost.
+LAUNCH_TIMEOUT = 300
 
 
 class InstalledSteamRuntime(unittest.TestCase):
@@ -43,11 +47,24 @@ class InstalledSteamRuntime(unittest.TestCase):
         if package == 'runtime-custom':
             env['STEAM_EXTRA_COMPAT_TOOLS_PATHS'] = compatibility
         executable = CONFIG['packages']['default' if package == 'runtime-custom' else package] + '/bin/steam'
-        result = subprocess.run([executable, 'argument with spaces'], env=env,
-                                capture_output=True, text=True, timeout=90)
         log = self.home / 'console.log'
-        self.assertEqual(result.returncode, expected,
-                         result.stdout + result.stderr + (log.read_text() if log.exists() else ''))
+        with subprocess.Popen([executable, 'argument with spaces'], env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, start_new_session=True) as process:
+            try:
+                stdout, stderr = process.communicate(timeout=LAUNCH_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                # Killing just the launcher leaves its copy/sandbox workers
+                # writing into TemporaryDirectory while unittest removes it.
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                stdout, stderr = process.communicate()
+                self.fail(f'Steam launcher exceeded {LAUNCH_TIMEOUT} seconds\n'
+                          + stdout + stderr + (log.read_text() if log.exists() else ''))
+            self.assertEqual(process.returncode, expected,
+                             stdout + stderr + (log.read_text() if log.exists() else ''))
         rows = [json.loads(line) for line in self.report.read_text().splitlines()]
         self.assertTrue(rows)
         for row in rows:

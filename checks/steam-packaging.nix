@@ -108,6 +108,8 @@ pkgs.testers.runNixOSTest {
   nodes.machine = _: {
     virtualisation.memorySize = 2048;
     virtualisation.diskSize = 4096;
+    networking.useDHCP = false;
+    console.enable = false;
     users.users.fixture = { isNormalUser = true; };
     environment.systemPackages = [ packagingTest ];
   };
@@ -115,6 +117,6 @@ pkgs.testers.runNixOSTest {
     machine.start()
     machine.wait_for_unit("multi-user.target")
     machine.succeed("install -d -m 0700 -o fixture -g users /home/fixture/test-tmp")
-    machine.succeed("su - fixture -c 'TMPDIR=/home/fixture/test-tmp aurora-steam-packaging-test'", timeout=600)
+    machine.succeed("su - fixture -c 'TMPDIR=/home/fixture/test-tmp aurora-steam-packaging-test'", timeout=1200)
   '';
 }
