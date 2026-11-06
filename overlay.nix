@@ -323,8 +323,10 @@ in {
         # requirements on top.
         configurePhase = ''
           runHook preConfigure
-          mkdir build
-          export buildRoot="$PWD/build"
+          # nixpkgs installs this tree beside source/ in the dev output.
+          # Keep it outside source/ so its postInstall move cannot target itself.
+          export buildRoot="$NIX_BUILD_TOP/build"
+          mkdir -- "$buildRoot"
           cp ${kernelBaseFile} "$buildRoot/.config"
           chmod u+w "$buildRoot/.config"
           bash scripts/kconfig/merge_config.sh -m -O "$buildRoot" \
@@ -334,7 +336,6 @@ in {
           make "''${makeFlags[@]}" prepare
           test "$(cat "$buildRoot/include/config/kernel.release")" = 7.3.0
           buildFlags+=("KBUILD_BUILD_TIMESTAMP=$(date -u -d @$SOURCE_DATE_EPOCH)")
-          cd "$buildRoot"
         '';
         postConfigure = ''
           python3 ${stableFile ./kernel/validate-config.py} arch/arm64/configs/asahi.config \
