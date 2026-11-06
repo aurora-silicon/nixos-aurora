@@ -142,7 +142,12 @@ jobs:
       - env:
           GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
           FORCE: ${{ inputs.force && '--force' || '' }}
-        run: python3 scripts/track-sources.py open-pr --input "$RUNNER_TEMP/plan" $FORCE 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+        run: |
+          args=()
+          if [[ "$FORCE" == '--force' ]]; then
+            args+=(--force)
+          fi
+          python3 scripts/track-sources.py open-pr --input "$RUNNER_TEMP/plan" "${args[@]}" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
 
   mirror:
     # Keeps every pinned archive in the verified source cache so builds do

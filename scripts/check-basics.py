@@ -26,7 +26,6 @@ import argparse
 import os
 from pathlib import Path, PurePosixPath
 import re
-import subprocess
 import sys
 
 PREAMBLE = 'Aurora: look for this installation only on the disk GRUB started from.'
@@ -254,62 +253,6 @@ PAM_ACTIONS = {
 }
 
 
-def authselect_expression(text, features):
-    value, op, negate = None, None, False
-    for token in re.findall(r'not|and|or|"[^"]*"', text):
-        if token == 'not':
-            negate = not negate
-        elif token in ('and', 'or'):
-            op = token
-        else:
-            this = (token.strip('"') in features) != negate
-            negate = False
-            value = this if value is None else (value and this if op == 'and' else value or this)
-    return bool(value)
-
-
-def authselect_template(text, features):
-    """A profile file as authselect writes it for these features."""
-    lines = []
-    for line in text.splitlines():
-        found = re.search(r'\{(continue|stop) if ([^}]*)\}', line)
-        if found:
-            if (found[1] == 'continue') != authselect_expression(found[2], features):
-                break
-            continue
-        found = re.search(r'\{(include|exclude) if ([^}]*)\}', line)
-        if found:
-            if authselect_expression(found[2], features) != (found[1] == 'include'):
-                continue
-            line = line[:found.start()] + line[found.end():]
-        line = re.sub(r'\{imply [^}]*\}', '', line)
-        line = re.sub(r'\{if ((?:not )?"[^"]*"(?: (?:and|or) (?:not )?"[^"]*")*):([^}]*)\}',
-                      lambda m: (m[2].split('|') + [''])[0 if authselect_expression(m[1], features) else 1], line)
-        lines.append(line)
-    return '\n'.join(lines) + '\n'
-
-
-def authselect_files(root, extra):
-    """/etc/authselect files for the selected profile with extra features."""
-    conf = root.text(f'{root.etc}/authselect/authselect.conf')
-    if not conf:
-        return {}
-    words = [word for word in conf.split() if not word.startswith('#')]
-    profile, features = words[0], set(words[1:]) | set(extra)
-    for base in (f'{root.etc}/authselect/{profile}', f'/usr/share/authselect/vendor/{profile}',
-                 f'/usr/share/authselect/default/{profile}'):
-        if root.path(base).is_dir() and root.path(f'{base}/system-auth').is_file():
-            break
-    else:
-        return {}
-    files = {}
-    for name in ('system-auth', 'password-auth', 'fingerprint-auth', 'smartcard-auth', 'postlogin'):
-        text = root.text(f'{base}/{name}')
-        if text is not None:
-            files[name] = authselect_template(text, features)
-    return files
-
-
 def pam_auth_rows(text):
     rows = []
     for line in text.replace('\\\n', ' ').splitlines():
@@ -323,30 +266,27 @@ def pam_auth_rows(text):
     return rows
 
 
-def pam_service(root, name, generated):
+def pam_service(root, name):
     """The text of a PAM service as Linux-PAM finds it."""
     if name.startswith('/'):
         return root.text(name)
     for directory in (f'{root.etc}/pam.d', '/usr/lib/pam.d'):
         path = root.path(f'{directory}/{name}')
         if path.is_file():
-            target = os.path.basename(str(path))
-            if '/authselect/' in str(path) and target in generated:
-                return generated[target]
             return path.read_text(errors='replace')
     return None
 
 
-def pam_entries(root, name, generated, depth=0):
-    text = pam_service(root, name, generated)
+def pam_entries(root, name, depth=0):
+    text = pam_service(root, name)
     if text is None or depth > 20:
         return None
     entries = []
     for control, module, args in pam_auth_rows(text):
         if control == 'include':
-            entries += pam_entries(root, module, generated, depth + 1) or []
+            entries += pam_entries(root, module, depth + 1) or []
         elif control == 'substack':
-            entries.append(('substack', pam_entries(root, module, generated, depth + 1) or [], []))
+            entries.append(('substack', pam_entries(root, module, depth + 1) or [], []))
         else:
             entries.append((control, module, args))
     return entries
@@ -404,13 +344,13 @@ def pam_flat(entries):
             yield control, module, args
 
 
-def pam_fingerprint(root, service, generated):
+def pam_fingerprint(root, service):
     """None when the service is absent, else (fingerprint offered, password after it).
 
     The password only stays usable when a failed or absent fingerprint moves on:
     pam_fprintd must be sufficient (or a [...] control that ignores failure).
     """
-    entries = pam_entries(root, service, generated)
+    entries = pam_entries(root, service)
     if entries is None:
         return None
     paths = pam_paths(entries, service)
@@ -451,13 +391,11 @@ def logind_texts(root):
 
 
 def check_touchid(root, profile):
-    # Fedora turns authselect's with-fingerprint on once on a Mac with a sensor.
-    generated = authselect_files(root, ['with-fingerprint'])
     problems = []
     expect = [(name, True) for name in FINGERPRINT_SERVICES + LOCK_SCREENS.get(profile, ())]
     expect += [(name, False) for name in PASSWORD_SERVICES + PASSWORD_PROMPTS.get(profile, ())]
     for name, wanted in expect:
-        result = pam_fingerprint(root, name, generated)
+        result = pam_fingerprint(root, name)
         if result is None:
             if wanted or name == 'login':
                 problems.append(f'PAM service {name} is missing')
@@ -481,21 +419,6 @@ def check_touchid(root, profile):
     return '; '.join(problems) or None
 
 
-def boot_reader(args):
-    if args.boot_dir:
-        base = Path(args.boot_dir)
-        return lambda name: (base / name).read_bytes() if (base / name).is_file() else None
-
-    def read(name):
-        # debugfs exits 0 either way; a missing file is reported on stderr.
-        result = subprocess.run(['debugfs', '-R', f'cat /{name}', args.boot_image],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if result.returncode != 0 or b'not found' in result.stderr.lower():
-            return None
-        return result.stdout
-    return read
-
-
 def unhinted_searches(text):
     return [line.strip() for line in text.splitlines()
             if re.match(r'\s*search\b', line) and ('--hint' not in line or '--no-floppy' not in line)]
@@ -503,38 +426,33 @@ def unhinted_searches(text):
 
 def check_boot(args):
     esp, uuid = Path(args.esp), args.boot_uuid.lower()
-    read = boot_reader(args)
-    grub = 'grub2' if args.grub_flavor == 'fedora' else 'grub'
-    if args.grub_flavor == 'fedora':
-        stubs = [path for path in sorted(esp.glob('EFI/*/grub.cfg')) if 'configfile' in path.read_text()]
-        if read(f'{grub}/aurora-boot-{uuid}') is None:
-            return f'the /boot marker {grub}/aurora-boot-{uuid} is missing'
-    else:
-        core = esp / 'EFI/BOOT/BOOTAA64.EFI'
-        if not core.is_file():
-            return 'EFI/BOOT/BOOTAA64.EFI is missing'
-        data = core.read_bytes()
-        # grub-install embeds either a partition number or an early
-        # "search.fs_uuid <boot>" that falls back to every disk; Aurora's core
-        # embeds neither and runs EFI/BOOT/grub.cfg instead.
-        if re.search(rb'\((hd\d+)?,gpt\d+\)', data) or uuid.encode() in data.lower():
-            return 'the GRUB core names /boot by partition number or by an all-disk search'
-        if b'/EFI/BOOT' not in data:
-            return 'the GRUB core does not load its configuration from EFI/BOOT'
-        stubs = [esp / 'EFI/BOOT/grub.cfg']
-    if not stubs or not all(path.is_file() for path in stubs):
+    boot = Path(args.boot_dir)
+    core = esp / 'EFI/BOOT/BOOTAA64.EFI'
+    if not core.is_file():
+        return 'EFI/BOOT/BOOTAA64.EFI is missing'
+    data = core.read_bytes()
+    # grub-install embeds either a partition number or an early
+    # "search.fs_uuid <boot>" that falls back to every disk; Aurora's core
+    # embeds neither and runs EFI/BOOT/grub.cfg instead.
+    if re.search(rb'\((hd\d+)?,gpt\d+\)', data) or uuid.encode() in data.lower():
+        return 'the GRUB core names /boot by partition number or by an all-disk search'
+    if b'/EFI/BOOT' not in data:
+        return 'the GRUB core does not load its configuration from EFI/BOOT'
+    stub = esp / 'EFI/BOOT/grub.cfg'
+    if not stub.is_file():
         return 'the EFI GRUB stub configuration is missing'
-    for path in stubs:
-        text = path.read_text()
-        if PREAMBLE not in text or uuid not in text.lower():
-            return f'{path.relative_to(esp)} does not find /boot ({uuid}) by UUID on the startup disk'
-        if unhinted_searches(text):
-            return f'{path.relative_to(esp)} has a lookup without a hint: {unhinted_searches(text)[0]}'
-    main = read(f'{grub}/grub.cfg')
-    if main is None:
-        return f'/boot/{grub}/grub.cfg is missing'
-    if unhinted_searches(main.decode(errors='replace')):
-        return f'/boot/{grub}/grub.cfg has a lookup without a hint: {unhinted_searches(main.decode())[0]}'
+    text = stub.read_text()
+    if PREAMBLE not in text or uuid not in text.lower():
+        return f'EFI/BOOT/grub.cfg does not find /boot ({uuid}) by UUID on the startup disk'
+    searches = unhinted_searches(text)
+    if searches:
+        return f'EFI/BOOT/grub.cfg has a lookup without a hint: {searches[0]}'
+    main = boot / 'grub/grub.cfg'
+    if not main.is_file():
+        return '/boot/grub/grub.cfg is missing'
+    searches = unhinted_searches(main.read_text(errors='replace'))
+    if searches:
+        return f'/boot/grub/grub.cfg has a lookup without a hint: {searches[0]}'
     return None
 
 
@@ -559,14 +477,12 @@ def main():
     parser.add_argument('--system', help='NixOS: the system closure installed in the root')
     parser.add_argument('--esp', help='the EFI partition contents')
     parser.add_argument('--boot-dir', help='the /boot filesystem contents')
-    parser.add_argument('--boot-image', help='the /boot filesystem image (ext4)')
     parser.add_argument('--boot-uuid', help='the /boot filesystem UUID')
-    parser.add_argument('--grub-flavor', choices=['arch', 'fedora'], default='arch')
     args = parser.parse_args()
     if not args.root and not args.esp:
         parser.error('nothing to check: give --root, --esp or both')
-    if args.esp and not (args.boot_uuid and (args.boot_dir or args.boot_image)):
-        parser.error('--esp needs --boot-uuid and --boot-dir or --boot-image')
+    if args.esp and not (args.boot_uuid and args.boot_dir):
+        parser.error('--esp needs --boot-uuid and --boot-dir')
     checks = []
     if args.root:
         root = Root(args.root, args.system)

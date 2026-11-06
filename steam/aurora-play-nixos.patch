@@ -1,0 +1,142 @@
+From: Aurora NixOS maintainers
+Subject: [PATCH] Play: use the FHS launcher and discover configured native Proton tools
+
+Upstream: aurora-silicon/aurora-steam-native at c06f610.
+License: MIT, matching bin/aurora-play.
+
+--- a/bin/aurora-play
++++ b/bin/aurora-play
+@@ -3,9 +3,10 @@
+ # Copyright (c) 2026 Ryan Murray <ryan@aurorasilicon.org>
+ #
+ # Aurora Play: a small launcher for the Steam games installed for the native
+-# ARM64 Steam client, with a MangoHud switch for Aurora Proton.
++# ARM64 Steam client, with a MangoHud switch for native Proton.
+ import os
+ import re
++import shutil
+ import subprocess
+ import sys
+ from pathlib import Path
+@@ -19,9 +20,9 @@
+ APP_ID = "org.aurorasilicon.Play"
+ HOME = Path.home()
+ STEAM = Path(os.environ.get("AURORA_STEAM_ROOT") or (HOME / ".steam/root")).resolve()
+-LAUNCHER = Path(__file__).resolve().with_name("steam-native4k")
+-if not LAUNCHER.is_file():
+-    LAUNCHER = HOME / ".local/bin/steam-native4k"
++# NixOS needs the public FHS entry point as well as the 4K launcher it runs.
++LAUNCHER = Path(os.environ.get("AURORA_STEAM_LAUNCHER") or shutil.which("steam")
++                or (HOME / ".local/bin/steam"))
+ APPS = Path(os.environ.get("XDG_DATA_HOME") or (HOME / ".local/share")) / "applications"
+ MARKER = "# Managed by Aurora Play"
+ 
+@@ -30,7 +31,7 @@
+ # Executables shipped beside a game that are not the game window.
+ NOT_GAME_EXES = re.compile(r"crash|launcher|unins|redist|setup|helper|dxsetup|install|report|uploader", re.I)
+ 
+-MANGOHUD_SETTINGS = f"""{MARKER}: MangoHud for every Aurora Proton game. Switch it off in Aurora Play.
++MANGOHUD_SETTINGS = f"""{MARKER}: MangoHud for every native Proton game. Switch it off in Aurora Play.
+ user_settings = {{
+     "MANGOHUD": "1",
+     "MANGOHUD_CONFIG": "fps,frametime,frame_timing,gpu_stats,cpu_stats,ram,vram,engine_version,wine,resolution,output_folder={HOME}/mangologs,toggle_logging=Shift_L+F2",
+@@ -102,7 +103,7 @@
+         exe = max(exes, key=lambda p: p.stat().st_size).name
+         icon = cover_for(appid)
+         entry.write_text("[Desktop Entry]\nType=Application\n"
+-                         f"Name={name}\nComment=Steam game (Aurora Proton)\n"
++                         f"Name={name}\nComment=Steam game (native Proton)\n"
+                          f"Exec={LAUNCHER} steam://rungameid/{appid}\n"
+                          f"Icon={icon or 'applications-games'}\nStartupWMClass={exe}\n"
+                          f"NoDisplay=true\nTerminal=false\nCategories=Game;\n{MARKER}\n")
+@@ -117,8 +118,31 @@
+ 
+ 
+ def proton_settings_files():
+-    tools = STEAM / "compatibilitytools.d"
+-    return [d / "user_settings.py" for d in sorted(tools.glob("Aurora-Proton*")) if d.is_dir()]
++    """Discover native Wine tools, including Steam's configured extra paths."""
++    roots = [STEAM / "compatibilitytools.d"]
++    roots.extend(Path(p) for p in os.environ.get("STEAM_EXTRA_COMPAT_TOOLS_PATHS", "").split(":") if p)
++    tools = set()
++    for root in roots:
++        try:
++            candidates = [root, *root.iterdir()]
++        except OSError:
++            continue
++        for tool in candidates:
++            if not tool.is_dir():
++                continue
++            native = False
++            if (tool / "proton").is_file():
++                for relative in ("files/bin/wine", "files/bin/wine64", "dist/bin/wine",
++                                 "files/lib/wine/aarch64-unix/wine"):
++                    try:
++                        with (tool / relative).open("rb") as stream:
++                            header = stream.read(20)
++                    except OSError:
++                        continue
++                    native |= header[:6] == b"\x7fELF\x02\x01" and header[18:20] == b"\xb7\x00"
++            if native:
++                tools.add(tool.resolve() / "user_settings.py")
++    return sorted(tools)
+ 
+ 
+ def read_settings(f):
+@@ -138,7 +162,7 @@
+ 
+ 
+ def set_mangohud(enabled):
+-    """Write or remove our user_settings.py in every Aurora Proton build.
++    """Write or remove our user_settings.py in every native Proton build.
+ 
+     A user_settings.py that Aurora Play did not write is the person's own
+     Proton configuration: it is never overwritten or removed. Returns how many
+@@ -187,9 +211,10 @@
+         self.search.connect("search-changed", lambda *_: self.flow.invalidate_filter())
+         header.set_title_widget(self.search)
+ 
+-        hud = Gtk.Box(spacing=6, tooltip_text="Show the MangoHud overlay in Aurora Proton games")
++        hud = Gtk.Box(spacing=6, tooltip_text="Show the MangoHud overlay in native Proton games")
+         hud.append(Gtk.Label(label="Stats"))
+-        self.hud_switch = Gtk.Switch(active=mangohud_enabled(), valign=Gtk.Align.CENTER)
++        self.hud_switch = Gtk.Switch(active=mangohud_enabled(), valign=Gtk.Align.CENTER,
++                                     sensitive=bool(proton_settings_files()))
+         self.hud_switch.connect("notify::active", self.on_hud)
+         hud.append(self.hud_switch)
+         header.pack_end(hud)
+@@ -224,7 +249,7 @@
+     def on_hud(self, switch, _param):
+         try:
+             kept = set_mangohud(switch.get_active())
+-            msg = "Stats on for Aurora Proton games" if switch.get_active() else "Stats off"
++            msg = "Stats on for native Proton games" if switch.get_active() else "Stats off"
+             if kept:
+                 msg += f"; {kept} Proton build(s) with your own user_settings.py left unchanged"
+         except OSError as e:
+--- a/install-steam-arm64.py
++++ b/install-steam-arm64.py
+@@ -203,6 +203,10 @@
+         link_alias(steam_dir / alias, root)
+     # Steam looks for its launch wrapper through ~/.steam/sdkarm64.
+     link_alias(steam_dir / 'sdkarm64', root / 'linuxarm64')
++    # NixOS supplies both launchers and desktop entries in the system profile.
++    # The client aliases above are still needed; user copies would bypass the FHS wrapper.
++    if os.environ.get('AURORA_SYSTEM_LAUNCHERS') == '1':
++        return
+     install_file(HERE / 'bin/steam-native4k', prefix / 'bin/steam-native4k', 0o755)
+     install_file(HERE / 'libexec/steam-native4k-launch-loop.sh',
+                  prefix / 'libexec/steam-native4k-launch-loop.sh', 0o755)
+--- a/tests/test-aurora-play-settings.py
++++ b/tests/test-aurora-play-settings.py
+@@ -45,6 +45,10 @@
+         self.theirs = tools / "Aurora-Proton-11" / "user_settings.py"
+         self.ours.parent.mkdir(parents=True)
+         self.theirs.parent.mkdir(parents=True)
++        for tool in (self.ours.parent, self.theirs.parent):
++            (tool / "proton").touch()
++            (tool / "files/bin").mkdir(parents=True)
++            (tool / "files/bin/wine").write_bytes(b"\x7fELF\x02\x01" + b"\0" * 12 + b"\xb7\0")
+         self.own = 'user_settings = {"PROTON_LOG": "1", "MANGOHUD": "1"}\n'
+         self.theirs.write_text(self.own)
+         self.play = load_play(self.home, steam)

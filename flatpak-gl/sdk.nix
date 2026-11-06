@@ -14,6 +14,7 @@ stdenvNoCC.mkDerivation {
     mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
     ostree init --repo="$out" --mode=archive-z2
     python3 ${./fetch-sdk.py} --repo "$out" --refs "$refsJSONPath" \
+      --sdk-lock ${./sdk-lock.json} \
       --ca-file ${cacert}/etc/ssl/certs/ca-bundle.crt
     # Detached signatures can change independently of the immutable commit.
     # Its content graph and the fixed-output hash verify this fetch.

@@ -1,11 +1,17 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.aurora.flatpak;
+  managerSource = lib.fileset.toSource {
+    root = ../flatpak-gl;
+    fileset = lib.fileset.unions [
+      ../flatpak-gl/manage.py ../flatpak-gl/validate-repository.py ../flatpak-gl/sdk-lock.json
+    ];
+  };
   manager = pkgs.writeShellApplication {
     name = "aurora-flatpak-gl";
     runtimeInputs = [ config.services.flatpak.package pkgs.ostree pkgs.python3 ];
     text = ''
-      exec python3 ${../flatpak-gl}/manage.py "$@" \
+      exec python3 ${managerSource}/manage.py "$@" \
         --repo ${lib.escapeShellArg (toString cfg.package)} --commit ${lib.escapeShellArg cfg.package.commit}
     '';
   };
@@ -14,7 +20,12 @@ in {
     enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Enable Flatpak with Aurora Mesa for the 25.08 and 26.08 runtimes.";
+      description = ''
+        Enable Flatpak and install pinned Aurora GL runtime extensions before
+        desktop login. Supply GL driver defaults without replacing an explicit
+        `FLATPAK_GL_DRIVERS`. False removes Aurora's managed extensions and
+        overrides on a switch; Flatpak itself follows its other configuration.
+      '';
     };
     package = lib.mkPackageOption pkgs "aurora-flatpak-gl" { };
   };
@@ -29,6 +40,7 @@ in {
     services.flatpak.enable = lib.mkDefault true;
     xdg.portal.enable = lib.mkDefault true;
     xdg.portal.extraPortals = lib.mkIf (config.aurora.desktop == "minimal") [ pkgs.xdg-desktop-portal-gtk ];
+    xdg.portal.config.common.default = lib.mkIf (config.aurora.desktop == "minimal") (lib.mkDefault [ "gtk" ]);
     environment.systemPackages = [ manager ];
     # Preserve explicit user choices in login shells and user systemd services.
     environment.extraInit = ''

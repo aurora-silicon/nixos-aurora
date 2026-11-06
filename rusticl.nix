@@ -1,8 +1,7 @@
 # Rusticl alone uses the compiler runtime, from the same pin as native Mesa.
-{ callPackage, lib, mesa, src, commit, vulkan-loader }:
-(callPackage ./mesa.nix { inherit mesa src commit; }).overrideAttrs (old: {
+{ callPackage, lib, mesa, src, version, commit, vulkan-loader }:
+(callPackage ./pkgs/mesa-common.nix { inherit mesa src version commit; }).overrideAttrs (old: {
   pname = "mesa-aurora-rusticl";
-  outputs = [ "out" ];
   mesonFlags = (lib.filter (flag: flag != "-Dgallium-rusticl=false") old.mesonFlags)
     ++ [ "-Dgallium-rusticl=true" ];
   configurePhase = ''
@@ -33,5 +32,4 @@
     readelf -h "$out/lib/libRusticlOpenCL.so.1.0.0" | grep 'Machine:.*AArch64'
     readelf -Ws "$out/lib/libRusticlOpenCL.so.1.0.0" | grep 'clIcdGetPlatformIDsKHR'
   '';
-  disallowedRequisites = [ ];
 })

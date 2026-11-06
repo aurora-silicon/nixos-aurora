@@ -2,14 +2,21 @@
 let cfg = config.aurora.ane;
 in {
   options.aurora.ane = {
-    enable = lib.mkEnableOption "ANE userspace tools and compiler";
+    enable = lib.mkEnableOption "Apple Neural Engine (ANE) userspace tools and compiler" // {
+      description = ''
+        Install the Apple Neural Engine (ANE) tools and compiler, create the `accel` group and add
+        device access rules. Disabling this omits that userspace integration;
+        it does not change the kernel driver or fetch firmware.
+      '';
+    };
     firmwarePackage = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
       default = null;
       description = ''
-        Owner-supplied, uncompressed firmware package with files under
-        lib/firmware/apple/ane. Fetch locally with omarchy-ane-firmware-fetch;
-        see docs/ane.md. No Apple firmware is included or fetched by a build.
+        Optional owner-supplied firmware package with uncompressed files under
+        `lib/firmware/apple/ane`. Used only when `aurora.ane.enable` is true;
+        null adds no firmware. Fetch locally with `omarchy-ane-firmware-fetch`;
+        no Apple firmware is included or fetched by a build.
       '';
     };
   };

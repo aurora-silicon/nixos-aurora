@@ -13,24 +13,11 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 
-STORE_PATH = re.compile(r'/nix/store/[a-z0-9]{32}-[^/\s]+')
-NAR_HASH = re.compile(r'sha256-[A-Za-z0-9+/]{43}=')
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def nar_hashes(data):
-    if isinstance(data, list):
-        data = {item['path']: item for item in data}
-    if not isinstance(data, dict) or not data or len(data) > 30_000:
-        raise ValueError('Expected a bounded nonempty Nix closure')
-    result = {}
-    for path, info in data.items():
-        value = info.get('narHash', '') if isinstance(info, dict) else ''
-        if not STORE_PATH.fullmatch(path) or not NAR_HASH.fullmatch(value):
-            raise ValueError('Invalid Nix closure path or NAR hash')
-        result[path] = value
-    return result
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cache_inputs import NAR_HASH, STORE_PATH, nar_hashes  # noqa: E402
 
 
 def ordinary_paths(proof, commit, actual):
