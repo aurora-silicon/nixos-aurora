@@ -48,12 +48,8 @@ including the MacBook Neo.
 - With the marker, a Mac that boots a Mach-O Stage 1 (`/proc/device-tree/compatible` names one of the chips
   in the installer's `AuraStage1Format.usesMachO`: T8130 and later, T6040 and later) gets
   `m1n1/boot-ctxr.bin`, from the build's `ctxr/boot-ctxr-<board>.bin`, with only this board's device trees.
-  `m1n1/boot.bin` is never touched: a Stage 1 with the CTXR window chainloads `boot-ctxr.bin`, and an older
-  one keeps chainloading its frozen `boot.bin`, because it can't run an aura without the monitor. M1 to M3
-  Macs only ever use `boot.bin`.
-- Only an aura booted from `boot-ctxr.bin` publishes `/chosen/aurora,ctxr-exec-window`. When that property
-  is missing, the Mac is still booting the frozen `boot.bin`, so every rebuild warns the owner and names the
-  Recovery step, Utilities > Enroll Expanded Code Window. Until then new kernels run on the old device trees.
+  `m1n1/boot.bin` is never touched, because the padded Stage 1 these Macs enroll chainloads `boot-ctxr.bin`.
+  M1 to M3 Macs only ever use `boot.bin`.
 - A problem with one board's file never stops a rebuild. `scripts/build-ctxr-stage2.sh` warns and leaves the
   file out, and a Mach-O Mac whose board has no file gets a warning and an unchanged ESP.
 - An image build has no device tree to read, because its Stage 2 comes from the Apple Silicon module's

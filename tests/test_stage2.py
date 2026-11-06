@@ -129,7 +129,6 @@ class InstallStage2Tests(unittest.TestCase):
         self.compatible = root / 'compatible'
         self.compatible.write_bytes(compatible_file('j274', 't8103'))
         self.ctxr = self.esp / 'm1n1/boot-ctxr.bin'
-        self.window = root / 'window'
 
     def write_source(self, data):
         (self.source / 'boot.bin').write_bytes(data)
@@ -147,8 +146,7 @@ class InstallStage2Tests(unittest.TestCase):
         self.stub('lsblk', f'echo {state["partuuid"]}\n')
         env = dict(os.environ, PATH=f'{self.stubs}:{os.environ["PATH"]}',
                    AURORA_DEVICE_TREE_ESP=str(self.device_tree),
-                   AURORA_DEVICE_TREE_COMPATIBLE=str(self.compatible),
-                   AURORA_DEVICE_TREE_WINDOW=str(self.window))
+                   AURORA_DEVICE_TREE_COMPATIBLE=str(self.compatible))
         return subprocess.run(['bash', str(INSTALL), str(self.source), str(self.esp)], env=env,
                               capture_output=True, text=True)
 
@@ -247,22 +245,13 @@ class InstallStage2Tests(unittest.TestCase):
                 self.assert_frozen()
                 self.assertEqual(self.ctxr.read_bytes(), stage2(boards=('j700',)))
 
-    def test_a_mac_still_booting_the_frozen_file_is_told_what_to_do(self):
+    def test_macho_with_the_marker_says_where_the_update_went_and_warns_nothing(self):
         self.compatible.write_bytes(compatible_file('j700', 't8140'))
-        self.write_ctxr_source('j700', stage2(boards=('j700',)))
-        result = self.run_install()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('still boots m1n1/boot.bin', result.stderr)
-        self.assertIn('Utilities > Enroll Expanded Code Window', result.stderr)
-        self.assertIn('#enroll-expanded-code-window', result.stderr)
-
-    def test_a_mac_booting_the_ctxr_file_gets_no_warning(self):
-        self.compatible.write_bytes(compatible_file('j700', 't8140'))
-        self.window.write_bytes(b'\0' * 16)
         self.write_ctxr_source('j700', stage2(boards=('j700',)))
         result = self.run_install()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, '')
+        self.assertIn('m1n1/boot-ctxr.bin', result.stdout)
         self.assert_frozen()
 
     def test_macho_update_keeps_the_previous_ctxr_stage2(self):
@@ -278,7 +267,7 @@ class InstallStage2Tests(unittest.TestCase):
         self.assertIn('m1n1/boot-ctxr.bin.old', result.stdout)
         self.assert_frozen()
 
-    def test_macho_unchanged_stage2_writes_nothing_and_still_warns(self):
+    def test_macho_unchanged_stage2_writes_nothing(self):
         self.compatible.write_bytes(compatible_file('j700', 't8140'))
         self.write_ctxr_source('j700', stage2(boards=('j700',)))
         self.ctxr.write_bytes(stage2(boards=('j700',)))
@@ -287,7 +276,7 @@ class InstallStage2Tests(unittest.TestCase):
         result = self.run_install()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '')
-        self.assertIn('still boots m1n1/boot.bin', result.stderr)
+        self.assertEqual(result.stderr, '')
         self.assertEqual(old.read_bytes(), b'older generation')
         self.assert_frozen()
 

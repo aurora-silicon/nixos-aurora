@@ -21,22 +21,10 @@ esp=${2:-}
 # Where the booted Stage 2 records the partition UUID of its ESP.
 device_tree_esp=${AURORA_DEVICE_TREE_ESP:-/proc/device-tree/chosen/asahi,efi-system-partition}
 device_tree_compatible=${AURORA_DEVICE_TREE_COMPATIBLE:-/proc/device-tree/compatible}
-# Only an aura booted from boot-ctxr.bin publishes this.
-device_tree_window=${AURORA_DEVICE_TREE_WINDOW:-/proc/device-tree/chosen/aurora,ctxr-exec-window}
 
 refuse() {
   echo "aurora-install-stage2: $*; the ESP Stage 2 was left unchanged" >&2
   exit 1
-}
-
-warn_if_frozen() {
-  "$frozen" || return 0
-  cat >&2 <<'NOTICE'
-aurora-install-stage2: WARNING: This Mac still boots m1n1/boot.bin, which stays on its last aura, device trees and U-Boot.
-aurora-install-stage2: WARNING: This update is in m1n1/boot-ctxr.bin, and nothing boots that yet. New kernels run on the old device trees.
-aurora-install-stage2: WARNING: To move to it, start this installation's Recovery, open Aurora Installer and choose Utilities > Enroll Expanded Code Window.
-aurora-install-stage2: WARNING: Steps: https://github.com/aurora-silicon/aurora-installer/blob/main/macOS/Recovery/README.md#enroll-expanded-code-window
-NOTICE
 }
 
 # The board of a Mac that boots a Mach-O Stage 1, nothing on any other machine.
@@ -60,7 +48,6 @@ board=''
 if [[ -e $source_dir/monitor-free ]]; then
   board=$(macho_board)
 fi
-frozen=false
 if [[ -n $board ]]; then
   source=$source_dir/ctxr/boot-ctxr-$board.bin
   name=boot-ctxr.bin
@@ -68,7 +55,6 @@ if [[ -n $board ]]; then
     echo "aurora-install-stage2: warning: this build has no Stage 2 for $board, so m1n1/boot-ctxr.bin was left unchanged" >&2
     exit 0
   fi
-  [[ -e $device_tree_window ]] || frozen=true
 else
   source=$source_dir/boot.bin
   name=boot.bin
@@ -91,7 +77,6 @@ fi
 
 target=$esp/m1n1/$name
 if [[ -f $target ]] && cmp -s "$source" "$target"; then
-  warn_if_frozen
   exit 0
 fi
 staged=$target.new
@@ -108,4 +93,3 @@ fi
 mv -f "$staged" "$target"
 sync "$target"
 echo "Stage 2 updated at $target; the previous one is m1n1/$name.old"
-warn_if_frozen
