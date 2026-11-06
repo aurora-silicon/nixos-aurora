@@ -21,7 +21,7 @@ stdenv.mkDerivation {
   doCheck = true;
   checkPhase = ''
     runHook preCheck
-    meson test -C build --print-errorlogs --num-processes "$NIX_BUILD_CORES"
+    meson test --print-errorlogs --num-processes "$NIX_BUILD_CORES"
     runHook postCheck
   '';
 
