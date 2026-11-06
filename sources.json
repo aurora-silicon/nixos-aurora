@@ -98,6 +98,15 @@
     "sha256": "89e565031a99a2ea0ebf4eace98ed9289e9f2b5e9f32a8732294068605c52537",
     "nix_hash": "sha256-ieVlAxqZouoOv06s6Y7ZKJ6fK16fMqhzIpQGhgXFJTc="
   },
+  "libva-v4l2-request-avd": {
+    "repository": "https://github.com/omacom/libva-v4l2_request",
+    "commit": "4f60c51f7841dd74bb61c94a4ad31e630bbdab01",
+    "version": "1.3.r11",
+    "source_url": "https://codeload.github.com/omacom/libva-v4l2_request/tar.gz/4f60c51f7841dd74bb61c94a4ad31e630bbdab01",
+    "archive_root": "libva-v4l2_request-4f60c51f7841dd74bb61c94a4ad31e630bbdab01",
+    "sha256": "826fda7396374daea1c39c08e2057dd2b4775cf0205c59bce2d30ce2bfd212a4",
+    "nix_hash": "sha256-gm/ac5Y3Ta6hw5wI4gV90rR3XPAgXFm84tMM4r/SEqQ="
+  },
   "avd-fw": {
     "repository": "https://github.com/aurora-silicon/avd-fw",
     "commit": "6062e8516c0a751bc8e50f5d604a17395923189f",

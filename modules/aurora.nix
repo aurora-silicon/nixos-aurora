@@ -71,7 +71,11 @@
     boot.plymouth.package = lib.mkDefault pkgs.plymouth;
     boot.plymouth.theme = lib.mkDefault "spinner";
     hardware.graphics.enable = true;
-    hardware.graphics.extraPackages = [ pkgs.aurora-rusticl pkgs.aurora-lavapipe ];
+    hardware.graphics.extraPackages = [
+      pkgs.aurora-rusticl
+      pkgs.aurora-lavapipe
+      pkgs.libvaV4l2RequestAvd
+    ];
     services.desktopManager.plasma6.enable = config.aurora.desktop == "kde";
     # Plasma Login Manager, as on Fedora 44 and Aurora Alarm: its greeter runs
     # on KWin Wayland at the display's scale.

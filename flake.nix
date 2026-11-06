@@ -45,6 +45,7 @@
         libfprint = pkgs.libfprint;
         fprintd = pkgs.fprintd;
         avd-fw = pkgs.aurora-avd-firmware;
+        libva-v4l2-request-avd = pkgs.libvaV4l2RequestAvd;
         omarchy-ane-tools = pkgs.omarchy-ane-tools;
         mil-hwx-compiler = pkgs.mil-hwx-compiler;
         upower = pkgs.upower;
