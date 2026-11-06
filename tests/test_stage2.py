@@ -421,6 +421,12 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
         self.assertLess(text.index('prepare-stage2.py'), text.index('prepare-ctxr-stage2.py'))
         self.assertLess(text.index('prepare-ctxr-stage2.py'), text.index('-filesystems.tar.zst'))
 
+    def test_image_build_adds_the_ctxr_files_only_with_the_marker(self):
+        text = (ROOT / 'scripts/build-image').read_text()
+        self.assertIn('if [[ -e $aura/share/aura/monitor-free ]]; then\n'
+                      '  python3 "$root/scripts/prepare-ctxr-stage2.py"', text)
+        self.assertEqual(text.count('prepare-ctxr-stage2.py'), 1)
+
     def test_the_installed_build_splits_boards_only_with_the_marker(self):
         text = (ROOT / 'modules/installed.nix').read_text()
         marker = text.index('if [[ -e ${aura}/share/aura/monitor-free ]]; then')

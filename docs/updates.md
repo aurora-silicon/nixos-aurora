@@ -53,9 +53,11 @@ including the MacBook Neo.
 - A problem with one board's file never stops a rebuild. `scripts/build-ctxr-stage2.sh` warns and leaves the
   file out, and a Mach-O Mac whose board has no file gets a warning and an unchanged ESP.
 - An image build has no device tree to read, because its Stage 2 comes from the Apple Silicon module's
-  `extraFiles`. `scripts/prepare-ctxr-stage2.py` adds `boot-ctxr.bin`, a copy of `boot.bin`, to the image's
-  ESP, and `boot-ctxr-<board>.bin`, a copy of `boot-<board>.bin`, for each Mach-O board. The installer picks
-  the board's file over the combined one. The script fails the image if any of them is over 16 MiB.
+  `extraFiles`. If its aura has the marker, `scripts/prepare-ctxr-stage2.py` adds `boot-ctxr.bin`, a copy of
+  `boot.bin`, to the image's ESP, and `boot-ctxr-<board>.bin`, a copy of `boot-<board>.bin`, for each Mach-O
+  board. The installer picks the board's file over the combined one. The script fails the image if any of
+  them is over 16 MiB. Without the marker the image has no `boot-ctxr.bin`, and the installer refuses it on
+  Mach-O Macs, so no Mac gets a `boot-ctxr.bin` that rebuilds don't refresh.
 - Stage 1 (`aurora/stage1.bin`, `aurora/stage1.macho` and the boot object) is never written; it belongs
   to the installer.
 - The Apple Silicon module's own copy (`boot.loader.grub.extraFiles`, an unchecked overwrite with no
