@@ -24,7 +24,7 @@ if [ -z "${AURORA_STEAM_ROOT:-}" ]; then
 	if [ -z "$root" ] || [ ! -x "$root/steamrtarm64/steam" ]; then
 		[ ! -e "$HOME/.steam/root" ] || fail "$HOME/.steam/root is not a native ARM64 Steam client; move it aside to install one"
 		echo "steam: installing Valve's native ARM64 client for $USER" >&2
-		python3 "$lib/install-steam-arm64.py" \
+		AURORA_SYSTEM_LAUNCHERS=1 python3 "$lib/install-steam-arm64.py" \
 			--prefix "${XDG_STATE_HOME:-$HOME/.local/state}/aurora-steam-native/prefix"
 	fi
 fi

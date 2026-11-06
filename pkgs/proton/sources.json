@@ -1,0 +1,41 @@
+{
+  "version": "11-9",
+  "wine_commit": "981e2f0b9007fd70a6e0ed6119cb18f4164e26f9",
+  "archives": {
+    "proton": {
+      "name": "GE-Proton11-9-aarch64.tar.gz",
+      "url": "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton11-9/GE-Proton11-9-aarch64.tar.gz",
+      "hash": "sha256-lIlX6okpuKG0RMi5J4+Ht8ugAGzP7lHNVRq2lVXDQmU="
+    },
+    "wine": {
+      "name": "981e2f0b9007fd70a6e0ed6119cb18f4164e26f9.tar.gz",
+      "url": "https://github.com/ValveSoftware/wine/archive/981e2f0b9007fd70a6e0ed6119cb18f4164e26f9.tar.gz",
+      "hash": "sha256-22hciItrWFmyGiODkDoMiUrTcEBo33vkocbAeyIR6gg="
+    },
+    "ge-source": {
+      "name": "GE-Proton11-9.tar.gz",
+      "url": "https://github.com/GloriousEggroll/proton-ge-custom/archive/refs/tags/GE-Proton11-9.tar.gz",
+      "hash": "sha256-HVLE2npnEVhW58A8CBwVq/doOIqHYJonKbBwKs2Jkqg="
+    },
+    "wine-staging": {
+      "name": "6cc805ea57132eeaf44764e9213823c9b8d0d300.tar.gz",
+      "url": "https://github.com/wine-staging/wine-staging/archive/6cc805ea57132eeaf44764e9213823c9b8d0d300.tar.gz",
+      "hash": "sha256-RvzMZBLVoKxeAgR6VFu6IcPbRav6HBYRGaHeL3uMs2A="
+    },
+    "restore-configure": {
+      "name": "e813ca5771658b00875924ab88d525322e50d39f.patch",
+      "url": "https://github.com/ValveSoftware/wine/commit/e813ca5771658b00875924ab88d525322e50d39f.patch",
+      "hash": "sha256-3IY6YCY4VXSWv2PVbB2bu/u0STZlL07MNvbdGVF8ZJ8="
+    },
+    "vk-xml": {
+      "name": "vk.xml",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/Vulkan-Docs/v1.4.357/xml/vk.xml",
+      "hash": "sha256-Jk0Nc1DjfXDIJAf7Qw0IUED8AampYdQ97IwtbtHf0YM="
+    },
+    "video-xml": {
+      "name": "video.xml",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/Vulkan-Docs/v1.4.357/xml/video.xml",
+      "hash": "sha256-0Bi5FAFMBmBeNno7kpZwUR5vbeLyJcQFqLXi2RJAi3Y="
+    }
+  }
+}

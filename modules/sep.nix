@@ -12,10 +12,11 @@ in {
     type = lib.types.bool;
     default = false;
     description = ''
-      Offer fingerprint at the GNOME login screen as well as the lock screen.
-      GNOME Shell only offers it on the lock screen, because a fingerprint
-      login cannot unlock the keyring. The login screen also waits for Touch ID
-      to come up, up to 90 s after boot.
+      Patch GNOME Shell's greeter to offer fingerprint sign-in as well as
+      lock-screen authentication. The greeter waits for Touch ID readiness,
+      up to 90 seconds after boot; fingerprint sign-in does not unlock the
+      keyring. False leaves the normal password greeter and keeps lock-screen,
+      sudo and polkit fingerprint authentication enabled.
     '';
   };
 
@@ -58,13 +59,13 @@ in {
             rules.auth = {
               unix.control = lib.mkForce "[success=ok new_authtok_reqd=ok default=2]";
               aurora-touchid-rearm = {
-                enable = unix.enable;
+                inherit (unix) enable;
                 order = unix.order + 1;
                 control = "optional";
                 modulePath = "${pkgs.aurora-touchid-rearm}/lib/security/pam_aurora_touchid.so";
               };
               aurora-touchid-rearm-done = {
-                enable = unix.enable;
+                inherit (unix) enable;
                 order = unix.order + 2;
                 control = "sufficient";
                 modulePath = "${pkgs.pam}/lib/security/pam_permit.so";

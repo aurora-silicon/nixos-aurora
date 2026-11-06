@@ -30,24 +30,6 @@ let
         runHook postCheck
       '';
     });
-  kernelProvenance = builtins.fromJSON (builtins.readFile ./kernel/provenance.json);
-  kernelBase =
-    assert final.lib.assertMsg
-      (kernelProvenance.kernel_commit == pins."kernel-aurora".commit
-        && kernelProvenance.config_upstream.kernel_commit == kernelProvenance.kernel_commit)
-      "Refresh the canonical ALARM resolved config together with the kernel pin";
-    assert final.lib.assertMsg
-      (builtins.hashFile "sha256" ./kernel/config == kernelProvenance.config_upstream.config_sha256)
-      "The vendored ALARM resolved config does not match its provenance";
-    builtins.readFile ./kernel/config;
-  kernelBaseFile = final.writeText "config" kernelBase;
-  # The shared distribution config with NixOS's requirements on top, as the
-  # build merges them. NixOS modules read kernel features from this.
-  kernelConfig = final.lib.listToAttrs (final.lib.concatMap (line:
-    let matched = builtins.match "(CONFIG_[^=]+)=([ym])" line;
-    in final.lib.optional (matched != null) {
-      name = builtins.elemAt matched 0; value = builtins.elemAt matched 1;
-    }) (final.lib.splitString "\n" (kernelBase + "\n" + builtins.readFile ./kernel/nixos.config)));
   kernelLLVM = final.llvmPackages_22;
   # GNOME Initial Setup creates the owner account on GNOME images (its
   # new-user mode). nixpkgs' vendor file skips the account and password pages,
@@ -72,34 +54,13 @@ let
   guestPkgs = system: import final.path { inherit system; };
   x86 = guestPkgs "x86_64-linux";
   x86_32 = guestPkgs "i686-linux";
-  mesaCompilerTools = (x86.callPackage ./mesa.nix {
+  mesaCompilerTools = x86.callPackage ./pkgs/mesa-compiler-tools.nix {
     src = source "mesa-aurora";
-    commit = pins.mesa-aurora.commit;
-  }).overrideAttrs (old: {
-    pname = "aurora-mesa-compiler-tools";
-    outputs = [ "out" ];
-    configurePhase = ''
-      runHook preConfigure
-      meson setup tools --prefix="$out" --libdir=lib --buildtype=release "''${mesonFlags[@]}" \
-        -Dllvm=enabled -Dbuild-tests=false
-    '';
-    buildPhase = ''
-      ninja -C tools -j "$NIX_BUILD_CORES" src/compiler/clc/mesa_clc \
-        src/compiler/spirv/vtn_bindgen2 src/asahi/clc/asahi_clc
-    '';
-    doCheck = false;
-    installPhase = ''
-      mkdir -p $out/bin
-      cp tools/src/compiler/clc/mesa_clc tools/src/compiler/spirv/vtn_bindgen2 \
-        tools/src/asahi/clc/asahi_clc $out/bin/
-    '';
-    postFixup = "";
-    disallowedRequisites = [ ];
-    allowedReferences = null;
-  });
+    inherit (pins.mesa-aurora) version commit;
+  };
   guestMesa = packages: packages.callPackage ./mesa.nix {
     src = source "mesa-aurora";
-    commit = pins.mesa-aurora.commit;
+    inherit (pins.mesa-aurora) version commit;
     guest = true;
     compilerTools = mesaCompilerTools;
   };
@@ -255,7 +216,7 @@ in {
     baseSrc = let pin = pins.mil-hwx-compiler.extra_sources.gnustep-base; in final.fetchurl {
       name = "gnustep-base-${pin.commit}.tar.gz";
       url = pin.source_url;
-      sha256 = pin.sha256;
+      inherit (pin) sha256;
     };
     src = source "mil-hwx-compiler";
     version = pins.mil-hwx-compiler.version;
@@ -308,7 +269,12 @@ in {
     '';
   });
   # FEX from Aurora's fork in place of nixpkgs' (fex.nix).
-  fex = final.callPackage ./fex.nix { fex = prev.fex; pin = pins.fex-emu; };
+  fex = import ./fex.nix {
+    inherit (final) lib fetchurl runCommand;
+    inherit (prev) fex;
+    pin = pins.fex-emu;
+  };
+  aurora-proton = final.callPackage ./pkgs/proton { };
   # Aurora's Steam: nixpkgs' steam FHS environment around the native ARM64
   # launcher (steam/package.nix) in place of Valve's x86 bootstrap.
   steam-unwrapped = final.callPackage ./steam/package.nix {
@@ -318,223 +284,63 @@ in {
   steam = final.callPackage ./steam/fhs.nix { };
   # The userpages launcher, from the kernel's own source: it uses that tree's
   # private PR_AURORA_* prctl numbers.
-  aurora-userpages = final.stdenv.mkDerivation {
-    pname = "aurora-userpages";
-    version = pins.kernel-aurora.version;
+  aurora-userpages = final.callPackage ./pkgs/userpages.nix {
     src = source "kernel-aurora";
-    # Only the launcher, its prctl header and the license.
-    unpackPhase = ''
-      runHook preUnpack
-      root=${pins.kernel-aurora.archive_root}
-      tar -xzf "$src" "$root/COPYING" "$root/include/uapi/linux/prctl.h" "$root/tools/aurora-userpages"
-      sourceRoot=$root
-      runHook postUnpack
-    '';
-    buildPhase = ''
-      runHook preBuild
-      make -C tools/aurora-userpages
-      runHook postBuild
-    '';
-    installPhase = ''
-      runHook preInstall
-      install -Dm755 tools/aurora-userpages/userpages "$out/bin/userpages"
-      install -Dm644 tools/aurora-userpages/README.rst "$out/share/doc/aurora-userpages/README.rst"
-      install -Dm644 COPYING "$out/share/licenses/aurora-userpages/COPYING"
-      runHook postInstall
-    '';
-    doInstallCheck = true;
-    installCheckPhase = ''
-      "$out/bin/userpages" --help | grep -q '{native|4k|16k|64k} COMMAND'
-    '';
-    passthru = { inherit (pins.kernel-aurora) commit; };
-    meta = {
-      description = "Run programs with 4K userspace pages on the Aurora kernel";
-      license = final.lib.licenses.gpl2Only;
-      mainProgram = "userpages";
-      platforms = [ "aarch64-linux" ];
-    };
+    pin = pins.kernel-aurora;
   };
   aurora-bindgen = final.callPackage ./bindgen { llvmPackages = kernelLLVM; };
   linux-asahi = final.lib.makeOverridable ({ _kernelPatches ? [ ] }:
-    final.lib.recurseIntoAttrs (final.linuxPackagesFor (((final.callPackage
-      (final.path + "/pkgs/os-specific/linux/kernel/build.nix") {
-        rust-bindgen-unwrapped = final.aurora-bindgen;
-      }) {
-        pname = "linux-aurora";
-        version = "7.3.0";
-        modDirVersion = "7.3.0";
-        src = source "kernel-aurora";
-        configfile = kernelBaseFile;
-        config = kernelConfig;
-        stdenv = kernelLLVM.stdenv;
-        # Keep the native wrapped host compiler for host tools/RPATHs;
-        # compile the Apple kernel and Rust bindings with pinned LLVM.
-        extraMakeFlags = [ "LLVM=1" "LOCALVERSION=" "HOSTLDFLAGS=-fuse-ld=bfd -Wl,-rpath,${final.lib.getLib final.openssl}/lib"
-          "CC=${kernelLLVM.clang-unwrapped}/bin/clang"
-          "LD=${kernelLLVM.lld}/bin/ld.lld"
-          "AR=${kernelLLVM.llvm}/bin/llvm-ar"
-          "NM=${kernelLLVM.llvm}/bin/llvm-nm"
-          "STRIP=${kernelLLVM.llvm}/bin/llvm-strip"
-          "OBJCOPY=${kernelLLVM.llvm}/bin/llvm-objcopy"
-          "OBJDUMP=${kernelLLVM.llvm}/bin/llvm-objdump"
-          "READELF=${kernelLLVM.llvm}/bin/llvm-readelf"
-          "CFLAGS_MODULE=-I${final.lib.getLib kernelLLVM.clang-unwrapped}/lib/clang/${final.lib.versions.major kernelLLVM.clang-unwrapped.version}/include"
-          "CFLAGS_KERNEL=-I${final.lib.getLib kernelLLVM.clang-unwrapped}/lib/clang/${final.lib.versions.major kernelLLVM.clang-unwrapped.version}/include"
-        ];
-        extraMeta.branch = "7.3";
-        features.rust = true;
-        kernelPatches = [ {
-          name = "restore-legacy-speaker-protection";
-          patch = stableFile ./patches/0001-restore-legacy-speaker-protection.patch;
-        } ] ++ _kernelPatches;
-      }).overrideAttrs (finalAttrs: old: {
-        # NixOS consumers (including ASLR limits) need the resolved config,
-        # which the kernel builder already installs in its development output.
-        # Keep the configure input fragment private to the build environment.
-        passthru = old.passthru // {
-          configfile = "${finalAttrs.finalPackage.dev}/lib/modules/${old.passthru.modDirVersion}/build/.config";
-          # modules/installed.nix checks the kernel a system boots against its aura.
-          auroraCtxrExecmem = kernelCtxrExecmem;
-          # modules/installed.nix records this in each generation (aurora-dtb-abi).
-          auroraDtbAbi = kernelDtbAbi;
-          auroraLegacySpeakerProtection = true;
-        };
-        env = old.env // { RUSTC_BOOTSTRAP = "1"; };
-        nativeBuildInputs = old.nativeBuildInputs ++ [ final.binutils kernelLLVM.lld ];
-        # The source-tree entry point is selected by the pinned Kbuild.
-        postPatch = (old.postPatch or "") + ''
-          mkdir -p tools/aurora-bindgen/build/bin
-          ln -s ${final.aurora-bindgen}/bin/bindgen tools/aurora-bindgen/build/bin/bindgen
-        '';
-        # Start from the resolved configuration alarm-aurora ships for this
-        # kernel (kernel/config, see kernel/provenance.json), so every
-        # distribution builds the same options, and add only NixOS's own
-        # requirements on top.
-        configurePhase = ''
-          runHook preConfigure
-          # nixpkgs installs this tree beside source/ in the dev output.
-          # Keep it outside source/ so its postInstall move cannot target itself.
-          export buildRoot="$NIX_BUILD_TOP/build"
-          mkdir -- "$buildRoot"
-          cp ${kernelBaseFile} "$buildRoot/.config"
-          chmod u+w "$buildRoot/.config"
-          bash scripts/kconfig/merge_config.sh -m -O "$buildRoot" \
-            "$buildRoot/.config" ${stableFile ./kernel/nixos.config}
-          make "''${makeFlags[@]}" olddefconfig
-          runHook postConfigure
-          make "''${makeFlags[@]}" prepare
-          test "$(cat "$buildRoot/include/config/kernel.release")" = 7.3.0
-          buildFlags+=("KBUILD_BUILD_TIMESTAMP=$(date -u -d @$SOURCE_DATE_EPOCH)")
-        '';
-        postConfigure = ''
-          python3 ${stableFile ./kernel/validate-config.py} arch/arm64/configs/asahi.config \
-            ${stableFile ./kernel/nixos.config} "$buildRoot/.config"
-          python3 ${stableFile ./kernel/check-required.py} "$buildRoot/.config"
-          grep -qx 'CONFIG_RUST=y' "$buildRoot/.config"
-          grep -qx 'CONFIG_ARM64_16K_PAGES=y' "$buildRoot/.config"
-          ctxr=false
-          if grep -qx 'CONFIG_ARM64_CTXR_EXECMEM=y' "$buildRoot/.config"; then ctxr=true; fi
-          if [ "$ctxr" != ${final.lib.boolToString kernelCtxrExecmem} ]; then
-            echo "overlay.nix: set kernelCtxrExecmem = $ctxr; which this pin's configuration resolves to" >&2
-            exit 1
-          fi
-          make "''${makeFlags[@]}" rustavailable
-          make "''${makeFlags[@]}" certs/
-          "$buildRoot/certs/extract-cert" "" "$TMPDIR/aurora-empty-cert"
-        '';
-        postInstall = (old.postInstall or "") + ''
-          echo ${pins.kernel-aurora.commit} > "$out/aurora-source-commit"
-        '';
-      })))) { };
+    final.lib.recurseIntoAttrs (final.linuxPackagesFor (import ./pkgs/kernel.nix {
+      # Preserve buildLinux's .override API (features, extraMakeFlags, ...).
+      inherit (final) lib callPackage path writeText openssl binutils aurora-bindgen;
+      src = source "kernel-aurora";
+      pin = pins.kernel-aurora;
+      llvmPackages = kernelLLVM;
+      inherit kernelCtxrExecmem kernelDtbAbi;
+      kernelPatches = [ {
+        name = "restore-legacy-speaker-protection";
+        patch = stableFile ./patches/0001-restore-legacy-speaker-protection.patch;
+      } ] ++ _kernelPatches;
+    }))) { };
+  # Keep m1n1.override { customLogo = ...; } available to installed systems.
   m1n1 = assert final.lib.assertMsg (auraMonitorFree -> kernelCtxrExecmem)
     "aura without the monitor needs a kernel built with CONFIG_ARM64_CTXR_EXECMEM=y";
-    (prev.m1n1.override { customLogo = null; }).overrideAttrs (old: {
-    pname = "aura";
-    version = pins.aura.version;
-    # modules/installed.nix checks this against the kernel the system boots.
-    passthru = (old.passthru or { }) // { auroraMonitorFree = auraMonitorFree; };
+    import ./pkgs/aura.nix {
+    inherit (final) lib rustPlatform buildPackages;
+    inherit (prev) m1n1;
+    inherit auraMonitorFree;
     src = source "aura";
-    cargoDeps = final.rustPlatform.importCargoLock {
-      lockFile = ./locks/aura.Cargo.lock;
-      outputHashes."fatfs-0.4.0" = "sha256-r1STNZupll2U5MppT0gNmEKDl9gevRTYZFOAVimtZxU=";
-    };
-    postPatch = "";
-    # Build with clang and lld, as Fedora and Arch do. With GCC, aura's image
-    # outgrows the space that aura-raw.ld leaves before the DCP log buffer.
-    # python3 runs the build's built-in logo check.
-    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
-      kernelLLVM.clang-unwrapped kernelLLVM.lld kernelLLVM.llvm final.buildPackages.python3
-    ];
-    makeFlags = [ "RELEASE=1" "CHAINLOADING=1" "BUILTIN_LOGO=aurora" "USE_CLANG=1" ];
-    # This pin carries the v1.0.0b8 release label in archive builds.
-    env = (old.env or { }) // { AURA_VERSION_TAG = "1.0.0b8"; };
-    postBuild = ''
-      mkdir -p stage1
-      cp build/aura.bin stage1/aura-raw.bin
-      cp build/aura.macho stage1/aura.macho
-      cp build/aura-boot.macho stage1/aura-boot.macho
-      make clean
-      make $makeFlags ESP_STAGE2=1
-    '';
-    installPhase = ''
-      mkdir -p $out/lib/m1n1 $out/share/aura/stage1
-      cp build/aura.bin $out/lib/m1n1/m1n1.bin
-      cp stage1/* $out/share/aura/stage1/
-      # An aura without the monitor: Stage 2 then stops updating boot.bin on Mach-O Macs.
-      found=false
-      if [ -f src/ctxr_exec.c ] || [ ! -f src/monitor.c ]; then found=true; fi
-      if [ "$found" != ${final.lib.boolToString auraMonitorFree} ]; then
-        echo "overlay.nix: set auraMonitorFree = $found; which the pinned source is" >&2
-        exit 1
-      fi
-      ${final.lib.optionalString auraMonitorFree "touch $out/share/aura/monitor-free"}
-    '';
-    doCheck = false; # Upstream m1n1's Python suite is not the Aura test suite.
-  });
-  uboot-asahi = prev.uboot-asahi.overrideAttrs (old: {
+    pin = pins.aura;
+    llvmPackages = kernelLLVM;
+  };
+  uboot-asahi = prev.uboot-asahi.overrideAttrs (_old: {
     src = source "uboot-aurora";
     version = pins.uboot-aurora.version;
     patches = [ ];
   });
   mesa = (final.callPackage ./mesa.nix {
-    mesa = prev.mesa;
+    inherit (prev) mesa;
     src = source "mesa-aurora";
-    commit = pins.mesa-aurora.commit;
+    inherit (pins.mesa-aurora) version commit;
   }).overrideAttrs (old: {
     # Preserve the conventional interface without retaining LLVM in GL's closure.
     passthru = old.passthru // { opencl = final.aurora-rusticl; };
   });
   aurora-lavapipe = final.callPackage ./lavapipe.nix {
-    mesa = prev.mesa;
+    inherit (prev) mesa;
     src = source "mesa-aurora";
-    commit = pins.mesa-aurora.commit;
+    inherit (pins.mesa-aurora) version commit;
   };
   aurora-rusticl = final.callPackage ./rusticl.nix {
-    mesa = prev.mesa;
+    inherit (prev) mesa;
     src = source "mesa-aurora";
-    commit = pins.mesa-aurora.commit;
+    inherit (pins.mesa-aurora) version commit;
   };
-  aurora-fex-mesa = x86.runCommand "aurora-fex-mesa-${pins.mesa-aurora.version}-${builtins.substring 0 12 pins.mesa-aurora.commit}" {
-    nativeBuildInputs = [ x86.binutils ];
-    passthru = { inherit (pins.mesa-aurora) commit; };
-  } ''
-    mkdir -p $out/usr
-    cp -a ${guestMesa x86}/usr/lib64 $out/usr/
-    cp -a ${guestMesa x86_32}/usr/lib $out/usr/
-    cp -a ${guestMesa x86}/usr/share $out/usr/
-    # The manifest directory is shared by both guest architectures.
-    chmod -R u+w $out/usr/share
-    cp -a --update=none ${guestMesa x86_32}/usr/share/. $out/usr/share/
-    echo ${pins.mesa-aurora.commit} > $out/.aurora-mesa-commit
-    for library in $out/usr/lib64/libgallium*.so $out/usr/lib64/libvulkan_asahi.so; do
-      readelf -h "$library" | grep -q 'Advanced Micro Devices X86-64'
-      readelf -n "$library" | grep -Eq 'Build ID: [0-9a-f]{40}'
-    done
-    for library in $out/usr/lib/libgallium*.so $out/usr/lib/libvulkan_asahi.so; do
-      readelf -h "$library" | grep -q 'Intel 80386'
-      readelf -n "$library" | grep -Eq 'Build ID: [0-9a-f]{40}'
-    done
-  '';
+  aurora-fex-mesa = x86.callPackage ./pkgs/fex-mesa.nix {
+    pin = pins.mesa-aurora;
+    mesa64 = guestMesa x86;
+    mesa32 = guestMesa x86_32;
+  };
   aurora-flatpak-gl = final.callPackage ./flatpak-gl/package.nix {
     mesaSrc = source "mesa-aurora";
     mesaPin = pins.mesa-aurora;
@@ -586,37 +392,9 @@ in {
   # nixpkgs exposes a symlink join here: overriding its src does not replace
   # the inner model derivation. Build the pinned models explicitly, then merge
   # them ahead of the native common UCM definitions.
-  alsa-ucm-conf-asahi = let
-    models = final.stdenvNoCC.mkDerivation {
-      pname = "aurora-ucm-models";
-      version = pins.alsa-ucm-conf-aurora.version;
-      src = source "alsa-ucm-conf-aurora";
-      dontBuild = true;
-      installPhase = ''
-        runHook preInstall
-        mkdir -p "$out/share/alsa"
-        cp -r ucm2 "$out/share/alsa/"
-        echo ${pins.alsa-ucm-conf-aurora.commit} > "$out/.aurora-ucm-commit"
-        runHook postInstall
-      '';
-    };
-  in final.symlinkJoin {
-    pname = "alsa-ucm-conf-aurora";
-    inherit (models) version src;
-    paths = [ models final.alsa-ucm-conf ];
-    postBuild = ''
-      test "$(cat "$out/.aurora-ucm-commit")" = ${pins.alsa-ucm-conf-aurora.commit}
-      grep -qF 'JackControl "Internal Mic Jack"' \
-        "$out/share/alsa/ucm2/conf.d/aop_audio/3chan/HiFi.conf"
-      test -f "$out/share/alsa/ucm2/conf.d/macaudio/MacBook Neo J700.conf"
-    '';
-    passthru.commit = pins.alsa-ucm-conf-aurora.commit;
-    meta = {
-      description = "Aurora model profiles with native common ALSA UCM definitions";
-      homepage = "https://github.com/aurora-silicon/alsa-ucm-conf-asahi";
-      license = final.lib.licenses.bsd3;
-      platforms = [ "aarch64-linux" ];
-    };
+  alsa-ucm-conf-asahi = final.callPackage ./pkgs/ucm.nix {
+    src = source "alsa-ucm-conf-aurora";
+    pin = pins.alsa-ucm-conf-aurora;
   };
   # Fedora Aurora's speakersafetyd-aurora-profiles: the J616s speaker model
   # (speakersafetyd's J316 values with the J616 V/I sense layout) and the udev
@@ -648,7 +426,7 @@ in {
       patchShebangs $out/libexec/speakerguardd/use-feedback-guard
     '';
   };
-  bankstown-lv2 = prev.bankstown-lv2.overrideAttrs (old: {
+  bankstown-lv2 = prev.bankstown-lv2.overrideAttrs (_old: {
     src = source "bankstown";
     version = pins.bankstown.version;
     cargoDeps = final.rustPlatform.importCargoLock { lockFile = ./locks/bankstown.Cargo.lock; };
@@ -666,52 +444,15 @@ in {
   # package's own lib/aurora-camera-denoise, so a Neural Engine backend has to
   # be built into this derivation. Settings come from /etc, which
   # modules/camera-denoise.nix writes.
-  aurora-camera-denoise = final.stdenv.mkDerivation {
-    pname = "aurora-camera-denoise";
-    version = pins.camera-denoise.version;
+  aurora-camera-denoise = final.callPackage ./pkgs/camera-denoise.nix {
     src = source "camera-denoise";
-    nativeBuildInputs = [ final.meson final.ninja final.pkg-config ];
-    buildInputs = [ final.pipewire ];
-    mesonFlags = [
-      "-Ddaemon=enabled"
-      # The optional Vulkan temporal backend stays out, as on Fedora and Arch.
-      "-Dgpu=disabled"
-      "-Dsysconfdir=/etc"
-      "-Dsystemduserunitdir=${placeholder "out"}/lib/systemd/user"
-    ];
-    doCheck = true;
-    postInstall = ''
-      substituteInPlace $out/lib/systemd/user/aurora-camera-denoise.service \
-        --replace-fail "ExecReload=/bin/kill" "ExecReload=${final.coreutils}/bin/kill"
-    '';
-    passthru.commit = pins.camera-denoise.commit;
-    meta = {
-      description = "PipeWire filter that denoises the built-in camera in low light";
-      homepage = "https://github.com/aurora-silicon/camera-denoise";
-      license = final.lib.licenses.mit;
-      mainProgram = "aurora-camera-denoise";
-      platforms = [ "aarch64-linux" ];
-    };
+    pin = pins.camera-denoise;
   };
   # The keyboard backlight that follows the ambient light sensor, a system
   # service. modules/kbd-light.nix enables it and writes its settings.
-  aurora-kbd-light = final.stdenv.mkDerivation {
-    pname = "aurora-kbd-light";
-    version = pins.kbd-light.version;
+  aurora-kbd-light = final.callPackage ./pkgs/kbd-light.nix {
     src = source "kbd-light";
-    makeFlags = [ "PREFIX=${placeholder "out"}" "UNITDIR=${placeholder "out"}/lib/systemd/system" ];
-    postInstall = ''
-      substituteInPlace $out/lib/systemd/system/aurora-kbd-light.service \
-        --replace-fail "ExecStart=/usr/bin/aurora-kbd-light" "ExecStart=$out/bin/aurora-kbd-light"
-    '';
-    passthru.commit = pins.kbd-light.commit;
-    meta = {
-      description = "Keyboard backlight that follows the ambient light sensor";
-      homepage = "https://github.com/aurora-silicon/kbd-light";
-      license = final.lib.licenses.mit;
-      mainProgram = "aurora-kbd-light";
-      platforms = [ "aarch64-linux" ];
-    };
+    pin = pins.kbd-light;
   };
   # Touch ID as a FIDO2/U2F security key (aurora-sep-userspace fido/).
   # modules/fido.nix runs it with aurora.fido.enable; off by default.
@@ -760,7 +501,7 @@ in {
     plugin = let pin = pins.omdrop-awdl.extra_sources.omdrop-plugin; in final.fetchurl {
       name = "omdrop-plugin-${pin.commit}.tar.gz";
       url = pin.source_url;
-      sha256 = pin.sha256;
+      inherit (pin) sha256;
     };
     runtimePath = final.lib.makeBinPath [ py final.bash final.coreutils final.iproute2 final.iputils
       final.iw final.openssl final.procps final.util-linux final.gawk final.gnugrep final.gnused

@@ -1,0 +1,25 @@
+# Install a writable copy for Steam and Play without replacing user changes.
+source=@PROTON@
+root="${XDG_DATA_HOME:-$HOME/.local/share}/aurora-proton"
+target="$root/$(basename "$source")"
+marker="$target/.aurora-proton-source"
+if [[ -e "$target" || -L "$target" ]]; then
+  if [[ -f "$marker" && "$(cat "$marker")" == "$source" ]]; then
+    printf '%s\n' "$target"
+    exit 0
+  fi
+  echo "Refusing to overwrite existing compatibility tool: $target" >&2
+  exit 1
+fi
+mkdir -p "$root"
+temporary=$(mktemp -d "$root/.install.XXXXXXXX")
+trap 'rm -rf -- "$temporary"' EXIT
+cp -a --reflink=auto --no-preserve=ownership "$source/." "$temporary/"
+chmod -R u+rwX "$temporary"
+printf '%s\n' "$source" > "$temporary/.aurora-proton-source"
+mv -T --no-clobber "$temporary" "$target"
+[[ -f "$marker" && "$(cat "$marker")" == "$source" ]] || {
+  echo "Compatibility tool target appeared during installation: $target" >&2
+  exit 1
+}
+printf '%s\n' "$target"

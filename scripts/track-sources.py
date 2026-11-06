@@ -8,7 +8,9 @@ workflow token. sources.json carries the fetchurl hash in SRI form
 See docs/updates.md.
 """
 from pathlib import Path
-import re
+import configparser
+import os
+import json
 import subprocess
 import sys
 
@@ -24,8 +26,7 @@ RECIPES = {'kernel-aurora': 'kernel', 'aura': 'aura', 'mesa-aurora': 'mesa',
            'fex-emu': 'fex', 'aurora-steam-native': 'steam'}
 KINDS = {'kernel-aurora': 'kernel', 'mesa-aurora': 'mesa'}
 CI_WORKFLOWS = ['checks.yml']
-PATCH_PATHS = [r'sources\.json', r'kernel/provenance\.json', r'locks/aura\.Cargo\.lock', r'overlay\.nix',
-               r'mesa\.nix']
+PATCH_PATHS = [r'sources\.json', r'kernel/provenance\.json', r'locks/aura\.Cargo\.lock']
 # Files that record a source commit outside sources.json.
 COMMIT_FILES = {'kernel-aurora': ['kernel/provenance.json'], 'aura': [], 'mesa-aurora': [],
                 'fex-emu': [], 'aurora-steam-native': []}
@@ -33,15 +34,45 @@ COMMIT_FILES = {'kernel-aurora': ['kernel/provenance.json'], 'aura': [], 'mesa-a
 CARGO_LOCKS = {'aura': ('rust/Cargo.lock', 'locks/aura.Cargo.lock')}
 
 
-def set_nix_version(path, old, new, keys):
-    text = path.read_text()
-    updated = text
-    for key in keys:
-        updated = re.sub(rf'(\b{key}\s*=\s*)"{re.escape(old)}";', rf'\g<1>"{new}";', updated)
-    if updated == text:
-        return False
-    path.write_text(updated)
-    return True
+def refresh_fex_submodules(root, item):
+    """Resolve the selected gitlinks before admitting a new FEX parent pin."""
+    path = root / 'sources.json'
+    pins = json.loads(path.read_text())
+    parent = pins['fex-emu']
+    slug = lib.repository_slug(parent['repository'])
+    tree = lib.gh_api(f'repos/{slug}/git/trees/{item["new"]}?recursive=1')
+    if tree.get('truncated'):
+        raise ValueError('FEX git tree response was truncated')
+    gitlinks = {entry['path']: entry['sha'] for entry in tree['tree']
+                if entry.get('mode') == '160000' and entry.get('type') == 'commit'}
+    modules = configparser.ConfigParser(interpolation=None)
+    modules.read_string(lib.read_members(item['archive_path'], ['.gitmodules'])['.gitmodules'].decode())
+    repositories = {modules[section]['path']: modules[section]['url'] for section in modules.sections()}
+    refreshed = {}
+    notes = []
+    for name, old in parent['extra_sources'].items():
+        source_path = old['path']
+        commit = gitlinks[source_path]
+        if not lib.HEX40.fullmatch(commit):
+            raise ValueError(f'{name}: invalid gitlink commit')
+        repository = lib.repository_slug(repositories[source_path])
+        if repository != lib.repository_slug(old['repository']):
+            raise ValueError(f'{name}: submodule repository changed; review it explicitly')
+        pin = dict(old)
+        if commit != old['commit']:
+            submodule = {'key': name, 'repository': repository, 'new': commit}
+            info = tl.prepare_source(submodule, Path(item['archive_path']).parent,
+                                     os.environ.get('GITHUB_REPOSITORY', 'aurora-silicon/nixos-aurora'),
+                                     token=os.environ.get('GH_TOKEN'))
+            pin.update(commit=commit, source_url=info['source_url'], archive_root=info['archive_root'],
+                       sha256=info['sha256'], nix_hash=info['nix_hash'])
+            if not info['tree_verified']:
+                item.setdefault('needs_review', []).append(f'{name}: {info.get("tree_note", "archive tree mismatch")}')
+            notes.append(f'FEX {name}: {old["commit"][:12]} -> {commit[:12]}')
+        refreshed[name] = pin
+    parent.update(extra_sources=refreshed, submodules_commit=item['new'])
+    path.write_text(json.dumps(pins, indent=2) + '\n')
+    return notes
 
 
 def update_recipe(root, item, today):
@@ -63,28 +94,21 @@ def update_recipe(root, item, today):
                 notes.append(f'{target} updated from the archive')
                 if tl.cargo_git_sources(new_lock) != tl.cargo_git_sources(old_lock):
                     item.setdefault('needs_review', []).append(
-                        'git dependencies changed; update importCargoLock outputHashes in overlay.nix')
+                        'git dependencies changed; update importCargoLock outputHashes in pkgs/aura.nix')
+    if key == 'fex-emu':
+        try:
+            notes.extend(refresh_fex_submodules(root, item))
+        except (OSError, ValueError, RuntimeError, KeyError, configparser.Error) as error:
+            # The recipe refuses a parent whose gitlinks were not refreshed.
+            item.setdefault('needs_review', []).append(f'FEX submodule refresh failed: {error}')
     if key == 'aura':
         # A release label belongs to the commit it was tagged on, not to the next one.
-        path = root / 'overlay.nix'
-        text = path.read_text()
-        path.write_text(re.sub(r'^(\s*#.*\n)*\s*env = .*\bAURA_VERSION_TAG = "[^"]*";.*\n', '', text,
-                               flags=re.M))
-    old_version = item.get('previous_version')
-    if item.get('version_changed') and old_version:
-        if key == 'kernel-aurora':
-            changed = set_nix_version(root / 'overlay.nix', old_version, item['version'],
-                                      ['version', 'modDirVersion'])
-            branch = '.'.join(item['version'].split('.')[:2])
-            text = (root / 'overlay.nix').read_text()
-            (root / 'overlay.nix').write_text(re.sub(r'(extraMeta\.branch\s*=\s*)"[^"]*";',
-                                                     rf'\g<1>"{branch}";', text, count=1))
-        else:
-            changed = set_nix_version(root / 'mesa.nix', old_version, item['version'], ['version'])
-        notes.append(f'version {old_version} -> {item["version"]}'
-                     + ('' if changed else ' (recipe version not found; edit it by hand)'))
-        if not changed:
-            item.setdefault('needs_review', []).append('the recipe version could not be updated')
+        path = root / 'sources.json'
+        pins = json.loads(path.read_text())
+        if pins['aura'].pop('release_tag', None) is not None:
+            path.write_text(json.dumps(pins, indent=2) + '\n')
+    if item.get('version_changed') and item.get('previous_version'):
+        notes.append(f'version {item["previous_version"]} -> {item["version"]}')
     return notes
 
 
@@ -104,7 +128,7 @@ def ci_inputs(packages):
     if 'mesa' in packages:
         # All graphics outputs consume the same pin. A tracker change
         # must build the runtime payloads too, even with an explicit matrix.
-        packages.update(('fex-mesa', 'flatpak-gl', 'rusticl', 'graphics'))
+        packages.update(('fex-mesa', 'flatpak-gl', 'rusticl', 'lavapipe', 'graphics'))
     return {'checks.yml': {'packages': ' '.join(sorted(packages))}}
 
 

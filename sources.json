@@ -12,6 +12,7 @@
     "repository": "https://github.com/aurora-silicon/aura",
     "commit": "30e93e890055eb289f544972404ad7b7c4affc3a",
     "version": "1.0.0b8",
+    "release_tag": "1.0.0b8",
     "source_url": "https://codeload.github.com/aurora-silicon/aura/tar.gz/30e93e890055eb289f544972404ad7b7c4affc3a",
     "archive_root": "aura-30e93e890055eb289f544972404ad7b7c4affc3a",
     "sha256": "6519fef0f89fde4150b32e6ec7e6e7b00427469b75bde2e0e57f3c7427e90e9d",
@@ -209,6 +210,8 @@
     "archive_root": "fex-0c08727ae4c0c30601c962d982d4864b77dd17a2",
     "sha256": "b0e90b68f4eb009c02147d8859c2111baaf257dee916924be7ac833e09379665",
     "version": "2610",
+    "nix_hash": "sha256-sOkLaPTrAJwCFH2IWcIRG6ryV97pFpJL56yDPgk3lmU=",
+    "submodules_commit": "0c08727ae4c0c30601c962d982d4864b77dd17a2",
     "extra_sources": {
       "cpp-optparse": {
         "repository": "https://github.com/Sonicadvance1/cpp-optparse",
@@ -216,7 +219,8 @@
         "source_url": "https://codeload.github.com/Sonicadvance1/cpp-optparse/tar.gz/9f94388a339fcbb0bc95c17768eb786c85988f6e",
         "archive_root": "cpp-optparse-9f94388a339fcbb0bc95c17768eb786c85988f6e",
         "sha256": "68e6b500890270517d226abbc3610135de1600ddde29f44c9b68cca5e2a17f60",
-        "nix_hash": "sha256-aOa1AIkCcFF9Imq7w2EBNd4WAN3eKfRMm2jMpeKhf2A="
+        "nix_hash": "sha256-aOa1AIkCcFF9Imq7w2EBNd4WAN3eKfRMm2jMpeKhf2A=",
+        "path": "Source/Common/cpp-optparse"
       },
       "drm-headers": {
         "repository": "https://github.com/FEX-Emu/drm-headers",
@@ -224,7 +228,8 @@
         "source_url": "https://codeload.github.com/FEX-Emu/drm-headers/tar.gz/3e49836995c1dcb3df709440ad2f270b569c6a5f",
         "archive_root": "drm-headers-3e49836995c1dcb3df709440ad2f270b569c6a5f",
         "sha256": "3d3653841f81ea5be1a15cd4b458f048c1fffbcd97fcc808454a7fbe7cf1a555",
-        "nix_hash": "sha256-PTZThB+B6lvhoVzUtFjwSMH/+82X/MgIRUp/vnzxpVU="
+        "nix_hash": "sha256-PTZThB+B6lvhoVzUtFjwSMH/+82X/MgIRUp/vnzxpVU=",
+        "path": "External/drm-headers"
       },
       "jemalloc": {
         "repository": "https://github.com/FEX-Emu/jemalloc",
@@ -232,7 +237,8 @@
         "source_url": "https://codeload.github.com/FEX-Emu/jemalloc/tar.gz/8436195ad5e1bc347d9b39743af3d29abee59f06",
         "archive_root": "jemalloc-8436195ad5e1bc347d9b39743af3d29abee59f06",
         "sha256": "800cc0653f5bc2f0ed2cc7bb383f8eeda1ff94b2e89eaee0ccc57bd5fb002fe4",
-        "nix_hash": "sha256-gAzAZT9bwvDtLMe7OD+O7aH/lLLonq7gzMV71fsAL+Q="
+        "nix_hash": "sha256-gAzAZT9bwvDtLMe7OD+O7aH/lLLonq7gzMV71fsAL+Q=",
+        "path": "External/jemalloc_glibc"
       },
       "range-v3": {
         "repository": "https://github.com/ericniebler/range-v3",
@@ -240,7 +246,8 @@
         "source_url": "https://codeload.github.com/ericniebler/range-v3/tar.gz/ca1388fb9da8e69314dda222dc7b139ca84e092f",
         "archive_root": "range-v3-ca1388fb9da8e69314dda222dc7b139ca84e092f",
         "sha256": "57a6fca5d60a85b84e8efecc62f0ca064e6b1f89b97b513284fe7f5bd43d49eb",
-        "nix_hash": "sha256-V6b8pdYKhbhOjv7MYvDKBk5rH4m5e1EyhP5/W9Q9Ses="
+        "nix_hash": "sha256-V6b8pdYKhbhOjv7MYvDKBk5rH4m5e1EyhP5/W9Q9Ses=",
+        "path": "External/range-v3"
       },
       "rpmalloc": {
         "repository": "https://github.com/FEX-Emu/rpmalloc",
@@ -248,7 +255,8 @@
         "source_url": "https://codeload.github.com/FEX-Emu/rpmalloc/tar.gz/ed227446afce6ff505b312bae1e10a3daaeeea39",
         "archive_root": "rpmalloc-ed227446afce6ff505b312bae1e10a3daaeeea39",
         "sha256": "f14761cc0c8976aed669475087021661f269699ef8297885b665eed4b764b087",
-        "nix_hash": "sha256-8UdhzAyJdq7WaUdQhwIWYfJpaZ74KXiFtmXu1LdksIc="
+        "nix_hash": "sha256-8UdhzAyJdq7WaUdQhwIWYfJpaZ74KXiFtmXu1LdksIc=",
+        "path": "External/rpmalloc"
       },
       "Vulkan-Headers": {
         "repository": "https://github.com/KhronosGroup/Vulkan-Headers",
@@ -256,7 +264,8 @@
         "source_url": "https://codeload.github.com/KhronosGroup/Vulkan-Headers/tar.gz/ee2ec5fd83dafce291024683b50dc89219333076",
         "archive_root": "Vulkan-Headers-ee2ec5fd83dafce291024683b50dc89219333076",
         "sha256": "df7a152381a7fdaf98e36de7716b8d6d6ead776764bc76d1a1aef9049d1bca89",
-        "nix_hash": "sha256-33oVI4Gn/a+Y423ncWuNbW6td2dkvHbRoa75BJ0byok="
+        "nix_hash": "sha256-33oVI4Gn/a+Y423ncWuNbW6td2dkvHbRoa75BJ0byok=",
+        "path": "External/Vulkan-Headers"
       },
       "vixl": {
         "repository": "https://github.com/FEX-Emu/vixl",
@@ -264,7 +273,8 @@
         "source_url": "https://codeload.github.com/FEX-Emu/vixl/tar.gz/6561d40650885ad24fbd0aa0cdb20ccb4808d444",
         "archive_root": "vixl-6561d40650885ad24fbd0aa0cdb20ccb4808d444",
         "sha256": "03caa03990ee02c6d48781368332c4b9019ec2101addab3aa29eb359bb7d7653",
-        "nix_hash": "sha256-A8qgOZDuAsbUh4E2gzLEuQGewhAa3as6op6zWbt9dlM="
+        "nix_hash": "sha256-A8qgOZDuAsbUh4E2gzLEuQGewhAa3as6op6zWbt9dlM=",
+        "path": "External/vixl"
       },
       "unordered_dense": {
         "repository": "https://github.com/martinus/unordered_dense",
@@ -272,10 +282,10 @@
         "source_url": "https://codeload.github.com/martinus/unordered_dense/tar.gz/3234af2c03549bc85656bfd3a86993bf1cd8aef1",
         "archive_root": "unordered_dense-3234af2c03549bc85656bfd3a86993bf1cd8aef1",
         "sha256": "aa68d77ef88475db710bf647017f5ccb13ceec6f55f3defa37e995b043eb990b",
-        "nix_hash": "sha256-qmjXfviEddtxC/ZHAX9cyxPO7G9V8976N+mVsEPrmQs="
+        "nix_hash": "sha256-qmjXfviEddtxC/ZHAX9cyxPO7G9V8976N+mVsEPrmQs=",
+        "path": "External/unordered_dense"
       }
-    },
-    "nix_hash": "sha256-sOkLaPTrAJwCFH2IWcIRG6ryV97pFpJL56yDPgk3lmU="
+    }
   },
   "aurora-steam-native": {
     "repository": "https://github.com/aurora-silicon/aurora-steam-native",

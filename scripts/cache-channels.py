@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / 'scripts'))
 import updatelib as lib  # noqa: E402
+from cache_inputs import expected_outputs, require_coverage, store_paths  # noqa: E402
 
 TAG = re.compile(r'cache-[A-Za-z0-9._-]+')
 REFS = {'testing': 'channel-testing', 'stable': 'channel-stable'}
@@ -45,8 +46,9 @@ def verify_attestation(directory, repository):
         digest, name = line.split(maxsplit=1)
         listed[name.lstrip('*')] = digest
     archive = directory / 'cache-metadata.tar.gz'
-    if listed.get('cache-metadata.tar.gz') != lib.sha256_file(archive):
-        raise ValueError('SHA256SUMS does not match cache-metadata.tar.gz')
+    for name in ('cache-metadata.tar.gz', 'manifest.json'):
+        if listed.get(name) != lib.sha256_file(directory / name):
+            raise ValueError('SHA256SUMS does not match ' + name)
     result = subprocess.run(['gh', 'attestation', 'verify', str(archive), '--repo', repository,
                              '--signer-workflow', f'{repository}/.github/workflows/publish-cache.yml',
                              '--deny-self-hosted-runners', '--format', 'json'],
@@ -98,26 +100,58 @@ def pin_history(old_commit, new_commit, allow_downgrade):
     return lines
 
 
-def assemble(args):
-    repository = args.repository
-    if not TAG.fullmatch(args.tag):
-        raise SystemExit('expected a cache-* release tag')
-    state = lib.load_channels(ROOT, repository)
-    site, work = Path(args.site), Path(args.work)
-    download = work / 'release'
+def authenticate_release(repository, tag, site, work):
+    """Authenticate an immutable release without changing channel state."""
+    if not TAG.fullmatch(tag):
+        raise ValueError('expected a cache-* release tag')
+    download = Path(work) / 'release'
     download.mkdir(parents=True)
-    lib.gh('release', 'download', args.tag, '--repo', repository, '--dir', str(download),
-           '--pattern', 'cache-metadata.tar.gz', '--pattern', 'SHA256SUMS')
+    lib.gh('release', 'download', tag, '--repo', repository, '--dir', str(download),
+           '--pattern', 'cache-metadata.tar.gz', '--pattern', 'SHA256SUMS', '--pattern', 'manifest.json')
     provenance = verify_attestation(download, repository)
-    subprocess.run([sys.executable, str(ROOT / 'scripts/extract-cache-metadata.py'),
-                    str(download / 'cache-metadata.tar.gz'), str(site)], check=True)
-    subprocess.run([sys.executable, str(ROOT / 'scripts/verify-published-cache.py'), '--cache-dir',
-                    str(site / 'cache'), '--public-key', str(ROOT / 'keys/cache.pub')], check=True)
-    release = lib.gh_api(f'repos/{repository}/releases/tags/{args.tag}')
+    release = lib.gh_api(f'repos/{repository}/releases/tags/{tag}')
     commit = release['target_commitish']
     if not lib.HEX40.fullmatch(commit) or not lib.is_ancestor(ROOT, commit, 'origin/main'):
-        raise SystemExit(f'{args.tag} does not target a commit on main')
+        raise ValueError(f'{tag} does not target a commit on main')
+    manifest = json.loads((download / 'manifest.json').read_text())
+    if manifest.get('commit', commit) != commit:
+        raise ValueError('Cache manifest does not name the release target commit')
+    subprocess.run([sys.executable, str(ROOT / 'scripts/extract-cache-metadata.py'),
+                    str(download / 'cache-metadata.tar.gz'), str(site)], check=True)
+    require_coverage(expected_outputs(commit), store_paths(Path(site) / 'cache'))
+    subprocess.run([sys.executable, str(ROOT / 'scripts/verify-published-cache.py'), '--cache-dir',
+                    str(Path(site) / 'cache'), '--public-key', str(ROOT / 'keys/cache.pub')], check=True)
+    return release, provenance
+
+
+def authenticate(args):
+    release, provenance = authenticate_release(args.repository, args.tag, Path(args.site), Path(args.work))
+    print(f'Authenticated {args.tag} ({release["target_commitish"]}): {provenance}')
+
+
+def assemble(args):
+    repository = args.repository
+    state = lib.load_channels(ROOT, repository)
+    site = Path(args.site)
+    release, provenance = authenticate_release(repository, args.tag, site, Path(args.work))
+    commit = release['target_commitish']
+    current = {state.get('cache', {}).get('commit')}
+    if args.advance_testing:
+        current.add(state['channels'].get('testing', {}).get('commit'))
+    if not args.allow_downgrade and any(
+            before and not lib.is_ancestor(ROOT, before, commit) for before in current):
+        raise SystemExit('Cache or testing would move backwards; use --allow-downgrade for an approved rollback')
     report = pin_history(previous_commit(state, repository, args.tag), commit, args.allow_downgrade)
+    covered = store_paths(site / 'cache')
+    for channel, entry in state['channels'].items():
+        if (channel == 'testing' and args.advance_testing) or entry['commit'] == commit:
+            continue
+        expected = expected_outputs(entry['commit'])
+        try:
+            require_coverage(expected, covered)
+        except ValueError as error:
+            raise ValueError(f'{channel} channel outputs would be lost; deploy a cumulative cache '
+                             f'containing the selected release and {entry["commit"]}: {error}') from error
     shutil.copyfile(ROOT / 'keys/cache.pub', site / 'cache.pub')
     stamp = now()
     entry = {'tag': args.tag, 'commit': commit, 'released_at': release['created_at'], 'deployed_at': stamp,
@@ -132,6 +166,7 @@ def assemble(args):
                                                    indent=2, sort_keys=True) + '\n')
     (site / 'index.html').write_text(
         '<!doctype html><title>Aurora NixOS</title><h1>Aurora NixOS binary cache</h1>'
+        '<p><a href="docs/">Documentation</a> · <a href="docs/options/">Options</a></p>'
         f'<p><code>{CACHE_URL}</code>, key <code>{(ROOT / "keys/cache.pub").read_text().strip()}</code></p>\n')
     Path(args.state_out).write_text(json.dumps(state, indent=2) + '\n')
     print('\n'.join([f'## Cache {args.tag} ({commit[:12]})', '', f'- attestation: {provenance}',
@@ -154,6 +189,8 @@ def promote(args):
     if soaked < args.min_soak_hours:
         raise SystemExit(f'{commit[:12]} has been on testing for {soaked:.1f} h; the minimum is {args.min_soak_hours} h.')
     current = state['channels'].get('stable', {}).get('commit')
+    if current and not args.allow_downgrade and not lib.is_ancestor(ROOT, current, commit):
+        raise SystemExit('Stable would move backwards; use --allow-downgrade for an approved rollback')
     report = pin_history(current, commit, args.allow_downgrade)
     # Every hardware output of the commit must be in the live cache with a
     # valid signature, or stable systems would rebuild the kernel locally.
@@ -198,6 +235,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--repository', default=os.environ.get('GITHUB_REPOSITORY', ''))
     commands = parser.add_subparsers(dest='command', required=True)
+    auth = commands.add_parser('authenticate')
+    auth.add_argument('--tag', required=True)
+    auth.add_argument('--site', required=True)
+    auth.add_argument('--work', required=True)
     build = commands.add_parser('assemble')
     build.add_argument('--tag', required=True)
     build.add_argument('--advance-testing', action='store_true')
@@ -217,7 +258,7 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', args.repository):
         parser.error('--repository owner/name is required')
-    {'assemble': assemble, 'promote': promote, 'record': record}[args.command](args)
+    {'authenticate': authenticate, 'assemble': assemble, 'promote': promote, 'record': record}[args.command](args)
 
 
 if __name__ == '__main__':
