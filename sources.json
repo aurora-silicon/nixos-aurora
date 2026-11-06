@@ -1,12 +1,12 @@
 {
   "kernel-aurora": {
     "repository": "https://github.com/aurora-silicon/linux",
-    "commit": "2661d71e16bf538156001bd9e93bafcd60855c85",
+    "commit": "9127278801dd524b72454ee54d2be370d22a4197",
     "version": "7.3.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/linux/tar.gz/2661d71e16bf538156001bd9e93bafcd60855c85",
-    "archive_root": "linux-2661d71e16bf538156001bd9e93bafcd60855c85",
-    "sha256": "e7199a9342508b6f13cbb7aff66191a13d41ecadfaed5ea6764ffe9fec26b6e0",
-    "nix_hash": "sha256-5xmak0JQi28Ty7ev9mGRoT1B7K367V6mdk/+n+wmtuA="
+    "source_url": "https://codeload.github.com/aurora-silicon/linux/tar.gz/9127278801dd524b72454ee54d2be370d22a4197",
+    "archive_root": "linux-9127278801dd524b72454ee54d2be370d22a4197",
+    "sha256": "3f075235d2196e52779b6d2def5b9707b37961d85d1ad04fe1ae9de121882ca9",
+    "nix_hash": "sha256-PwdSNdIZblJ3m20t71uXB7N5YdhdGtBP4a6d4SGILKk="
   },
   "aura": {
     "repository": "https://github.com/aurora-silicon/aura",
@@ -98,6 +98,15 @@
     "sha256": "89e565031a99a2ea0ebf4eace98ed9289e9f2b5e9f32a8732294068605c52537",
     "nix_hash": "sha256-ieVlAxqZouoOv06s6Y7ZKJ6fK16fMqhzIpQGhgXFJTc="
   },
+  "libva-v4l2-request-avd": {
+    "repository": "https://github.com/omacom/libva-v4l2_request",
+    "commit": "4f60c51f7841dd74bb61c94a4ad31e630bbdab01",
+    "version": "1.3.r11",
+    "source_url": "https://codeload.github.com/omacom/libva-v4l2_request/tar.gz/4f60c51f7841dd74bb61c94a4ad31e630bbdab01",
+    "archive_root": "libva-v4l2_request-4f60c51f7841dd74bb61c94a4ad31e630bbdab01",
+    "sha256": "826fda7396374daea1c39c08e2057dd2b4775cf0205c59bce2d30ce2bfd212a4",
+    "nix_hash": "sha256-gm/ac5Y3Ta6hw5wI4gV90rR3XPAgXFm84tMM4r/SEqQ="
+  },
   "avd-fw": {
     "repository": "https://github.com/aurora-silicon/avd-fw",
     "commit": "6062e8516c0a751bc8e50f5d604a17395923189f",
@@ -186,10 +195,10 @@
   },
   "fex-emu": {
     "repository": "https://github.com/aurora-silicon/fex",
-    "commit": "c2c22c6a3654695ad436527ccaf95626b339ef11",
-    "source_url": "https://codeload.github.com/aurora-silicon/fex/tar.gz/c2c22c6a3654695ad436527ccaf95626b339ef11",
-    "archive_root": "fex-c2c22c6a3654695ad436527ccaf95626b339ef11",
-    "sha256": "48b6a8ea6b66fb6d625e0a29bde83ff942a78170648104e68a9791fb0d46fa3d",
+    "commit": "0c08727ae4c0c30601c962d982d4864b77dd17a2",
+    "source_url": "https://codeload.github.com/aurora-silicon/fex/tar.gz/0c08727ae4c0c30601c962d982d4864b77dd17a2",
+    "archive_root": "fex-0c08727ae4c0c30601c962d982d4864b77dd17a2",
+    "sha256": "b0e90b68f4eb009c02147d8859c2111baaf257dee916924be7ac833e09379665",
     "version": "2610",
     "extra_sources": {
       "cpp-optparse": {
@@ -257,7 +266,7 @@
         "nix_hash": "sha256-qmjXfviEddtxC/ZHAX9cyxPO7G9V8976N+mVsEPrmQs="
       }
     },
-    "nix_hash": "sha256-SLao6mtm+21iXgopveg/+UKngXBkgQTmipeR+w1G+j0="
+    "nix_hash": "sha256-sOkLaPTrAJwCFH2IWcIRG6ryV97pFpJL56yDPgk3lmU="
   },
   "aurora-steam-native": {
     "repository": "https://github.com/aurora-silicon/aurora-steam-native",

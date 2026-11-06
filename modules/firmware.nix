@@ -1,4 +1,4 @@
-{ config, lib, pkgs, ... }:
+{ lib, pkgs, ... }:
 let
   admission = pkgs.runCommand "aurora-peripheral-admission" { } ''
     install -Dm755 ${../firmware/aurora-peripheral-firmware.sh} $out/bin/aurora-peripheral-admission
@@ -82,7 +82,7 @@ in {
   # firmware reaches the initrd, so it is in the initrd but not autoloaded.
   boot.blacklistedKernelModules = [ "aop" "mt7932-fullmac" "mt7932_bt_pcie" "dockchannel-hid" ];
   boot.initrd.availableKernelModules = [ "vfat" "nvme_apple" "apple-mailbox" "aop" "mt7932-fullmac" "mt7932_bt_pcie" "dockchannel-hid" ];
-  boot.initrd.systemd.services.aurora-vendor-firmware = lib.mkIf config.boot.initrd.systemd.enable {
+  boot.initrd.systemd.services.aurora-vendor-firmware = {
     description = "Extract this Mac's vendor firmware before peripheral admission";
     wantedBy = [ "initrd.target" ];
     after = [ "systemd-udev-settle.service" ];
@@ -91,7 +91,7 @@ in {
     serviceConfig.Type = "oneshot";
     serviceConfig.ExecStart = "${loadFirmware}/bin/aurora-load-vendor-firmware";
   };
-  boot.initrd.systemd.storePaths = lib.mkIf config.boot.initrd.systemd.enable ([ loadFirmware extractFirmware admission ] ++ map lib.getBin firmwareTools);
+  boot.initrd.systemd.storePaths = [ loadFirmware extractFirmware admission ] ++ map lib.getBin firmwareTools;
   systemd.services.aurora-vendor-firmware = {
     description = "Maintain Aurora per-device firmware handoff";
     wantedBy = [ "multi-user.target" ];
@@ -101,6 +101,4 @@ in {
     serviceConfig.RemainAfterExit = true;
     serviceConfig.ExecStart = "${loadFirmware}/bin/aurora-load-vendor-firmware runtime";
   };
-  # Use the same service-based early boot as Fedora to preserve firmware order.
-  boot.initrd.systemd.enable = lib.mkDefault true;
 }

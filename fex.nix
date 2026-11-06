@@ -37,15 +37,6 @@ fex.overrideAttrs (finalAttrs: old: {
   # FEX tunes for the build machine by default (-mcpu from its /proc/cpuinfo),
   # which crashes with SIGILL on Apple CPUs when CI builds on Neoverse.
   cmakeFlags = old.cmakeFlags ++ [ (lib.cmakeFeature "TUNE_CPU" "none") ];
-  # The timed futex-wait tests time the wait in CNTVCT ticks and check it with
-  # high_resolution_clock; on the GitHub arm64 runners two of them came back
-  # 6-10 us short of 250 ms. Hide the four timed cases from the run (Catch2
-  # "[.]"); the untimed futex tests still run.
-  postPatch = old.postPatch + ''
-    sed -i 's/^TEST_CASE("FutexSpin-Timed-\([0-9]*bit\)")/TEST_CASE("FutexSpin-Timed-\1", "[.]")/' \
-      FEXCore/unittests/APITests/FutexSpinTest.cpp
-    [ "$(grep -c '^TEST_CASE("FutexSpin-Timed-[0-9]*bit", "\[\.\]")' FEXCore/unittests/APITests/FutexSpinTest.cpp)" = 4 ]
-  '';
   passthru = (old.passthru or { }) // { inherit (pin) commit; };
   meta = old.meta // {
     description = "Fast usermode x86 and x86-64 emulator for Arm64 Linux (Aurora build)";

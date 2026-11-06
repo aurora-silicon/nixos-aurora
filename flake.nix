@@ -1,7 +1,7 @@
 {
   description = "Aurora NixOS for Apple Silicon";
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/e7439b6b14ad3cc35d05608ebca9bce01a25f5f8";
+    nixpkgs.url = "github:NixOS/nixpkgs/1d060086d60cb76a40cf37109f979d88a5bd6396";
     apple-silicon.url = "github:nix-community/nixos-apple-silicon/12cd234285d3037cedfab979aa70b75284a59afc";
     apple-silicon.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -9,7 +9,13 @@
     let
       system = "aarch64-linux";
       overlays = [ apple-silicon.overlays.default self.overlays.default ];
-      pkgs = import nixpkgs { inherit system overlays; };
+      pkgs = import nixpkgs {
+        inherit system overlays;
+        # Steam's ARM64 runtime includes GTK 2; retain its deprecation warning.
+        # Remove this exception when Steam no longer needs GTK 2.
+        # https://github.com/NixOS/nixpkgs/issues/410814
+        config.problems.handlers."gtk+".broken = "warn";
+      };
       makeSystem = desktop: nixpkgs.lib.nixosSystem {
         inherit system;
         modules = [ apple-silicon.nixosModules.default self.nixosModules.default
@@ -45,6 +51,7 @@
         libfprint = pkgs.libfprint;
         fprintd = pkgs.fprintd;
         avd-fw = pkgs.aurora-avd-firmware;
+        libva-v4l2-request-avd = pkgs.libvaV4l2RequestAvd;
         omarchy-ane-tools = pkgs.omarchy-ane-tools;
         mil-hwx-compiler = pkgs.mil-hwx-compiler;
         upower = pkgs.upower;
@@ -302,6 +309,7 @@
           "every profile selects the patched Plymouth" = lib.all (c:
             c.boot.plymouth.package.drvPath == pkgs.plymouth.drvPath
             && patchedWith "0001-ply-terminal-Keep-terminal-input-nonblocking.patch" c.boot.plymouth.package
+            && patchedWith "0002-drm-Reset-inherited-HDR-connector-state-before-SDR.patch" c.boot.plymouth.package
             && c.boot.plymouth.package.doCheck) [ kde gnome minimal ];
           "minimal images boot without a splash" = !minimal.boot.plymouth.enable;
           "the initrd asks for no TPM drivers, which the shared kernel lacks" = lib.all (c:

@@ -42,6 +42,7 @@ NEEDS = {
     'libfprint': ['libfprint'],
     'fprintd': [],  # nixpkgs' pinned release, with the local companion patch
     'avd-fw': ['avd-fw'],
+    'libva-v4l2-request-avd': ['libva-v4l2-request-avd'],
     'omarchy-ane-tools': ['omarchy-ane-tools'],
     'mil-hwx-compiler': ['mil-hwx-compiler', 'mil-hwx-compiler/gnustep-base'],
     'upower': ['upower-aurora'],
