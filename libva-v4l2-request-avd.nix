@@ -27,6 +27,8 @@ stdenv.mkDerivation {
 
   postInstall = ''
     ln -s v4l2_request_drv_video.so "$out/lib/dri/asahi_drv_video.so"
+    # Aurora kernels name the AGX render node driver "aurora".
+    ln -s v4l2_request_drv_video.so "$out/lib/dri/aurora_drv_video.so"
   '';
 
   doInstallCheck = true;
@@ -34,6 +36,7 @@ stdenv.mkDerivation {
     test -f "$out/lib/dri/v4l2_request_drv_video.so"
     test -L "$out/lib/dri/asahi_drv_video.so"
     test "$(readlink "$out/lib/dri/asahi_drv_video.so")" = v4l2_request_drv_video.so
+    test "$(readlink "$out/lib/dri/aurora_drv_video.so")" = v4l2_request_drv_video.so
   '';
 
   meta = {
