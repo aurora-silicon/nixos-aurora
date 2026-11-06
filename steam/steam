@@ -28,4 +28,6 @@ if [ -z "${AURORA_STEAM_ROOT:-}" ]; then
 			--prefix "${XDG_STATE_HOME:-$HOME/.local/state}/aurora-steam-native/prefix"
 	fi
 fi
+# Steam starts its runtime launcher by name, including after client updates.
+export PATH="${AURORA_STEAM_ROOT:-$HOME/.steam/root}/steamapps/common/SteamLinuxRuntime_4-arm64/pressure-vessel/bin:$PATH"
 exec "$lib/bin/steam-native4k" "$@"

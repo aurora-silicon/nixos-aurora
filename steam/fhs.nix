@@ -56,6 +56,7 @@ let
             lsb-release # not documented, called from Big Picture
             pciutils # not documented, complains about lspci on startup
             glibc.bin
+            lsof # Steam checks the owner of its local webhelper connections.
             python3
             usbutils # not documented, complains about lsusb on startup (needed for the 'Enter VR Mode' button to appear)
             xdg-utils # calls xdg-open occasionally
@@ -79,6 +80,13 @@ let
             libxcrypt
             libGL
             gtk2
+            # Valve's native UI, browser and graphics-query dependencies.
+            libSM
+            libICE
+            SDL2
+            ibus
+            nss
+            nspr
 
             libdrm
             libgbm
