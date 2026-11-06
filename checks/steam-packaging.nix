@@ -36,9 +36,9 @@ let
   payload = pkgs.runCommandCC "steam-native-entry-fixture" {} ''
     $CC -Wall -Wextra -Werror ${./steam-payload.c} -o "$out"
   '';
-  # General CI kernels already use 4 KiB pages and lack Aurora's private
-  # prctl. On a 16 KiB Aurora host use the actual launcher; in both cases
-  # the real ELF parent and Python descendant verify their own page sizes.
+  # The virtual-platform kernel uses 4 KiB pages and lacks Aurora's private
+  # prctl. Keep the launcher protocol and verify the real ELF parent and
+  # Python descendant rather than substituting a shell-only payload.
   pageLauncher = pkgs.writeShellScript "steam-fixture-page-launcher" ''
     [ "$1" = 4k ] || exit 64
     shift
@@ -58,14 +58,11 @@ let
       disabled = disabledSystem.config.programs.steam.package;
     };
   });
-in
-assert lib.assertMsg (failures == [ ]) "Aurora Steam module: ${lib.concatStringsSep "; " failures}";
-assert !cfg.hardware.graphics.enable32Bit;
-assert !cfg.services.pipewire.alsa.support32Bit;
-assert !cfg.services.pulseaudio.support32Bit;
-pkgs.runCommand "aurora-steam-packaging" {
-  nativeBuildInputs = [ pkgs.python3 ];
-} ''
+  packagingTest = pkgs.writeShellApplication {
+    name = "aurora-steam-packaging-test";
+    runtimeInputs = [ pkgs.python3 pkgs.coreutils pkgs.gnugrep pkgs.diffutils ];
+    text = ''
+  test "$(id -u)" != 0
   export HOME="$TMPDIR/home" XDG_DATA_HOME="$TMPDIR/data"
   mkdir -p "$HOME" "$XDG_DATA_HOME"
   test -x ${steam}/bin/steam
@@ -96,5 +93,28 @@ for manifest in manifests:
     header = library.read_bytes()[:20]
     assert header[:6] == b'\x7fELF\x02\x01' and struct.unpack_from('<H', header, 18)[0] == 183, library
 PY
-  touch $out
-''
+    '';
+  };
+in
+assert lib.assertMsg (failures == [ ]) "Aurora Steam module: ${lib.concatStringsSep "; " failures}";
+assert !cfg.hardware.graphics.enable32Bit;
+assert !cfg.services.pipewire.alsa.support32Bit;
+assert !cfg.services.pulseaudio.support32Bit;
+pkgs.testers.runNixOSTest {
+  name = "aurora-steam-packaging";
+  # Test actual unprivileged bubblewrap on a NixOS kernel, independently of
+  # Ubuntu runner AppArmor policy or the Nix builder's user namespace.
+  requiredFeatures.kvm = false;
+  nodes.machine = _: {
+    virtualisation.memorySize = 2048;
+    virtualisation.diskSize = 4096;
+    users.users.fixture = { isNormalUser = true; };
+    environment.systemPackages = [ packagingTest ];
+  };
+  testScript = ''
+    machine.start()
+    machine.wait_for_unit("multi-user.target")
+    machine.succeed("install -d -m 0700 -o fixture -g users /home/fixture/test-tmp")
+    machine.succeed("su - fixture -c 'TMPDIR=/home/fixture/test-tmp aurora-steam-packaging-test'", timeout=600)
+  '';
+}

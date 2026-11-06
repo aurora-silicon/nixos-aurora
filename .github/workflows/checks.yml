@@ -83,7 +83,7 @@ jobs:
             experimental-features = nix-command flakes
             extra-substituters = https://aurorasilicon.org/nixos-aurora/cache
             extra-trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=
-      - name: Exercise installed Steam and Proton launchers independently of package selection
+      - name: Exercise installed Steam and Proton launchers in a NixOS VM
         run: nix build --no-link --print-build-logs --max-jobs 2 --cores 4 .#checks.aarch64-linux.steam-packaging
   documentation:
     runs-on: ubuntu-24.04-arm
