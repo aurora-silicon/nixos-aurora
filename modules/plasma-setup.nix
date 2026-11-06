@@ -4,10 +4,11 @@
 # sysusers, tmpfiles, polkit and D-Bus. The flag file, the unit's condition and
 # the account helper's tool search are patched for NixOS (overlay.nix).
 #
-# At first boot plasma-setup.service writes an SDDM autologin for the
-# plasma-setup system user; that session runs the wizard, which creates the
-# owner (wheel) through its KAuth helper, writes /etc/plasma-setup-done and
-# logs out to the greeter. modules/firstboot.nix orders it after Aurora's disk
+# At first boot plasma-setup.service writes a Plasma Login autologin for the
+# plasma-setup system user (/etc/plasmalogin.conf.d/99-plasma-setup.conf; it
+# picks that path because systemd reports plasmalogin.service enabled). That
+# session runs the wizard, which creates the owner (wheel) through its KAuth
+# helper, writes /etc/plasma-setup-done and logs out to the greeter. modules/firstboot.nix orders it after Aurora's disk
 # step. Accounts are found through /etc/login.defs (UID 1000-29999 on NixOS),
 # so the nixbld build users (30001 and up) never count as an owner.
 let
@@ -23,8 +24,8 @@ in {
   config = lib.mkIf cfg.enable {
     assertions = [
       {
-        assertion = config.services.displayManager.sddm.enable;
-        message = "aurora.plasmaSetup requires SDDM, whose autologin starts the setup session.";
+        assertion = config.services.displayManager.plasma-login-manager.enable;
+        message = "aurora.plasmaSetup requires Plasma Login Manager, whose autologin starts the setup session.";
       }
       {
         assertion = config.users.mutableUsers;
@@ -42,6 +43,13 @@ in {
     # The setup user's home with the wizard's autostart entry, recreated in
     # /run at every boot.
     systemd.tmpfiles.packages = [ package ];
+    # plasma-setup-tmpfiles.conf sets every file in that home to 0750, and
+    # systemd-xdg-autostart-generator warns about an executable entry on every
+    # boot until setup completes. Mode adjustments run in file name order, so
+    # this name must sort after plasma-setup-tmpfiles.conf.
+    systemd.tmpfiles.settings.plasma-setup-xdg-autostart."/run/plasma-setup/.config/autostart/*.desktop".z = {
+      mode = "0640";
+    };
     # The package's sysusers.d entry: u plasma-setup - "Plasma Setup" /run/plasma-setup /bin/sh
     users.users.plasma-setup = {
       isSystemUser = true;
@@ -52,16 +60,9 @@ in {
       shell = pkgs.bashInteractive;
     };
     users.groups.plasma-setup = { };
-    # NixOS restricts SDDM autologin to UID 1000 and up; the setup user is a
-    # system user, which keeps it out of every account count. Let SDDM start
-    # its session (the autologin configuration that names it is root's) and
-    # keep the UID check for everyone else.
-    security.pam.services.sddm-autologin.rules.auth.plasma-setup = {
-      order = (config.security.pam.services.sddm-autologin.rules.auth.sddm-autologin-user.order or 10200) - 1;
-      control = "sufficient";
-      modulePath = "${config.security.pam.package}/lib/security/pam_succeed_if.so";
-      settings.quiet = true;
-      args = lib.mkAfter [ "user" "=" "plasma-setup" ];
-    };
+    # The setup user is a system user, which keeps it out of every account
+    # count. NixOS's plasmalogin-autologin stack has no UID floor (its SDDM
+    # stack allows UID 1000 and up only), so Plasma Login starts its session
+    # from the root-owned autologin configuration that names it.
   };
 }

@@ -52,7 +52,7 @@ in {
     };
     requiredBoards = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ "j700" "j616s" ];
+      default = [ "j700" "j616s" "j614s" ];
       description = "Boards whose device trees the one shared Stage 2 must carry.";
     };
   };

@@ -53,6 +53,9 @@
         aura = pkgs.m1n1;
         uboot = pkgs.uboot-asahi;
         kernel = pkgs.linux-asahi.kernel;
+        userpages = pkgs.aurora-userpages;
+        fex = pkgs.fex;
+        steam = pkgs.steam;
         mesa = pkgs.mesa;
         rusticl = pkgs.aurora-rusticl;
         lavapipe = pkgs.aurora-lavapipe;
@@ -78,6 +81,7 @@
         neo-platform = pkgs.aurora-neo-platform-config;
         aurora-bless = pkgs.aurora-bless;
         camera-denoise = pkgs.aurora-camera-denoise;
+        kbd-light = pkgs.aurora-kbd-light;
       };
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;
@@ -119,6 +123,37 @@
            touch $out
          '';
 
+      # Touch ID: which PAM services take a fingerprint, and the power button.
+      touchid-pam = let
+        inherit (nixpkgs) lib;
+        auth = c: name: lib.filter (lib.hasPrefix "auth ")
+          (lib.splitString "\n" (c.security.pam.services.${name}.text or ""));
+        offers = c: name: lib.any (lib.hasInfix "/pam_fprintd.so") (auth c name);
+        # pam_fprintd only as "sufficient", with the password after it.
+        orPassword = c: name: let
+          lines = auth c name;
+          index = lib.lists.findFirstIndex (lib.hasInfix "/pam_fprintd.so") null lines;
+        in index != null
+          && lib.all (line: !(lib.hasInfix "/pam_fprintd.so" line) || lib.hasPrefix "auth sufficient " line) lines
+          && lib.any (lib.hasInfix "/pam_unix.so") (lib.drop index lines);
+        failures = lib.concatMap (value: let c = value.config; kde = c.aurora.desktop == "kde"; in
+          lib.mapAttrsToList (name: _: "${c.aurora.desktop}: ${name}") (lib.filterAttrs (_: passed: !passed) {
+            "sudo takes a fingerprint or the password" = orPassword c "sudo";
+            "polkit takes a fingerprint or the password" = orPassword c "polkit-1";
+            "the console login, su and ssh ask for the password" =
+              !(offers c "login") && !(offers c "su") && !(offers c "sshd");
+            "the login screen asks for the password" = if kde
+              then !(offers c "plasmalogin") && !(offers c "kde")
+              else c.aurora.desktop != "gnome" || !(offers c "gdm-password");
+            "the lock screen takes a fingerprint" = if kde then offers c "kde-fingerprint"
+              else c.aurora.desktop != "gnome" || offers c "gdm-fingerprint";
+            "a short power-button press suspends" = c.services.logind.settings.Login.HandlePowerKey == "suspend"
+              && c.services.logind.settings.Login.HandlePowerKeyLongPress == "poweroff"
+              && (!kde || lib.hasInfix "PowerButtonAction=1" (builtins.readFile c.environment.etc."xdg/powerdevilrc".source));
+          })) (lib.attrValues self.nixosConfigurations);
+      in assert lib.assertMsg (failures == [ ]) "Touch ID PAM policy: ${lib.concatStringsSep "; " failures}";
+        pkgs.runCommand "aurora-touchid-pam" { } "touch $out";
+
       fex-overlay-upgrade = import ./checks/fex-overlay-upgrade.nix { inherit pkgs; };
       flatpak-sandbox = pkgs.runCommand "aurora-flatpak-build-sandbox" {
         requiredSystemFeatures = [ "uid-range" ];
@@ -146,6 +181,11 @@
                 || lib.elem "LogoPath=${value.pkgs.aurora-logos}/share/pixmaps/system-logo-white.png"
                   (lib.splitString "\n" config.environment.etc."xdg/kcm-about-distrorc".text);
               "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
+              "the Type-C port controllers find their USB4 router in the initrd" =
+                lib.all (m: lib.elem m config.boot.initrd.availableKernelModules) [ "tps6598x" "thunderbolt_apple" ];
+              "the display chain and its PMP come up before the root is unlocked" =
+                lib.all (m: lib.elem m config.boot.initrd.availableKernelModules)
+                  [ "apple-pmp" "mux-apple-display-crossbar" "appledrm" ];
               "PipeWire and WirePlumber use the pinned audio and UCM profiles" =
                 lib.elem value.pkgs.asahi-audio config.services.pipewire.configPackages
                 && lib.elem value.pkgs.asahi-audio config.services.pipewire.wireplumber.configPackages
@@ -166,6 +206,9 @@
                 && config.services.pipewire.enable
                 && lib.elem value.pkgs.aurora-camera-denoise config.systemd.packages
                 && lib.elem "pipewire.service" config.systemd.user.services.aurora-camera-denoise.wantedBy;
+              "the keyboard backlight follows the light sensor from boot" = config.aurora.kbdLight.enable
+                && lib.elem value.pkgs.aurora-kbd-light config.systemd.packages
+                && lib.elem "multi-user.target" config.systemd.services.aurora-kbd-light.wantedBy;
               "Flatpak uses the Aurora repository" = config.services.flatpak.enable
                 && config.aurora.flatpak.enable
                 && config.aurora.flatpak.package.commit == pkgs.aurora-flatpak-gl.commit
@@ -204,6 +247,34 @@
       # It needs the kernel, so the image workflow builds it next to the system.
       stage2 = imageProbe.config.system.build.auroraStage2;
       stage2-tools = imageProbe.config.system.build.auroraStage2Tools;
+      # Per-process 4K userspace pages are on in every profile; an owner can
+      # turn them off with user4k=off or aurora.userpages.enable = false.
+      userpages = let
+        inherit (nixpkgs) lib;
+        profiles = lib.attrValues self.nixosConfigurations;
+        kdeWith = module: (self.nixosConfigurations.aurora-kde.extendModules { modules = [ module ]; }).config;
+        optedOut = kdeWith { boot.kernelParams = [ "user4k=off" ]; };
+        disabled = kdeWith { aurora.userpages.enable = false; };
+        position = argument: lib.lists.findFirstIndex (value: value == argument) (-1);
+        expectations = {
+          "every profile boots with user4k=on and ships the launcher" = lib.all (value:
+            lib.elem "user4k=on" value.config.boot.kernelParams
+            && lib.elem value.pkgs.aurora-userpages value.config.environment.systemPackages) profiles;
+          "an owner's user4k=off follows user4k=on, so it wins" =
+            position "user4k=on" optedOut.boot.kernelParams >= 0
+            && position "user4k=on" optedOut.boot.kernelParams < position "user4k=off" optedOut.boot.kernelParams;
+          "aurora.userpages.enable = false leaves out both" = !(lib.elem "user4k=on" disabled.boot.kernelParams)
+            && !(lib.elem pkgs.aurora-userpages disabled.environment.systemPackages);
+          "the launcher builds from the kernel's own source" =
+            pkgs.aurora-userpages.src.outPath == pkgs.linux-asahi.kernel.src.outPath;
+        };
+      in pkgs.runCommand "aurora-userpages-evaluation" {
+        failures = lib.concatStringsSep "\n" (lib.attrNames (lib.filterAttrs (_: met: !met) expectations));
+      } ''
+        if [[ -n "$failures" ]]; then printf '%s\n' "$failures" >&2; exit 1; fi
+        ${pkgs.aurora-userpages}/bin/userpages --help > /dev/null
+        touch $out
+      '';
       firstboot-image = let
         inherit (nixpkgs) lib;
         kde = self.nixosConfigurations.aurora-kde.config;
@@ -216,11 +287,9 @@
         installs = packages: lib.any (package: package.pname or "" == "plasma-setup") packages;
         patchedWith = name: package: lib.any (patch: lib.hasSuffix "-${name}" (toString patch)) (package.patches or [ ]);
         launchAuth = lib.splitString "\n" gnome.security.pam.services.gdm-launch-environment.text;
-        autologinAuth = lib.splitString "\n" kde.security.pam.services.sddm-autologin.text;
-        lineOf = match: lib.lists.findFirstIndex match null autologinAuth;
-        setupAutologin = lineOf (line: lib.hasPrefix "auth sufficient " line && lib.hasInfix "pam_succeed_if.so" line
-          && lib.hasInfix "user = plasma-setup" line);
-        uidAutologin = lineOf (line: lib.hasInfix "pam_succeed_if.so" line && lib.hasInfix "uid >= 1000" line);
+        autologinAuth = lib.filter (lib.hasPrefix "auth ")
+          (lib.splitString "\n" kde.security.pam.services.plasmalogin-autologin.text);
+        greeter = kde.systemd.services.plasmalogin;
         kdeWith = module: (self.nixosConfigurations.aurora-kde.extendModules { modules = [ module ]; }).config;
         # What the rekey writes into owner.nix once the password unlocks the disk.
         kdeRekeyed = kdeWith { aurora.firstboot.passwordHooks = false; };
@@ -270,15 +339,27 @@
           "Plasma Setup's unit, D-Bus helper, tmpfiles and polkit files are installed" = installs kde.systemd.packages
             && installs kde.services.dbus.packages && installs kde.systemd.tmpfiles.packages && installs kde.environment.systemPackages;
           "Plasma Setup is patched for NixOS paths" = patchedWith "plasma-setup-nixos-paths.patch" plasmaSetupPackage;
+          "Plasma Setup's autostart entry is not executable" =
+            kde.systemd.tmpfiles.settings.plasma-setup-xdg-autostart."/run/plasma-setup/.config/autostart/*.desktop".z.mode == "0640";
           "the setup user is a system user with its sysusers home" = kde.users.users.plasma-setup.isSystemUser
             && kde.users.users.plasma-setup.home == "/run/plasma-setup" && kde.users.groups ? plasma-setup;
-          "SDDM may log the setup user in automatically, and only it below UID 1000" = setupAutologin != null
-            && uidAutologin != null && setupAutologin < uidAutologin;
-          "SDDM reads Plasma Setup's autologin from /etc/sddm.conf.d" = kde.environment.etc ? "sddm.conf.d/00-nixos.conf";
+          "KDE signs in with Plasma Login Manager, whose greeter runs on KWin Wayland, not SDDM" =
+            kde.services.displayManager.plasma-login-manager.enable && !kde.services.displayManager.sddm.enable
+            && !gnome.services.displayManager.plasma-login-manager.enable
+            && !minimal.services.displayManager.plasma-login-manager.enable;
+          "Plasma Login is the display-manager.service alias and the only KDE greeter unit" =
+            lib.elem "display-manager.service" greeter.aliases && lib.elem "graphical.target" greeter.wantedBy
+            && !(kde.systemd.services ? display-manager);
+          "the KDE greeter waits for the disk step" = lib.elem "aurora-firstboot.service" greeter.after
+            && greeter.unitConfig.ConditionPathExists == "!/var/lib/aurora/firstboot/pending";
+          "Plasma Login may log the setup user in automatically: no UID floor" = autologinAuth != [ ]
+            && !(lib.any (lib.hasInfix "pam_succeed_if.so") autologinAuth);
+          "Plasma Login reads Plasma Setup's autologin from /etc/plasmalogin.conf.d" =
+            kde.environment.etc ? "plasmalogin.conf.d/00-nixos-defaults.conf";
           "Plasma Setup's autologin session exists" = lib.elem "plasma" kde.services.displayManager.sessionData.sessionNames;
           "the Nix build users are not counted as accounts" = kde.security.loginDefs.settings.UID_MAX < kde.ids.uids.nixbld;
-          "SDDM keeps the splash for the disk password, as GDM does" =
-            lib.elem "plymouth-quit.service" kde.systemd.services.display-manager.conflicts
+          "Plasma Login keeps the splash for the disk password, as GDM does" =
+            lib.elem "plymouth-quit.service" greeter.conflicts && lib.elem "plymouth-quit.service" greeter.onFailure
             && kde.systemd.services.plymouth-quit.wantedBy == [ ]
             && lib.elem "plymouth-quit.service" gnome.systemd.services.display-manager.conflicts;
           "GNOME Initial Setup runs on GNOME images only" = gnome.aurora.gnomeInitialSetup.enable
@@ -307,14 +388,16 @@
             && !(kde.environment.etc ? "aurora/desktop-account-setup")
             && !(minimal.environment.etc ? "aurora/desktop-account-setup");
           "the first password sign-in hooks are declared until the rekey" =
-            kde.security.pam.services.sddm.rules.auth ? aurora-password-hook
-            && kde.security.pam.services.sddm-autologin.rules.auth ? aurora-password-gate
+            kde.security.pam.services.plasmalogin.rules.auth ? aurora-password-hook
+            && kde.security.pam.services.plasmalogin-autologin.rules.auth ? aurora-password-gate
+            && lib.hasInfix "aurora-password-hook" kde.security.pam.services.plasmalogin.text
             && gnome.security.pam.services.gdm-password.rules.auth ? aurora-password-hook
-            && kde.environment.etc ? "aurora/password-hooks";
+            && kde.environment.etc."aurora/password-hooks".text == "plasmalogin plasmalogin-autologin\n"
+            && gnome.environment.etc."aurora/password-hooks".text == "gdm-password\n";
           "a rebuild after the rekey removes the hooks" =
-            !(kdeRekeyed.security.pam.services.sddm.rules.auth ? aurora-password-hook)
-            && !(kdeRekeyed.security.pam.services.sddm-autologin.rules.auth ? aurora-password-gate)
-            && !(lib.hasInfix "aurora-password-hook" kdeRekeyed.security.pam.services.sddm.text)
+            !(kdeRekeyed.security.pam.services.plasmalogin.rules.auth ? aurora-password-hook)
+            && !(kdeRekeyed.security.pam.services.plasmalogin-autologin.rules.auth ? aurora-password-gate)
+            && !(lib.hasInfix "aurora-password-hook" kdeRekeyed.security.pam.services.plasmalogin.text)
             && !(kdeRekeyed.environment.etc ? "aurora/password-hooks");
           "the console keymap follows the XKB layout unless set" = kde.console.keyMap == "us"
             && lib.hasSuffix "-xkb-console-keymap" (toString kdeGerman.console.keyMap)
@@ -322,8 +405,33 @@
             && lib.hasInfix "layout=de\n" kdeGerman.environment.etc."aurora/keyboard".text;
           "the initrd unlock prompt waits for the console keymap" = lib.elem "systemd-vconsole-setup.service"
             imageProbe.config.boot.initrd.systemd.services.aurora-initrd-root.after;
+          "NetworkManager's dispatcher stays on the bus until NetworkManager stops" = lib.all (c: let
+              dispatcher = c.systemd.services.NetworkManager-dispatcher;
+            in lib.elem "NetworkManager.service" dispatcher.before
+              && dispatcher.serviceConfig.ExecStart
+                == [ "" "${c.networking.networkmanager.package}/libexec/nm-dispatcher --persist" ])
+            [ kde gnome minimal ];
+          "systemd-modules-load asks only for modules this kernel provides" = lib.all (c: let
+              conf = lib.splitString "\n" c.environment.etc."modules-load.d/nixos.conf".source.text;
+            in lib.elem "loop" conf && !(lib.elem "atkbd" conf) && !(lib.elem "cpufreq_schedutil" conf))
+            [ kde gnome minimal ];
+          # dbus-broker logs "Ignoring duplicate name" for each service file
+          # it reads a second time (modules/dbus.nix).
+          "each bus reads every D-Bus service directory once" = lib.all (c: let
+              sw = toString c.system.path;
+              linked = map toString (lib.concatMap (output: output.paths) c.system.path.chosenOutputs);
+              dirs = c.environment.etc."dbus-1".source.busServiceDirectories or { system = [ ]; session = [ sw ]; };
+              once = list: list == lib.unique list && !(lib.any (p: p != sw && lib.elem p linked) list);
+            in once dirs.system && once dirs.session && lib.elem sw dirs.system && !(lib.elem sw dirs.session)
+              && lib.any (line: lib.hasPrefix "XDG_DATA_DIRS " line && lib.hasInfix "/run/current-system/sw/share" line)
+                (lib.splitString "\n" c.environment.etc."pam/environment".text))
+            [ kde gnome minimal ];
         };
       in pkgs.runCommand "aurora-firstboot-image-evaluation" {
+        rootUnit = let
+          units = imageProbe.config.boot.initrd.systemd.units;
+        in lib.concatMapStrings (name: units.${name}.text)
+          (lib.filter (lib.hasPrefix "dev-disk-by\\x2duuid-") (lib.attrNames units));
         desktopFailures = lib.concatStringsSep "\n" (lib.attrNames (lib.filterAttrs (_: met: !met) desktopExpectations));
         stage2Preserved = if builtins.hasAttr "m1n1/boot.bin" imageProbe.config.boot.loader.grub.extraFiles
           || !(builtins.hasAttr "m1n1/boot.bin" (makeSystem "minimal").config.boot.loader.grub.extraFiles)
@@ -346,8 +454,11 @@
           exit 1
         fi
         case "$units" in
-          *'What=/dev/mapper/root'*) ;;
-          *) echo 'initrd sysroot must use the encrypted root mapper from boot start' >&2; exit 1 ;;
+          *'What=/dev/mapper/root'*) echo 'initrd sysroot must not wait for the mapper of a root that may stay plaintext' >&2; exit 1 ;;
+        esac
+        case "$rootUnit" in
+          *'JobRunningTimeoutSec=infinity'*) ;;
+          *) echo 'initrd root device must not time out during first-boot conversion' >&2; exit 1 ;;
         esac
         case "$units" in
           *'JobRunningTimeoutSec=infinity'*) ;;

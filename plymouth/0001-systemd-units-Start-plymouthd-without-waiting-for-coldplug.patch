@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Tue, 3 Nov 2026 17:46:17 +1100
+Subject: [PATCH] systemd-units: Start plymouthd without waiting for coldplug
+
+plymouth-start.service is ordered after systemd-udev-trigger.service.
+The ordering came with commit aaad73c3 ("ensure udevd is started before
+plymouthd"), when plymouthd took an empty udev queue to mean that coldplug
+had finished. The device manager no longer looks at the udev queue. It
+creates renderers from udev add events as they arrive and falls back to
+other devices after DeviceTimeout, so it does not need coldplug to have
+started or finished before it runs.
+
+Waiting for systemd-udev-trigger.service delays the splash by the time
+the coldplug takes to queue every device. With the prioritized "module"
+subsystem, that is about 0.7 s in an Apple silicon initramfs, after the
+display driver is already up.
+
+Order plymouthd after systemd-udevd.service only, so that its udev monitor
+sees every add event, and after dracut-pre-trigger.service, where an
+initramfs can coldplug the display ahead of the other devices.
+---
+ systemd-units/plymouth-start.service.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/systemd-units/plymouth-start.service.in b/systemd-units/plymouth-start.service.in
+index 830a62d..3d378fb 100644
+--- a/systemd-units/plymouth-start.service.in
++++ b/systemd-units/plymouth-start.service.in
+@@ -2,7 +2,7 @@
+ Description=Show Plymouth Boot Screen
+ DefaultDependencies=no
+ Wants=systemd-ask-password-plymouth.path systemd-vconsole-setup.service
+-After=systemd-vconsole-setup.service systemd-udev-trigger.service systemd-udevd.service
++After=systemd-vconsole-setup.service systemd-udevd.service dracut-pre-trigger.service
+ Before=systemd-ask-password-plymouth.service
+ ConditionKernelCommandLine=!plymouth.enable=0
+ ConditionVirtualization=!container
+-- 
+2.50.1 (Apple Git-155)
+

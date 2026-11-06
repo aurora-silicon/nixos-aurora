@@ -1,8 +1,9 @@
 { config, lib, pkgs, ... }:
 {
   imports = [ ./ane.nix ./firmware.nix ./platform.nix ./audio.nix ./system-fixes.nix
-    ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix
-    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ];
+    ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix ./dbus.nix
+    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix
+    ./userpages.nix ./boot-splash.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";
@@ -35,18 +36,28 @@
     boot.initrd.availableKernelModules = [
       "apple-mailbox" "apple_nvmem_spmi" "nvme_apple" "pinctrl-apple-gpio"
       "macsmc" "macsmc-power" "macsmc-input" "macsmc-hwmon" "macsmc-reboot"
-      "i2c-pasemi-platform" "tps6598x" "sn201202x" "apple-dart" "dwc3"
+      "i2c-pasemi-platform" "tps6598x" "sn201202x" "thunderbolt_apple" "apple-dart" "dwc3"
       "dwc3-of-simple" "xhci-pci" "pcie-apple" "gpio_macsmc" "phy-apple-atc"
       "nvmem_apple_efuses" "spi-apple" "spi-hid-apple" "spi-hid-apple-of"
       "rtc-macsmc" "spmi-apple-controller" "apple-dockchannel" "dockchannel-hid"
       "apple-rtkit-helper" "usb-storage" "xhci-plat-hcd" "usbhid" "hid_generic"
       "nvme" "virtio_blk" "virtio_pci" "uas" "sd_mod"
       "vfat" "dm-crypt" "btrfs" "ext4" "aop" "mt7932-fullmac" "mt7932_bt_pcie"
+      # The display chain and its PMP, as Fedora and ALARM carry them. On the M4
+      # Pro the T6041 display gate brings the external display processors up
+      # only once apple-pmp binds and gives up 20 s into the boot; with the
+      # chain only on an encrypted root it would wait for the passphrase and
+      # leave every external display off. udev loads them during coldplug.
+      "apple-pmp" "mux-apple-display-crossbar" "appledrm"
     ];
     # Apple silicon Macs have no TPM, and the shared distribution kernel has no
     # TPM drivers (its TPM 2.0 CRB interface would need ACPI). Do not ask the
     # systemd initrd for tpm-tis and tpm-crb.
     boot.initrd.systemd.tpm2.enable = lib.mkDefault false;
+    # nixpkgs always lists atkbd and the schedutil governor module; this
+    # kernel has no PS/2 driver and builds schedutil in.
+    environment.etc."modules-load.d/nixos.conf".source = lib.mkForce (pkgs.writeText "nixos.conf"
+      (lib.concatStringsSep "\n" (lib.subtractLists [ "atkbd" "cpufreq_schedutil" ] config.boot.kernelModules) + "\n"));
     boot.supportedFilesystems = [ "ext4" "btrfs" ];
     # Quiet by default: failures still reach the console, and systemd shows
     # status only when a unit fails or stalls.
@@ -82,7 +93,9 @@
     hardware.graphics.enable = true;
     hardware.graphics.extraPackages = [ pkgs.aurora-rusticl pkgs.aurora-lavapipe ];
     services.desktopManager.plasma6.enable = config.aurora.desktop == "kde";
-    services.displayManager.sddm.enable = config.aurora.desktop == "kde";
+    # Plasma Login Manager, as on Fedora 44 and Aurora Alarm: its greeter runs
+    # on KWin Wayland at the display's scale.
+    services.displayManager.plasma-login-manager.enable = config.aurora.desktop == "kde";
     services.desktopManager.gnome.enable = config.aurora.desktop == "gnome";
     services.displayManager.gdm.enable = config.aurora.desktop == "gnome";
     # Every Aurora desktop image comes with a web browser, as Fedora and ALARM do.
@@ -101,10 +114,12 @@
     systemd.services.sshd-keygen = lib.mkIf (config.services.openssh.enable && config.services.openssh.generateHostKeys
       && !config.aurora.openssh.startAtBoot) { wantedBy = lib.mkForce [ ]; };
     # GDM keeps the splash until its greeter starts and replaces
-    # plymouth-quit.service; give SDDM the same role, so the splash is still up
-    # when first boot asks for the disk password. If SDDM fails,
-    # plymouth-quit.service still removes the splash.
-    systemd.services.display-manager = lib.mkIf (config.services.displayManager.sddm.enable && config.boot.plymouth.enable) {
+    # plymouth-quit.service; give Plasma Login the same role, so the splash is
+    # still up when first boot asks for the disk password. If Plasma Login
+    # fails, plymouth-quit.service still removes the splash. Its unit is
+    # plasmalogin.service; display-manager.service is only an alias of it, so
+    # a display-manager definition here would be a second, empty unit.
+    systemd.services.plasmalogin = lib.mkIf (config.services.displayManager.plasma-login-manager.enable && config.boot.plymouth.enable) {
       conflicts = [ "plymouth-quit.service" ];
       after = [ "plymouth-start.service" ];
       onFailure = [ "plymouth-quit.service" ];
@@ -114,7 +129,7 @@
     };
     # As with GDM: if multi-user.target wanted plymouth-quit.service, a
     # nixos-rebuild switch would stop the display manager to start it.
-    systemd.services.plymouth-quit = lib.mkIf (config.services.displayManager.sddm.enable && config.boot.plymouth.enable) {
+    systemd.services.plymouth-quit = lib.mkIf (config.services.displayManager.plasma-login-manager.enable && config.boot.plymouth.enable) {
       wantedBy = lib.mkForce [ ];
     };
     environment.systemPackages = [ pkgs.aurora-bless pkgs.git pkgs.cryptsetup pkgs.btrfs-progs ];

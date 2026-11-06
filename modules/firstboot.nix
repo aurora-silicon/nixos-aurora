@@ -1,6 +1,12 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, utils, ... }:
 let
   layout = config.aurora.imageLayout;
+  # The device units root= can name for this image, as aurora-initrd-root
+  # --root-device-units prints them for dracut and mkinitcpio.
+  rootDeviceUnits = [
+    "${utils.escapeSystemdPath "/dev/disk/by-uuid/${layout.rootUUID}"}.device"
+    "${utils.escapeSystemdPath "/dev/disk/by-label/AURORA_ROOT"}.device"
+  ];
   layoutFile = pkgs.writeText "aurora-image-layout" ''
     format=1
     root_uuid=${layout.rootUUID}
@@ -8,6 +14,14 @@ let
     root_subvolume=root
   '';
   xkb = config.services.xserver.xkb;
+  plasmaLogin = config.services.displayManager.plasma-login-manager.enable;
+  # On the first boot, the greeter waits for account setup and its final
+  # state write. A completed setup is skipped on later boots, but the greeter
+  # must still start.
+  greeterGate = {
+    after = [ "aurora-firstboot.service" ];
+    unitConfig.ConditionPathExists = "!/var/lib/aurora/firstboot/pending";
+  };
 in {
   options.aurora.firstboot.passwordHooks = lib.mkOption {
     type = lib.types.bool;
@@ -73,30 +87,33 @@ in {
         Environment = "AURORA_IMAGE_LAYOUT=${layoutFile}";
       };
     };
-    boot.initrd.systemd.units."sysroot.mount" = {
+    # sysroot.mount keeps the root device fileSystems names. When
+    # aurora-initrd-root opens an encrypted root it points sysroot at
+    # /dev/mapper/root itself (a runtime drop-in and a daemon-reload), as on
+    # Fedora and ALARM. A root left plaintext (encryption declined at install,
+    # or a layout the service leaves alone) mounts as it is; a static
+    # What=/dev/mapper/root would wait for a mapper that never appears.
+    boot.initrd.systemd.units = {
+      "sysroot.mount" = {
+        overrideStrategy = "asDropin";
+        text = ''
+          [Unit]
+          Requires=aurora-initrd-root.service
+          After=aurora-initrd-root.service
+        '';
+      };
+    } // lib.genAttrs ([ "dev-mapper-root.device" ] ++ rootDeviceUnits) (_: {
       overrideStrategy = "asDropin";
-      # The first conversion replaces the plaintext device while the initrd
-      # is running. Queue sysroot against the mapper from the outset so its
-      # original device job cannot expire during the conversion.
-      text = ''
-        [Unit]
-        Requires=aurora-initrd-root.service
-        After=aurora-initrd-root.service
-
-        [Mount]
-        What=/dev/mapper/root
-      '';
-    };
-    boot.initrd.systemd.units."dev-mapper-root.device" = {
-      overrideStrategy = "asDropin";
-      # The first-boot LUKS conversion can take longer than systemd's default
-      # device-job timeout. Keep waiting for the mapper while the conversion
-      # service runs; its own failures are reported by that service.
+      # The first-boot LUKS conversion replaces the plaintext device while the
+      # initrd runs and can outlast systemd's default device-job timeout. The
+      # root device returns as the opened mapper (same Btrfs UUID); keep
+      # waiting while the conversion service runs, which reports its own
+      # failures.
       text = ''
         [Unit]
         JobRunningTimeoutSec=infinity
       '';
-    };
+    });
     # The shared aurora-firstboot.service, declared here because the package
     # carries no unit files. On desktop images the desktop's own setup creates
     # the owner (Plasma Setup on KDE, GNOME Initial Setup on GNOME), whose
@@ -134,7 +151,9 @@ in {
     # the rekey sets aurora.firstboot.passwordHooks = false in owner.nix, so
     # the next rebuild removes them.
     environment.etc."aurora/password-hooks" = lib.mkIf config.aurora.firstboot.passwordHooks {
-      text = "sddm sddm-autologin gdm-password\n";
+      text = lib.concatStringsSep " " (lib.optionals plasmaLogin [ "plasmalogin" "plasmalogin-autologin" ]
+        ++ lib.optionals config.services.displayManager.sddm.enable [ "sddm" "sddm-autologin" ]
+        ++ lib.optional config.services.displayManager.gdm.enable "gdm-password") + "\n";
     };
     security.pam.services = lib.mkIf config.aurora.firstboot.passwordHooks (let
       pamExec = "${config.security.pam.package}/lib/security/pam_exec.so";
@@ -145,15 +164,20 @@ in {
         modulePath = pamExec;
         args = [ "quiet" "expose_authtok" hook ];
       };
+      gate = {
+        order = 0;
+        control = "requisite";
+        modulePath = pamExec;
+        args = [ "quiet" hook "--gate" ];
+      };
     in lib.mkMerge [
+      (lib.mkIf plasmaLogin {
+        plasmalogin.rules.auth.aurora-password-hook = signIn;
+        plasmalogin-autologin.rules.auth.aurora-password-gate = gate;
+      })
       (lib.mkIf config.services.displayManager.sddm.enable {
         sddm.rules.auth.aurora-password-hook = signIn;
-        sddm-autologin.rules.auth.aurora-password-gate = {
-          order = 0;
-          control = "requisite";
-          modulePath = pamExec;
-          args = [ "quiet" hook "--gate" ];
-        };
+        sddm-autologin.rules.auth.aurora-password-gate = gate;
       })
       (lib.mkIf config.services.displayManager.gdm.enable {
         gdm-password.rules.auth.aurora-password-hook = signIn;
@@ -234,12 +258,12 @@ in {
       (lib.filterAttrs (_: user: user.isNormalUser) config.users.users == {}) {
       environment.SYSTEMD_ETC_HOSTNAME = lib.mkForce "/etc/hostname";
     };
-    systemd.services.display-manager = lib.mkIf (config.aurora.desktop != "minimal") {
-      after = [ "aurora-firstboot.service" ];
-      # On the first boot, wait for account setup and its final state write.
-      # A completed setup is skipped on later boots, but the greeter must still start.
-      unitConfig.ConditionPathExists = "!/var/lib/aurora/firstboot/pending";
-    };
+    # Plasma Login's unit is plasmalogin.service, which NixOS also links as
+    # display-manager.service: a display-manager definition beside it would be
+    # replaced by that link. The GDM and SDDM modules define
+    # display-manager.service itself.
+    systemd.services.plasmalogin = lib.mkIf (config.aurora.desktop != "minimal" && plasmaLogin) greeterGate;
+    systemd.services.display-manager = lib.mkIf (config.aurora.desktop != "minimal" && !plasmaLogin) greeterGate;
     systemd.services."getty@" = {
       overrideStrategy = "asDropin";
       unitConfig.ConditionPathExists = "!/var/lib/aurora/firstboot/pending";

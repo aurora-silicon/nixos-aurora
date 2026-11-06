@@ -39,15 +39,18 @@ jobs:
         run: |
           nix flake check --no-build
           nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
-            .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity .#checks.aarch64-linux.ane-packaging
+            .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity .#checks.aarch64-linux.ane-packaging \
+            .#checks.aarch64-linux.userpages
       - name: Inspect KDE graphical login configuration
         run: |
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.defaultUnit
+          nix eval --json .#nixosConfigurations.aurora-kde.config.services.displayManager.plasma-login-manager.enable
           nix eval --json .#nixosConfigurations.aurora-kde.config.services.displayManager.sddm.enable
-          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.wantedBy
-          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.after
-          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.requires
-          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.display-manager.unitConfig.ConditionPathExists
+          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.aliases
+          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.wantedBy
+          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.after
+          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.requires
+          nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.unitConfig.ConditionPathExists
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.blacklistedKernelModules
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.initrd.availableKernelModules
   fex-overlay:

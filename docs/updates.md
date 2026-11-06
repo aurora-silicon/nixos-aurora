@@ -34,7 +34,7 @@ including the MacBook Neo.
 
 - At build time `scripts/check-stage2.py` requires the file to start with the system's aura build, carry
   only device trees, one gzip U-Boot member and m1n1 option lines, and include the device trees of
-  `aurora.stage2.requiredBoards` (`j700` and `j616s` by default). The build fails otherwise, so a rebuild stops before
+  `aurora.stage2.requiredBoards` (`j700`, `j616s` and `j614s` by default). The build fails otherwise, so a rebuild stops before
   it switches.
 - At install time `aurora-install-stage2` (`scripts/install-stage2.sh`) checks the input against its
   recorded digest and that the ESP is the mounted FAT partition this Mac booted from
@@ -42,7 +42,8 @@ including the MacBook Neo.
   unchanged file is left alone. A changed one is written to `boot.bin.new`, verified, the previous file is
   kept as `m1n1/boot.bin.old` and the new one renamed into place. Any refusal leaves the ESP unchanged and
   fails the bootloader install loudly.
-- Stage 1 (`aurora/stage1.bin` and the boot object) is never written; it belongs to the installer.
+- Stage 1 (`aurora/stage1.bin`, `aurora/stage1.macho` and the boot object) is never written; it belongs
+  to the installer.
 - The Apple Silicon module's own copy (`boot.loader.grub.extraFiles`, an unchecked overwrite with no
   backup) is removed on installed systems. `aurora.stage2.enable = false` stops Stage 2 updates entirely.
 

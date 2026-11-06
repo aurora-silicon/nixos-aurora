@@ -2,6 +2,12 @@
 let
   cfg = config.aurora.sep;
 in {
+  # nixpkgs offers a fingerprint to every PAM service once fprintd is on; here
+  # a service takes one only when it says so (see config below).
+  options.security.pam.services = lib.mkOption {
+    type = lib.types.attrsOf (lib.types.submodule { config.fprintAuth = lib.mkDefault false; });
+  };
+
   options.aurora.sep.greeterFingerprint.enable = lib.mkOption {
     type = lib.types.bool;
     default = false;
@@ -20,6 +26,27 @@ in {
       boot.blacklistedKernelModules = [ "apple_sep" ];
       environment.systemPackages = [ pkgs.aurora-sep pkgs.libfprint ];
       services.fprintd.enable = true;
+      # Touch ID: a fingerprint or the password at sudo, polkit and the lock
+      # screens (gdm-fingerprint, and kde-fingerprint from the Plasma module);
+      # the password at the login screens, the console login, su and ssh.
+      # fprintAuth puts pam_fprintd in as "sufficient", ahead of the password.
+      security.pam.services = {
+        sudo.fprintAuth = true;
+        polkit-1.fprintAuth = true;
+        login.fprintAuth = false;
+        su.fprintAuth = false;
+        sshd = lib.mkIf config.services.openssh.enable { fprintAuth = false; };
+      };
+      # The Touch ID sensor is the power button: a short press suspends and a
+      # 5 s press powers off wherever no desktop handles the button. In Plasma
+      # PowerDevil handles it; powerdevilrc makes its short press suspend too.
+      services.logind.settings.Login = {
+        HandlePowerKey = lib.mkDefault "suspend";
+        HandlePowerKeyLongPress = lib.mkDefault "poweroff";
+      };
+      environment.etc."xdg/powerdevilrc" = lib.mkIf config.services.desktopManager.plasma6.enable {
+        source = ../sep/powerdevilrc;
+      };
       systemd.timers.aurora-sep = {
         description = "Initialize Aurora SEP after persistent storage is available";
         wantedBy = [ "timers.target" ];
