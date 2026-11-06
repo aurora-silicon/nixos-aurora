@@ -451,6 +451,22 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
         self.assertIn('final.lib.assertMsg (auraMonitorFree -> kernelCtxrExecmem)',
                       (ROOT / 'overlay.nix').read_text())
 
+    def test_a_system_checks_the_kernel_it_boots_against_its_aura(self):
+        # Not just the two constants: a system that overrides its kernel is checked too.
+        overlay = (ROOT / 'overlay.nix').read_text()
+        self.assertIn('auroraCtxrExecmem = kernelCtxrExecmem;', overlay)
+        self.assertIn('passthru = (old.passthru or { }) // { auroraMonitorFree = auraMonitorFree; };', overlay)
+        installed = (ROOT / 'modules/installed.nix').read_text()
+        self.assertIn('assertion = !(aura.auroraMonitorFree or false)\n'
+                      '        || (config.boot.kernelPackages.kernel.auroraCtxrExecmem or false);', installed)
+
+    def test_nix_reports_the_option_only_once_the_kernel_has_it(self):
+        # kernel/config names it early and Kconfig drops it, so kernel.config.isYes
+        # must not see it until kernelCtxrExecmem says the build resolves it.
+        overlay = (ROOT / 'overlay.nix').read_text()
+        self.assertIn('(final.lib.optional (!kernelCtxrExecmem) "CONFIG_ARM64_CTXR_EXECMEM");', overlay)
+        self.assertIn('kernelConfig = builtins.removeAttrs', overlay)
+
     def test_the_kernel_build_refuses_a_flag_its_configuration_disagrees_with(self):
         check = self.step('ctxr=false', 'fi')
         for line, value, ok in (('CONFIG_ARM64_CTXR_EXECMEM=y', 'true', True), ('', 'false', True),

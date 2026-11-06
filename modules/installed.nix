@@ -66,6 +66,15 @@ in {
     };
   };
   config = {
+    # An aura without the monitor moves the kernel into the CTXR window, and only
+    # a kernel built with CONFIG_ARM64_CTXR_EXECMEM keeps its code inside it. This
+    # checks the kernel this system boots, so an overridden kernel is checked too.
+    assertions = [{
+      assertion = !(aura.auroraMonitorFree or false)
+        || (config.boot.kernelPackages.kernel.auroraCtxrExecmem or false);
+      message = "This aura has no monitor, so the kernel needs CONFIG_ARM64_CTXR_EXECMEM=y "
+        + "(kernelCtxrExecmem in overlay.nix, with a kernel pin that has it).";
+    }];
     # The Apple Silicon module would copy its Stage 2 over the ESP file on
     # every install without a backup or checks; Aurora installs it below.
     boot.loader.grub.extraFiles = lib.mkForce { };

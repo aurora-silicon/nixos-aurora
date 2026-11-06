@@ -35,11 +35,15 @@ let
   kernelBaseFile = final.writeText "config" kernelBase;
   # The shared distribution config with NixOS's requirements on top, as the
   # build merges them. NixOS modules read kernel features from this.
-  kernelConfig = final.lib.listToAttrs (final.lib.concatMap (line:
+  # kernel/config names CONFIG_ARM64_CTXR_EXECMEM before the kernel pin has the
+  # option, and Kconfig drops it, so it is left out until kernelCtxrExecmem says
+  # the resolved configuration has it; kernel.config.isYes can't report it on early.
+  kernelConfig = builtins.removeAttrs (final.lib.listToAttrs (final.lib.concatMap (line:
     let matched = builtins.match "(CONFIG_[^=]+)=([ym])" line;
     in final.lib.optional (matched != null) {
       name = builtins.elemAt matched 0; value = builtins.elemAt matched 1;
-    }) (final.lib.splitString "\n" (kernelBase + "\n" + builtins.readFile ./kernel/nixos.config)));
+    }) (final.lib.splitString "\n" (kernelBase + "\n" + builtins.readFile ./kernel/nixos.config))))
+    (final.lib.optional (!kernelCtxrExecmem) "CONFIG_ARM64_CTXR_EXECMEM");
   kernelLLVM = final.llvmPackages_22;
   # GNOME Initial Setup creates the owner account on GNOME images (its
   # new-user mode). nixpkgs' vendor file skips the account and password pages,
@@ -317,6 +321,8 @@ in {
         # Keep the configure input fragment private to the build environment.
         passthru = old.passthru // {
           configfile = "${finalAttrs.finalPackage.dev}/lib/modules/${old.passthru.modDirVersion}/build/.config";
+          # modules/installed.nix checks the kernel a system boots against its aura.
+          auroraCtxrExecmem = kernelCtxrExecmem;
         };
         env = old.env // { RUSTC_BOOTSTRAP = "1"; };
         nativeBuildInputs = old.nativeBuildInputs ++ [ final.binutils kernelLLVM.lld ];
@@ -370,6 +376,8 @@ in {
     (prev.m1n1.override { customLogo = null; }).overrideAttrs (old: {
     pname = "aura";
     version = pins.aura.version;
+    # modules/installed.nix checks this against the kernel the system boots.
+    passthru = (old.passthru or { }) // { auroraMonitorFree = auraMonitorFree; };
     src = source "aura";
     cargoDeps = final.rustPlatform.importCargoLock {
       lockFile = ./locks/aura.Cargo.lock;
