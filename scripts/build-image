@@ -125,6 +125,8 @@ python3 "$root/scripts/prepare-stage2.py" \
   --combined "$out/esp/m1n1/boot.bin" \
   --aura "$aura/lib/m1n1/m1n1.bin" \
   --output "$out/esp/m1n1" --manifest "$out/stage2.json"
+# A Stage 1 with the CTXR window chainloads these, on Mach-O Macs.
+python3 "$root/scripts/prepare-ctxr-stage2.py" "$out/esp/m1n1"
 nix path-info --recursive --json "$system" > "$out/closure.json"
 cp "$target/etc/nixos/machine.nix" "$out/machine.nix"
 sync

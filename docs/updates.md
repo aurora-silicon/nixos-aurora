@@ -39,16 +39,27 @@ including the MacBook Neo.
 - At install time `aurora-install-stage2` (`scripts/install-stage2.sh`) checks the input against its
   recorded digest and that the ESP is the mounted FAT partition this Mac booted from
   (`/proc/device-tree/chosen/asahi,efi-system-partition` when present) with an `m1n1` directory. An
-  unchanged file is left alone. A changed one is written to `boot.bin.new`, verified, the previous file is
-  kept as `m1n1/boot.bin.old` and the new one renamed into place. Any refusal leaves the ESP unchanged and
+  unchanged file is left alone. A changed one is written to `<name>.new`, verified, the previous file is
+  kept as `m1n1/<name>.old` and the new one renamed into place. Any refusal leaves the ESP unchanged and
   fails the bootloader install loudly.
+- On a Mac that boots a Mach-O Stage 1 (`/proc/device-tree/compatible` names one of the chips in the
+  installer's `AuraStage1Format.usesMachO`: T8130 and later, T6040 and later), the file is
+  `m1n1/boot-ctxr.bin`, from the build's `ctxr/boot-ctxr-<board>.bin`, with only this board's device trees.
+  `m1n1/boot.bin` is never touched: a Stage 1 with the CTXR window chainloads `boot-ctxr.bin`, and an older
+  one keeps chainloading its frozen `boot.bin`, because it can't run an aura without the monitor. A frozen
+  `boot.bin` also keeps its device trees, so such a Mac runs new kernels on old trees until it is
+  re-enrolled. M1 to M3 Macs only ever use `boot.bin`.
+- An image build has no device tree to read. `scripts/prepare-ctxr-stage2.py` adds `boot-ctxr.bin`, a copy
+  of `boot.bin`, to the image's ESP, and `boot-ctxr-<board>.bin`, a copy of `boot-<board>.bin`, for each
+  Mach-O board. The installer picks the board's file over the combined one.
 - Stage 1 (`aurora/stage1.bin`, `aurora/stage1.macho` and the boot object) is never written; it belongs
   to the installer.
 - The Apple Silicon module's own copy (`boot.loader.grub.extraFiles`, an unchecked overwrite with no
   backup) is removed on installed systems. `aurora.stage2.enable = false` stops Stage 2 updates entirely.
 
 Recovery: boot the previous NixOS generation from GRUB if the new kernel misbehaves; if Stage 2 itself
-does not boot, restore `m1n1/boot.bin.old` over `m1n1/boot.bin` from macOS or the recovery environment.
+does not boot, restore `m1n1/boot.bin.old` over `m1n1/boot.bin` (`boot-ctxr.bin.old` over `boot-ctxr.bin`
+on a Mach-O Mac) from macOS or the recovery environment.
 
 `tests/test_stage2.py` runs the real installer script against a temporary ESP (only the mount and partition
 queries are stubbed) and covers update with backup, no-op, refusal on every failed check, Stage 1 left
@@ -65,7 +76,7 @@ sudo nix flake update aurora --flake /etc/nixos
 sudo nixos-rebuild switch --flake /etc/nixos#aurora
 ```
 
-The first switch installs `aurora-update` and refreshes Stage 2 (keeping `m1n1/boot.bin.old`); later
+The first switch installs `aurora-update` and refreshes Stage 2 (keeping the previous file as `.old`); later
 updates are `sudo aurora-update`.
 
 ## Channels
