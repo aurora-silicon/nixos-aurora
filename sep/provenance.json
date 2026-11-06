@@ -1,21 +1,6 @@
 {
   "repository": "https://github.com/aurora-silicon/linux",
-  "commit": "7cc30f35ecea3e90ceedd44babbde128c1d487a6",
+  "commit": "afbac7c1a27de3e07c455fad819021d9d99a5813",
   "source_directory": "tools/aurora-sep",
-  "upstream_files_sha256": {
-    "load-driver": "abea60bb264ced349f7cf671d8d26e1609a81a60ea4c34d66ec6f7f73b847dbb",
-    "aurora-sep.service": "447f99cc3c7e683134f31b993aa825fadde24e4854954a3035c96e6631d4d4d0",
-    "fprintd-aurora.conf": "f8d0c4b9385e6716d5ac5dd9941a57459fbc551a8238383bcde36cd929d0523f",
-    "README.md": "25e3db3e49d6932d76a73fe9c732e3298b256190c1386714b0bb9b0293e620e1",
-    "XART-SAFETY.md": "4422988e5e7f2417791957d066c501741e929705724083da76cdf1cb70d7a2fc",
-    "OS-IDENTITY.md": "52020e636e62b60f0c3e6251c3b67b8a8c409bff0486bc3463f356fd3073384b",
-    "aurora-sep-ready": "40f0d21446a85bab3e3800b31342e94e553af0fcde2c985503147519737e011d",
-    "aurora-sep-ready.service": "f38421360c2f885bb102bc5076d81006d352d03d12b5fb35b4da8a5132f4ccc0",
-    "fprintd-no-timeout.conf.in": "8d8df0ba2a6861b2edb2110e606906d84ca4848617621ad3cb48493a1522971d",
-    "extract-mesa-calibration": "15a878dcf382a22c5d807f0f2c754fe70d39baec88f65aea183b1fe56cf69441",
-    "aurora-sep-greeter-fingerprint": "5936eb76db666496a8700dade7ac6bcb3785b517958dcea10685690f1822c86f",
-    "aurora-sep-greeter-fingerprint.service": "ffab97b20bfd5f0eb1ab641179a131843349cf16890fff0cf2d893f0b5681b37",
-    "logind-aurora-sep.conf": "0695bd9ce4c207241db13c3ea07819a032d8213417021378f5015ab9317cde12"
-  },
-  "adaptations": "Late root-filesystem loading, timer, optional per-device calibration, trusted-key-only success without a reader, reader-presence gate on the readiness unit and fprintd; units are NixOS module options, with the login screen fingerprint unit behind aurora.sep.greeterFingerprint.enable (off by default, display-manager.service in place of gdm.service, GNOME Shell named from the store) the logind power-button snippet applied as services.logind.settings (lib.mkDefault) and powerdevilrc as the Plasma short-press default; fprintAuth defaults to off and is set on for sudo and polkit-1, off for login, su and sshd. The calibration is set up on demand by aurora-touchid-setup (when a file is missing, when the enclave refused one, or by hand) instead of at every start, and aurora-sep-ready starts it once per boot after a refusal; the files are kept in /var/lib/aurora-sep/firmware and linked into the firmware path on /run. No SELinux policy, as NixOS does not support SELinux. README.md is the module's own; XART-SAFETY.md and OS-IDENTITY.md are unmodified. The sensor-present gate accepts interfaces v4 and v5; aurora-sep-ready uses their common diag attributes."
+  "note": "Every file of the aurora-sep package except README.md and touchid-publish comes from the pinned archive (sources.json \"aurora-sep\") at build time; the units are NixOS options in modules/sep.nix. The pin is the head of https://github.com/aurora-silicon/linux/pull/1036 until that merges; then it moves to the integration/aurora commit that contains it."
 }

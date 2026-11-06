@@ -1,12 +1,26 @@
-{ stdenvNoCC, lib, makeWrapper, bash, coreutils, keyutils, kmod, python3, util-linux, gnugrep, systemd }:
+{ stdenvNoCC, lib, makeWrapper, bash, coreutils, keyutils, kmod, python3, util-linux, gnugrep, systemd
+, src, commit }:
 stdenvNoCC.mkDerivation {
   pname = "aurora-sep";
   version = "1.15";
-  src = ./.;
+  # tools/aurora-sep from aurora-silicon/linux (sources.json "aurora-sep");
+  # only touchid-publish and the README are kept here.
+  inherit src;
+  local = ./.;
+  sourceRoot = ".";
+  unpackPhase = ''
+    runHook preUnpack
+    tar -xzf $src --strip-components=3 linux-${commit}/tools/aurora-sep
+    cp $local/touchid-publish $local/README.md .
+    chmod u+w README.md touchid-publish
+    runHook postUnpack
+  '';
   nativeBuildInputs = [ makeWrapper python3 bash ];
   dontBuild = true;
+  passthru.auroraCommit = commit;
   installPhase = ''
     runHook preInstall
+    mv extract-mesa-calibration.py extract-mesa-calibration
     install -Dm755 load-driver $out/libexec/aurora-sep-load
     install -Dm755 aurora-sep-ready $out/libexec/aurora-sep-ready
     install -Dm755 aurora-sep-greeter-fingerprint $out/libexec/aurora-sep-greeter-fingerprint
@@ -32,6 +46,7 @@ stdenvNoCC.mkDerivation {
     for doc in README.md XART-SAFETY.md OS-IDENTITY.md logind-aurora-sep.conf; do
       install -Dm644 "$doc" "$out/share/doc/aurora-sep/$doc"
     done
+    install -Dm644 powerdevilrc $out/share/aurora-sep/powerdevilrc
     runHook postInstall
   '';
   meta.license = lib.licenses.gpl2Only;

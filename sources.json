@@ -8,6 +8,15 @@
     "sha256": "e7199a9342508b6f13cbb7aff66191a13d41ecadfaed5ea6764ffe9fec26b6e0",
     "nix_hash": "sha256-5xmak0JQi28Ty7ev9mGRoT1B7K367V6mdk/+n+wmtuA="
   },
+  "aurora-sep": {
+    "repository": "https://github.com/aurora-silicon/linux",
+    "commit": "afbac7c1a27de3e07c455fad819021d9d99a5813",
+    "version": "7.3.0",
+    "source_url": "https://codeload.github.com/aurora-silicon/linux/tar.gz/afbac7c1a27de3e07c455fad819021d9d99a5813",
+    "archive_root": "linux-afbac7c1a27de3e07c455fad819021d9d99a5813",
+    "sha256": "db8fa8945b2cff1af20e6b647fd543859e2a49e031910fc8bc84b0e71c457438",
+    "nix_hash": "sha256-24+olFss/xryDmtkf9VDhZ4qSeAxkQ/IvISw5xxFdDg="
+  },
   "aura": {
     "repository": "https://github.com/aurora-silicon/aura",
     "commit": "9a173ff5bf6264d56fdc4a6d2dae96ed482cb195",
