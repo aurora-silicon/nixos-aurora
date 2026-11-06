@@ -306,7 +306,7 @@ in {
           configfile = "${finalAttrs.finalPackage.dev}/lib/modules/${old.passthru.modDirVersion}/build/.config";
         };
         env = old.env // { RUSTC_BOOTSTRAP = "1"; };
-        nativeBuildInputs = old.nativeBuildInputs ++ [ final.binutils kernelLLVM.lld ];
+        nativeBuildInputs = old.nativeBuildInputs ++ [ final.binutils kernelLLVM.lld final.dtc ];
         # The source-tree entry point is selected by the pinned Kbuild.
         postPatch = (old.postPatch or "") + ''
           mkdir -p tools/aurora-bindgen/build/bin
@@ -340,6 +340,12 @@ in {
           make "''${makeFlags[@]}" rustavailable
           make "''${makeFlags[@]}" certs/
           "$buildRoot/certs/extract-cert" "" "$TMPDIR/aurora-empty-cert"
+        '';
+        # These DTBs are also embedded in system.build.m1n1 (ESP Stage 2).
+        postBuild = (old.postBuild or "") + ''
+          for board in t6040-j614s t6040-j616s t6041-j616c; do
+            test "$(fdtget -t s "arch/arm64/boot/dts/apple/$board.dtb" /dcp@402e00000/panel apple,color-gamut)" = display-p3 || exit 1
+          done
         '';
         postInstall = (old.postInstall or "") + ''
           echo ${pins.kernel-aurora.commit} > "$out/aurora-source-commit"
