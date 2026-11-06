@@ -88,6 +88,11 @@ let
     compilerTools = mesaCompilerTools;
   };
 in {
+  libvaV4l2RequestAvd = final.callPackage ./libva-v4l2-request-avd.nix {
+    src = source "libva-v4l2-request-avd";
+    version = pins.libva-v4l2-request-avd.version;
+    portabilityPatch = stableFile ./patches/libva-v4l2-request-offline-test-portability.patch;
+  };
   plymouth = prev.plymouth.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       (stableFile ./plymouth/0001-ply-terminal-Keep-terminal-input-nonblocking.patch)
