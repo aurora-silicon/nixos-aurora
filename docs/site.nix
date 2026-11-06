@@ -30,11 +30,16 @@ let
     # The indexer requires a base URL; absolute declaration URLs retain theirs.
     urlPrefix = "https://github.com/aurora-silicon/nixos-aurora/blob/main/";
   }).overrideAttrs (previous: {
-    # This input follows our nixpkgs; its fetchPnpmDeps normalization differs
-    # from the upstream nuschtpkgs revision used for the original dependency hash.
-    pnpmDeps = previous.pnpmDeps.overrideAttrs {
-      outputHash = "sha256-iC9dSmrqdx/4Lg68K6vqI+DstguW2Vnf0KLNX1aEfK8=";
-    };
+    # pnpm can exit successfully after optional archive downloads fail. Keep
+    # upstream's complete-store hash and reject an incomplete fetch explicitly.
+    pnpmDeps = previous.pnpmDeps.overrideAttrs (old: {
+      nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.python3 ];
+      postFixup = (old.postFixup or "") + ''
+        yq '.packages | keys' pnpm-lock.yaml > "$TMPDIR/locked-packages.json"
+        tar --zstd -xOf "$out/pnpm-store.tar.zst" ./v11/index.db.sql > "$TMPDIR/pnpm-index.sql"
+        python3 ${./check-pnpm-store.py} "$TMPDIR/locked-packages.json" "$TMPDIR/pnpm-index.sql"
+      '';
+    });
   });
   revision = self.rev or self.dirtyRev or "worktree";
 in pkgs.runCommand "aurora-documentation-site" {

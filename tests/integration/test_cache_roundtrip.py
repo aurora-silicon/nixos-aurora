@@ -1,5 +1,9 @@
 """Offline Nix cache interoperability; requires Nix, Git, OpenSSL and localhost.
 
+A tiny input-addressed derivation is evaluated and its fixture output registered
+in a private store. Export, signing and HTTP verification use the real tools;
+building the fixture is unnecessary and would require user namespaces on CI.
+
 Run separately from the source tracker's tool-only tests:
   nix shell --inputs-from . nixpkgs#openssl -c python3 -m unittest discover -s tests/integration
 """
@@ -60,14 +64,15 @@ def serve(directory):
 class RealCacheLifecycleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        missing = [tool for tool in ('nix', 'git', 'openssl') if shutil.which(tool) is None]
+        missing = [tool for tool in ('nix', 'nix-store', 'git', 'openssl', 'bash') if shutil.which(tool) is None]
         if missing:
             raise RuntimeError('Cache integration tests require: ' + ', '.join(missing))
-        if not Path('/bin/sh').is_file():
-            raise RuntimeError('The tiny offline fixture requires /bin/sh')
 
-    def command(self, *args, cwd=None):
-        return subprocess.check_output(args, cwd=cwd, text=True, stderr=subprocess.PIPE).strip()
+    def command(self, *args, cwd=None, input=None):
+        result = subprocess.run(args, cwd=cwd, input=input, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0,
+                         f'Command failed: {args!r}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}')
+        return result.stdout.strip()
 
     def git(self, *args):
         return self.command('git', '-C', str(self.repo), '-c', 'user.name=Cache test',
@@ -88,8 +93,8 @@ class RealCacheLifecycleTests(unittest.TestCase):
             'XDG_CONFIG_HOME': str(self.root / 'config'),
             'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
         }))
-        # No inputs, downloads or hardware code: one shell printf produces an
-        # input-addressed store path, so Nix must actually check its signature.
+        # No inputs, downloads or hardware code: this derivation defines an
+        # input-addressed path, so Nix must actually check its signature.
         system = self.command('nix', 'eval', '--impure', '--raw', '--expr', 'builtins.currentSystem')
         (self.repo / 'flake.nix').write_text('''{
   outputs = { ... }: {
@@ -118,12 +123,19 @@ class RealCacheLifecycleTests(unittest.TestCase):
         self.git('update-ref', 'refs/remotes/origin/main', self.commit)
         self.enterContext(patch.object(cache_inputs, 'ROOT', self.repo))
         self.enterContext(patch.object(channels, 'ROOT', self.repo))
-        reference = 'git+' + self.repo.as_uri() + '?rev=' + self.commit
-        build = json.loads(self.command('nix', 'build', '--no-link', '--json', reference + '#packages.aarch64-linux.fixture'))
         self.expected = cache_inputs.expected_outputs(self.commit)
-        self.assertEqual(self.expected['fixture']['drvPath'], build[0]['drvPath'])
+        fixture = self.expected['fixture']
+        self.assertEqual(len(fixture['outputs']), 1)
+        output = fixture['outputs'][0]
+        # Register only the known fixture bytes; this is a cache interoperability
+        # test, not a builder test. Nix computes the NAR hash itself, and neither
+        # the host store nor namespace/chroot setup is involved.
+        physical_output = self.root / 'store' / output.lstrip('/')
+        physical_output.write_bytes(b'cache-fixture')
+        self.command('nix-store', '--register-validity',
+                     input=output + '\n' + fixture['drvPath'] + '\n0\n')
         self.source = self.root / 'unsigned-cache'
-        self.command('bash', str(ROOT / 'scripts/export-cache'), str(self.source), build[0]['outputs']['out'])
+        self.command('bash', str(ROOT / 'scripts/export-cache'), str(self.source), output)
         metadata = self.root / 'metadata'
         metadata.mkdir()
         for entry in self.source.glob('*.narinfo'):

@@ -11,13 +11,13 @@ nix build --no-link .#checks.aarch64-linux.documentation
 nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.module-composition
 ```
 
-The separate integration suite requires Nix, Git, OpenSSL and localhost access. It verifies signed cache publication and channel assembly with a tiny offline fixture in a temporary store, and selective updater input changes in a temporary Git flake. CI requires OpenSSL for the signature tests.
+The separate integration suite requires Nix, Git, OpenSSL and localhost access. It registers a tiny input-addressed fixture in a temporary store to verify signed cache publication and channel assembly, and checks selective updater input changes in a temporary Git flake. It does not build through the redirected store or require user namespaces. CI requires OpenSSL for the signature tests.
 
 Statix and Deadnix use the pinned nixpkgs versions. Only Statix's `repeated_keys` rule is disabled: dotted option paths are a style choice. [Regenerate the option reference](documentation.md) after changing option metadata.
 
 `nix flake show` lists packages and checks. Build a package with `nix build .#kernel` or `nix build .#steam`. Hardware builds use native AArch64; `fex-mesa` is built on x86_64 for FEX's guest userspace.
 
-The FEX overlay VM check exercises generation switches, rollback, disabling and recovery. First-boot and SEP VM checks exercise the PAM/LUKS rekey flow and service repair lifecycle. Steam packaging checks run the configured launcher inside its FHS environment, including page size, graphics dependencies and Proton precedence. Device boot and game compatibility require hardware testing.
+The FEX overlay VM check exercises generation switches, rollback, disabling and recovery. First-boot and SEP VM checks exercise the PAM/LUKS rekey flow and service repair lifecycle. Steam packaging checks run the configured FHS launcher as an ordinary user in a NixOS VM, including page size, graphics dependencies and Proton precedence. Device boot and game compatibility require hardware testing.
 
 ## Layout
 
