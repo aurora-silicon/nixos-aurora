@@ -102,6 +102,7 @@ diff --git a/tests/hwguard.py b/tests/hwguard.py
 -    check("signal" in out, f"SIGINT did not record signal status: {out!r}")
 +    try:
 +        # The start record is written after the guard installs its handlers.
++        # A fixed delay can instead interrupt the interpreter during imports.
 +        ready_until = time.monotonic() + 10
 +        while True:
 +            try:
