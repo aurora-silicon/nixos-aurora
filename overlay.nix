@@ -1,5 +1,13 @@
 final: prev:
 let
+  # True once the pinned aura has no monitor (aura#77); its build checks this
+  # against the source. Such an aura moves the kernel into the CTXR window, so it
+  # needs kernelCtxrExecmem.
+  auraMonitorFree = false;
+  # True with a kernel pin whose configuration resolves CONFIG_ARM64_CTXR_EXECMEM=y
+  # (aurora-silicon/linux#985), which keeps every kernel code page inside that
+  # window. The kernel build checks this against its configuration.
+  kernelCtxrExecmem = false;
   stableFile = path: final.writeText (builtins.baseNameOf path) (builtins.readFile path);
   # nixpkgs constructs the CLI and engine with the same builder argument.
   # Patch only the engine, so the resulting Docker symlinks and wrappers all
@@ -325,6 +333,12 @@ in {
           python3 ${stableFile ./kernel/check-required.py} "$buildRoot/.config"
           grep -qx 'CONFIG_RUST=y' "$buildRoot/.config"
           grep -qx 'CONFIG_ARM64_16K_PAGES=y' "$buildRoot/.config"
+          ctxr=false
+          if grep -qx 'CONFIG_ARM64_CTXR_EXECMEM=y' "$buildRoot/.config"; then ctxr=true; fi
+          if [ "$ctxr" != ${final.lib.boolToString kernelCtxrExecmem} ]; then
+            echo "overlay.nix: set kernelCtxrExecmem = $ctxr; which this pin's configuration resolves to" >&2
+            exit 1
+          fi
           make "''${makeFlags[@]}" rustavailable
           make "''${makeFlags[@]}" certs/
           "$buildRoot/certs/extract-cert" "" "$TMPDIR/aurora-empty-cert"
@@ -333,7 +347,9 @@ in {
           echo ${pins.kernel-aurora.commit} > "$out/aurora-source-commit"
         '';
       })))) { };
-  m1n1 = (prev.m1n1.override { customLogo = null; }).overrideAttrs (old: {
+  m1n1 = assert final.lib.assertMsg (auraMonitorFree -> kernelCtxrExecmem)
+    "aura without the monitor needs a kernel built with CONFIG_ARM64_CTXR_EXECMEM=y";
+    (prev.m1n1.override { customLogo = null; }).overrideAttrs (old: {
     pname = "aura";
     version = pins.aura.version;
     src = source "aura";
@@ -364,9 +380,13 @@ in {
       cp build/aura.bin $out/lib/m1n1/m1n1.bin
       cp stage1/* $out/share/aura/stage1/
       # An aura without the monitor: Stage 2 then stops updating boot.bin on Mach-O Macs.
-      if [ -f src/ctxr_exec.c ] || [ ! -f src/monitor.c ]; then
-        touch $out/share/aura/monitor-free
+      found=false
+      if [ -f src/ctxr_exec.c ] || [ ! -f src/monitor.c ]; then found=true; fi
+      if [ "$found" != ${final.lib.boolToString auraMonitorFree} ]; then
+        echo "overlay.nix: set auraMonitorFree = $found; which the pinned source is" >&2
+        exit 1
       fi
+      ${final.lib.optionalString auraMonitorFree "touch $out/share/aura/monitor-free"}
     '';
     doCheck = false; # Upstream m1n1's Python suite is not the Aura test suite.
   });

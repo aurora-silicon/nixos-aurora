@@ -433,23 +433,51 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
         self.assertLess(marker, text.index('touch $out/monitor-free'))
         self.assertLess(marker, text.index('scripts/build-ctxr-stage2.sh}'))
 
-    def marker_step(self):
-        text = (ROOT / 'overlay.nix').read_text()
-        return re.search(r'(?ms)^ +if \[ -f src/ctxr_exec\.c.*?^ +fi$', text)[0]
+    def flag(self, name):
+        return re.search(rf'(?m)^  {name} = (true|false);$', (ROOT / 'overlay.nix').read_text())[1] == 'true'
 
-    def test_the_aura_build_marks_itself_from_the_pinned_source(self):
+    def step(self, start, end):
+        """The lines of overlay.nix from the one starting `start` to the next one equal to `end`."""
+        text = (ROOT / 'overlay.nix').read_text()
+        return re.search(rf'(?ms)^ +{re.escape(start)}.*?^ +{re.escape(end)}$', text)[0]
+
+    def test_an_aura_without_the_monitor_needs_a_kernel_that_keeps_its_code_in_the_window(self):
+        # Both flags are checked against the pinned source and the resolved
+        # configuration when they build, and evaluation asserts the pair.
+        if self.flag('auraMonitorFree'):
+            self.assertTrue(self.flag('kernelCtxrExecmem'),
+                            'aura without the monitor needs CONFIG_ARM64_CTXR_EXECMEM=y')
+        self.assertIn('CONFIG_ARM64_CTXR_EXECMEM=y', (ROOT / 'kernel/config').read_text().splitlines())
+        self.assertIn('final.lib.assertMsg (auraMonitorFree -> kernelCtxrExecmem)',
+                      (ROOT / 'overlay.nix').read_text())
+
+    def test_the_kernel_build_refuses_a_flag_its_configuration_disagrees_with(self):
+        check = self.step('ctxr=false', 'fi')
+        for line, value, ok in (('CONFIG_ARM64_CTXR_EXECMEM=y', 'true', True), ('', 'false', True),
+                                ('CONFIG_ARM64_CTXR_EXECMEM=y', 'false', False), ('', 'true', False)):
+            with self.subTest(line=line, value=value), tempfile.TemporaryDirectory() as temporary:
+                (Path(temporary) / '.config').write_text(line + '\n')
+                script = check.replace('${final.lib.boolToString kernelCtxrExecmem}', value)
+                result = subprocess.run(['bash', '-euc', script], capture_output=True, text=True,
+                                        env=dict(os.environ, buildRoot=temporary))
+                self.assertEqual(result.returncode == 0, ok, result.stderr)
+
+    def test_the_aura_build_refuses_a_flag_the_pinned_source_disagrees_with(self):
+        check = self.step('found=false', 'fi')
+        marker = '${final.lib.optionalString auraMonitorFree "touch $out/share/aura/monitor-free"}'
+        self.assertIn(marker, (ROOT / 'overlay.nix').read_text())
         cases = {'monitor': (('monitor.c',), False), 'monitor-free': (('ctxr_exec.c',), True),
                  'both': (('monitor.c', 'ctxr_exec.c'), True), 'renamed': (('other.c',), True)}
-        for name, (files, expected) in cases.items():
-            with self.subTest(name), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                (root / 'src').mkdir()
-                (root / 'out/share/aura').mkdir(parents=True)
-                for file in files:
-                    (root / 'src' / file).write_text('')
-                subprocess.run(['bash', '-euc', self.marker_step()], cwd=root, check=True,
-                               env=dict(os.environ, out=str(root / 'out')))
-                self.assertEqual((root / 'out/share/aura/monitor-free').exists(), expected)
+        for name, (files, source) in cases.items():
+            for value in (False, True):
+                with self.subTest(name, value=value), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    (root / 'src').mkdir()
+                    for file in files:
+                        (root / 'src' / file).write_text('')
+                    script = check.replace('${final.lib.boolToString auraMonitorFree}', str(value).lower())
+                    result = subprocess.run(['bash', '-euc', script], cwd=root, capture_output=True, text=True)
+                    self.assertEqual(result.returncode == 0, value == source, result.stderr)
 
 
 class BuildCtxrStage2Tests(unittest.TestCase):
