@@ -45,7 +45,7 @@ in {
         HandlePowerKeyLongPress = lib.mkDefault "poweroff";
       };
       environment.etc."xdg/powerdevilrc" = lib.mkIf config.services.desktopManager.plasma6.enable {
-        source = ../sep/powerdevilrc;
+        source = "${pkgs.aurora-sep}/share/aurora-sep/powerdevilrc";
       };
       systemd.timers.aurora-sep = {
         description = "Initialize Aurora SEP after persistent storage is available";

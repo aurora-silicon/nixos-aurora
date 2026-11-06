@@ -155,7 +155,10 @@ in {
       ./patches/gdm-initial-setup-session-path.patch
     ];
   });
-  aurora-sep = final.callPackage ./sep/package.nix { };
+  aurora-sep = final.callPackage ./sep/package.nix {
+    src = source "aurora-sep";
+    inherit (pins.aurora-sep) commit;
+  };
   libfprint = prev.libfprint.overrideAttrs (old: {
     src = source "libfprint";
     version = pins.libfprint.version;
