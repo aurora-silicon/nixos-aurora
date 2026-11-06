@@ -42,16 +42,24 @@ including the MacBook Neo.
   unchanged file is left alone. A changed one is written to `<name>.new`, verified, the previous file is
   kept as `m1n1/<name>.old` and the new one renamed into place. Any refusal leaves the ESP unchanged and
   fails the bootloader install loudly.
-- On a Mac that boots a Mach-O Stage 1 (`/proc/device-tree/compatible` names one of the chips in the
-  installer's `AuraStage1Format.usesMachO`: T8130 and later, T6040 and later), the file is
+- The aura build carries `share/aura/monitor-free` once its pinned source has no monitor. `overlay.nix`
+  checks for `src/ctxr_exec.c` or a missing `src/monitor.c`, so the aura#77 pin turns it on by itself. Until
+  then every Mac updates `boot.bin`.
+- With the marker, a Mac that boots a Mach-O Stage 1 (`/proc/device-tree/compatible` names one of the chips
+  in the installer's `AuraStage1Format.usesMachO`: T8130 and later, T6040 and later) gets
   `m1n1/boot-ctxr.bin`, from the build's `ctxr/boot-ctxr-<board>.bin`, with only this board's device trees.
   `m1n1/boot.bin` is never touched: a Stage 1 with the CTXR window chainloads `boot-ctxr.bin`, and an older
-  one keeps chainloading its frozen `boot.bin`, because it can't run an aura without the monitor. A frozen
-  `boot.bin` also keeps its device trees, so such a Mac runs new kernels on old trees until it is
-  re-enrolled. M1 to M3 Macs only ever use `boot.bin`.
-- An image build has no device tree to read. `scripts/prepare-ctxr-stage2.py` adds `boot-ctxr.bin`, a copy
-  of `boot.bin`, to the image's ESP, and `boot-ctxr-<board>.bin`, a copy of `boot-<board>.bin`, for each
-  Mach-O board. The installer picks the board's file over the combined one.
+  one keeps chainloading its frozen `boot.bin`, because it can't run an aura without the monitor. M1 to M3
+  Macs only ever use `boot.bin`.
+- Only an aura booted from `boot-ctxr.bin` publishes `/chosen/aurora,ctxr-exec-window`. When that property
+  is missing, the Mac is still booting the frozen `boot.bin`, so every rebuild warns the owner and names the
+  Recovery step, Utilities > Enroll Expanded Code Window. Until then new kernels run on the old device trees.
+- A problem with one board's file never stops a rebuild. `scripts/build-ctxr-stage2.sh` warns and leaves the
+  file out, and a Mach-O Mac whose board has no file gets a warning and an unchanged ESP.
+- An image build has no device tree to read, because its Stage 2 comes from the Apple Silicon module's
+  `extraFiles`. `scripts/prepare-ctxr-stage2.py` adds `boot-ctxr.bin`, a copy of `boot.bin`, to the image's
+  ESP, and `boot-ctxr-<board>.bin`, a copy of `boot-<board>.bin`, for each Mach-O board. The installer picks
+  the board's file over the combined one. The script fails the image if any of them is over 16 MiB.
 - Stage 1 (`aurora/stage1.bin`, `aurora/stage1.macho` and the boot object) is never written; it belongs
   to the installer.
 - The Apple Silicon module's own copy (`boot.loader.grub.extraFiles`, an unchecked overwrite with no

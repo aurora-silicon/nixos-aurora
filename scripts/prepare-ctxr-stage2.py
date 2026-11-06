@@ -4,9 +4,12 @@
 An installer payload's ESP gets boot-ctxr.bin, a copy of the combined boot.bin,
 and boot-ctxr-<board>.bin, a copy of boot-<board>.bin for each board that boots
 a Mach-O Stage 1. prepare-stage2.py refuses boot-*.bin in its output directory,
-so this runs after it.
+so this runs after it. A second run replaces what the first one wrote.
 
-usage: prepare-ctxr-stage2.py SOURCE [OUTPUT]
+Any problem fails an image build. With --keep-going, for a rebuild that runs on
+every Mac, a problem with one file only leaves that file out.
+
+usage: prepare-ctxr-stage2.py [--keep-going] SOURCE [OUTPUT]
 """
 import argparse
 import json
@@ -21,7 +24,7 @@ BOARD_FILE = re.compile(r'boot-(j[0-9]+[a-z]*)\.bin')
 # The boards assemble-distribution-payload.py requires in every payload.
 REQUIRED_BOARDS = ('j700', 'j616s', 'j614s')
 # Aura's Stage 2 slot on these Macs.
-MAX_BOARD_BYTES = 16 * 1024 * 1024
+MAX_STAGE2_BYTES = 16 * 1024 * 1024
 
 
 def uses_macho(compatible):
@@ -86,46 +89,56 @@ def board_compatible(image, board):
 
 
 def copy(source, target):
-    if target.exists():
-        raise ValueError(f'{target.name} already exists')
+    size = source.stat().st_size
+    if size > MAX_STAGE2_BYTES:
+        raise ValueError(f'{source.name} is {size} bytes, over the {MAX_STAGE2_BYTES} byte slot')
     shutil.copyfile(source, target)
     if target.read_bytes() != source.read_bytes():
         raise ValueError(f'{target.name} does not match {source.name}')
 
 
-def prepare(source, output):
+def prepare(source, output, keep_going=False):
+    def attempt(step):
+        try:
+            step()
+        except ValueError as error:
+            if not keep_going:
+                raise
+            print(f'warning: {error}; leaving it out', file=sys.stderr)
+            return False
+        return True
+
     output.mkdir(parents=True, exist_ok=True)
     written = []
     if (source / 'boot.bin').is_file():
-        copy(source / 'boot.bin', output / 'boot-ctxr.bin')
-        written.append('boot-ctxr.bin')
+        if attempt(lambda: copy(source / 'boot.bin', output / 'boot-ctxr.bin')):
+            written.append('boot-ctxr.bin')
     boards = set()
+
+    def add_board(path, board):
+        if uses_macho(board_compatible(path.read_bytes(), board)):
+            copy(path, output / f'boot-ctxr-{board}.bin')
+            written.append(f'boot-ctxr-{board}.bin')
+            boards.add(board)
+
     for path in sorted(source.iterdir()):
         found = BOARD_FILE.fullmatch(path.name)
-        if not found:
-            continue
-        board = found[1]
-        image = path.read_bytes()
-        if not uses_macho(board_compatible(image, board)):
-            continue
-        if len(image) > MAX_BOARD_BYTES:
-            raise ValueError(f'{path.name} is {len(image)} bytes, over the {MAX_BOARD_BYTES} byte slot')
-        copy(path, output / f'boot-ctxr-{board}.bin')
-        written.append(f'boot-ctxr-{board}.bin')
-        boards.add(board)
+        if found:
+            attempt(lambda: add_board(path, found[1]))
     missing = [board for board in REQUIRED_BOARDS if board not in boards]
-    if missing:
+    if missing and not keep_going:
         raise ValueError('no board Stage 2 for ' + ', '.join(missing))
     return written
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--keep-going', action='store_true')
     parser.add_argument('source', type=Path)
     parser.add_argument('output', type=Path, nargs='?')
     args = parser.parse_args()
     try:
-        written = prepare(args.source, args.output or args.source)
+        written = prepare(args.source, args.output or args.source, args.keep_going)
     except (OSError, ValueError) as error:
         sys.exit(f'CTXR Stage 2 preparation failed: {error}')
     print(json.dumps(written))

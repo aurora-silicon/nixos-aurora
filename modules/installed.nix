@@ -4,10 +4,10 @@
 # - Every bootloader install (nixos-rebuild switch or boot) refreshes the ESP
 #   Stage 2 exactly as update-m1n1 does on ALARM and Fedora: aura, the new
 #   kernel's Apple device trees and U-Boot, written only when it changes, with
-#   the previous file kept as .old. M1 to M3 Macs get m1n1/boot.bin with every
-#   tree. A Mac that boots a Mach-O Stage 1 gets m1n1/boot-ctxr.bin with its
-#   own board's trees, and its m1n1/boot.bin stays as it is. Stage 1 is never
-#   written.
+#   the previous file kept as .old. Every Mac gets m1n1/boot.bin with every tree
+#   until aura has no monitor. Then a Mac that boots a Mach-O Stage 1 gets
+#   m1n1/boot-ctxr.bin with its own board's trees, and its m1n1/boot.bin stays
+#   as it is. Stage 1 is never written.
 # - aurora-update takes the newest signed update of the channel /etc/nixos
 #   follows, in one command. Nothing upgrades unattended.
 let
@@ -26,14 +26,12 @@ let
       --aura ${aura}/lib/m1n1/m1n1.bin ${lib.concatMapStringsSep " " (board: "--require-board ${board}") cfg.requiredBoards} \
       > $out/manifest.json
     sha256sum $out/boot.bin | cut -d' ' -f1 > $out/boot.bin.sha256
-    mkdir boards $out/ctxr
-    python3 ${../scripts/prepare-stage2.py} --combined $out/boot.bin \
-      --aura ${aura}/lib/m1n1/m1n1.bin --output boards --manifest boards.json
-    python3 ${../scripts/prepare-ctxr-stage2.py} boards $out/ctxr
-    for image in $out/ctxr/*.bin; do
-      python3 ${../scripts/check-stage2.py} --stage2 "$image" --aura ${aura}/lib/m1n1/m1n1.bin > /dev/null
-      sha256sum "$image" | cut -d' ' -f1 > "$image.sha256"
-    done
+    if [[ -e ${aura}/share/aura/monitor-free ]]; then
+      touch $out/monitor-free
+      ${pkgs.runtimeShell} ${../scripts/build-ctxr-stage2.sh} ${../scripts/check-stage2.py} \
+        ${../scripts/prepare-stage2.py} ${../scripts/prepare-ctxr-stage2.py} \
+        $out/boot.bin ${aura}/lib/m1n1/m1n1.bin $out/ctxr
+    fi
   '';
   installStage2 = pkgs.writeShellApplication {
     name = "aurora-install-stage2";

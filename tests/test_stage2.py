@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -66,7 +67,7 @@ def compatible_file(board, chip):
     return f'apple,{board}\0apple,{chip}\0apple,arm-platform\0'.encode()
 
 
-def full_device_tree(board, chip):
+def full_device_tree(board, chip, padding=0):
     """A device tree whose root names its board, then its chip."""
     strings = b'compatible\0'
     value = f'apple,{board}\0apple,{chip}\0apple,arm-platform\0'.encode()
@@ -75,9 +76,9 @@ def full_device_tree(board, chip):
             + struct.pack('>III', 3, len(value), 0) + padded
             + struct.pack('>I', 2) + struct.pack('>I', 9))
     strings_offset = 40 + len(body)
-    total = strings_offset + len(strings)
+    total = strings_offset + len(strings) + padding
     header = struct.pack('>10I', 0xD00DFEED, total, 40, strings_offset, 40, 17, 16, 0, len(strings), len(body))
-    return header + body + strings
+    return header + body + strings + b'\0' * padding
 
 
 class CheckStage2Tests(unittest.TestCase):
@@ -128,6 +129,7 @@ class InstallStage2Tests(unittest.TestCase):
         self.compatible = root / 'compatible'
         self.compatible.write_bytes(compatible_file('j274', 't8103'))
         self.ctxr = self.esp / 'm1n1/boot-ctxr.bin'
+        self.window = root / 'window'
 
     def write_source(self, data):
         (self.source / 'boot.bin').write_bytes(data)
@@ -145,7 +147,8 @@ class InstallStage2Tests(unittest.TestCase):
         self.stub('lsblk', f'echo {state["partuuid"]}\n')
         env = dict(os.environ, PATH=f'{self.stubs}:{os.environ["PATH"]}',
                    AURORA_DEVICE_TREE_ESP=str(self.device_tree),
-                   AURORA_DEVICE_TREE_COMPATIBLE=str(self.compatible))
+                   AURORA_DEVICE_TREE_COMPATIBLE=str(self.compatible),
+                   AURORA_DEVICE_TREE_WINDOW=str(self.window))
         return subprocess.run(['bash', str(INSTALL), str(self.source), str(self.esp)], env=env,
                               capture_output=True, text=True)
 
@@ -157,6 +160,7 @@ class InstallStage2Tests(unittest.TestCase):
         self.assertFalse((self.esp / 'm1n1/boot.bin.new').exists())
 
     def write_ctxr_source(self, board, data):
+        (self.source / 'monitor-free').touch()
         directory = self.source / 'ctxr'
         directory.mkdir(exist_ok=True)
         (directory / f'boot-ctxr-{board}.bin').write_bytes(data)
@@ -219,7 +223,20 @@ class InstallStage2Tests(unittest.TestCase):
         self.device_tree.unlink()
         self.assertEqual(self.run_install().returncode, 0)
 
-    def test_every_macho_chip_leaves_boot_bin_byte_identical(self):
+    def test_macho_without_the_marker_keeps_updating_boot_bin(self):
+        for chip in MACHO_CHIPS:
+            with self.subTest(chip):
+                self.target.write_bytes(b'installed stage 2')
+                (self.esp / 'm1n1/boot.bin.old').unlink(missing_ok=True)
+                self.compatible.write_bytes(compatible_file('j700', chip))
+                result = self.run_install()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.target.read_bytes(), stage2())
+                self.assertEqual((self.esp / 'm1n1/boot.bin.old').read_bytes(), b'installed stage 2')
+                self.assertFalse(self.ctxr.exists())
+                self.assertEqual(result.stderr, '')
+
+    def test_macho_with_the_marker_leaves_boot_bin_byte_identical(self):
         self.write_ctxr_source('j700', stage2(boards=('j700',)))
         for chip in MACHO_CHIPS:
             with self.subTest(chip):
@@ -229,6 +246,24 @@ class InstallStage2Tests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assert_frozen()
                 self.assertEqual(self.ctxr.read_bytes(), stage2(boards=('j700',)))
+
+    def test_a_mac_still_booting_the_frozen_file_is_told_what_to_do(self):
+        self.compatible.write_bytes(compatible_file('j700', 't8140'))
+        self.write_ctxr_source('j700', stage2(boards=('j700',)))
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('still boots m1n1/boot.bin', result.stderr)
+        self.assertIn('Utilities > Enroll Expanded Code Window', result.stderr)
+        self.assertIn('#enroll-expanded-code-window', result.stderr)
+
+    def test_a_mac_booting_the_ctxr_file_gets_no_warning(self):
+        self.compatible.write_bytes(compatible_file('j700', 't8140'))
+        self.window.write_bytes(b'\0' * 16)
+        self.write_ctxr_source('j700', stage2(boards=('j700',)))
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        self.assert_frozen()
 
     def test_macho_update_keeps_the_previous_ctxr_stage2(self):
         self.compatible.write_bytes(compatible_file('j700', 't8140'))
@@ -243,7 +278,7 @@ class InstallStage2Tests(unittest.TestCase):
         self.assertIn('m1n1/boot-ctxr.bin.old', result.stdout)
         self.assert_frozen()
 
-    def test_macho_unchanged_stage2_writes_nothing(self):
+    def test_macho_unchanged_stage2_writes_nothing_and_still_warns(self):
         self.compatible.write_bytes(compatible_file('j700', 't8140'))
         self.write_ctxr_source('j700', stage2(boards=('j700',)))
         self.ctxr.write_bytes(stage2(boards=('j700',)))
@@ -252,15 +287,26 @@ class InstallStage2Tests(unittest.TestCase):
         result = self.run_install()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '')
+        self.assertIn('still boots m1n1/boot.bin', result.stderr)
         self.assertEqual(old.read_bytes(), b'older generation')
         self.assert_frozen()
 
-    def test_macho_board_the_build_does_not_carry_is_refused(self):
+    def test_macho_board_the_build_does_not_carry_warns_and_keeps_the_rebuild_going(self):
         self.compatible.write_bytes(compatible_file('j873g', 't8152'))
         self.write_ctxr_source('j700', stage2(boards=('j700',)))
         result = self.run_install()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('left unchanged', result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('no Stage 2 for j873g', result.stderr)
+        self.assert_frozen()
+        self.assertFalse(self.ctxr.exists())
+
+    def test_macho_board_file_without_a_digest_warns_and_keeps_the_rebuild_going(self):
+        self.compatible.write_bytes(compatible_file('j700', 't8140'))
+        self.write_ctxr_source('j700', stage2(boards=('j700',)))
+        (self.source / 'ctxr/boot-ctxr-j700.bin.sha256').unlink()
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('no Stage 2 for j700', result.stderr)
         self.assert_frozen()
         self.assertFalse(self.ctxr.exists())
 
@@ -272,26 +318,31 @@ class InstallStage2Tests(unittest.TestCase):
         self.assert_frozen()
         self.assertFalse(self.ctxr.exists())
 
-    def test_earlier_chips_keep_updating_boot_bin(self):
-        self.write_ctxr_source('j274', b'must not be installed')
-        for chip in EARLIER_CHIPS:
-            with self.subTest(chip):
-                self.target.write_bytes(b'installed stage 2')
-                (self.esp / 'm1n1/boot.bin.old').unlink(missing_ok=True)
-                self.compatible.write_bytes(compatible_file('j274', chip))
-                result = self.run_install()
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(self.target.read_bytes(), stage2())
-                self.assertEqual((self.esp / 'm1n1/boot.bin.old').read_bytes(), b'installed stage 2')
-                self.assertFalse(self.ctxr.exists())
+    def test_earlier_chips_are_the_same_with_and_without_the_marker(self):
+        for marked in (False, True):
+            if marked:
+                self.write_ctxr_source('j274', b'must not be installed')
+            for chip in EARLIER_CHIPS:
+                with self.subTest(chip=chip, marked=marked):
+                    self.target.write_bytes(b'installed stage 2')
+                    (self.esp / 'm1n1/boot.bin.old').unlink(missing_ok=True)
+                    self.compatible.write_bytes(compatible_file('j274', chip))
+                    result = self.run_install()
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(self.target.read_bytes(), stage2())
+                    self.assertEqual((self.esp / 'm1n1/boot.bin.old').read_bytes(), b'installed stage 2')
+                    self.assertFalse(self.ctxr.exists())
+                    self.assertEqual(result.stderr, '')
 
     def test_without_a_compatible_it_installs_boot_bin(self):
+        (self.source / 'monitor-free').touch()
         self.compatible.unlink()
         self.assertEqual(self.run_install().returncode, 0)
         self.assertEqual(self.target.read_bytes(), stage2())
         self.assertFalse(self.ctxr.exists())
 
     def test_another_machine_installs_boot_bin(self):
+        (self.source / 'monitor-free').touch()
         self.compatible.write_bytes(b'linux,dummy-virt\0')
         self.assertEqual(self.run_install().returncode, 0)
         self.assertEqual(self.target.read_bytes(), stage2())
@@ -347,6 +398,22 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.split(esp)
 
+    def test_a_second_run_replaces_what_the_first_wrote(self):
+        esp = self.root / 'esp/m1n1'
+        self.split(esp)
+        (esp / 'boot.bin').write_bytes(self.combined.read_bytes())
+        prepare_ctxr.prepare(esp, esp)
+        (esp / 'boot.bin').write_bytes(b'rebuilt combined')
+        prepare_ctxr.prepare(esp, esp)
+        self.assertEqual((esp / 'boot-ctxr.bin').read_bytes(), b'rebuilt combined')
+
+    def test_an_oversized_shared_file_is_refused(self):
+        esp = self.root / 'esp/m1n1'
+        self.split(esp)
+        (esp / 'boot.bin').write_bytes(b'\0' * (prepare_ctxr.MAX_STAGE2_BYTES + 1))
+        with self.assertRaises(ValueError):
+            prepare_ctxr.prepare(esp, esp)
+
     def test_required_board_missing_is_refused(self):
         boards = self.root / 'boards'
         self.split(boards)
@@ -365,10 +432,84 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
         self.assertLess(text.index('prepare-stage2.py'), text.index('prepare-ctxr-stage2.py'))
         self.assertLess(text.index('prepare-ctxr-stage2.py'), text.index('-filesystems.tar.zst'))
 
-    def test_installed_build_has_a_digest_for_every_board_file(self):
+    def test_the_installed_build_splits_boards_only_with_the_marker(self):
         text = (ROOT / 'modules/installed.nix').read_text()
-        self.assertIn('prepare-ctxr-stage2.py} boards $out/ctxr', text)
-        self.assertIn('"$image.sha256"', text)
+        marker = text.index('if [[ -e ${aura}/share/aura/monitor-free ]]; then')
+        self.assertLess(marker, text.index('touch $out/monitor-free'))
+        self.assertLess(marker, text.index('scripts/build-ctxr-stage2.sh}'))
+
+    def marker_step(self):
+        text = (ROOT / 'overlay.nix').read_text()
+        return re.search(r'(?ms)^ +if \[ -f src/ctxr_exec\.c.*?^ +fi$', text)[0]
+
+    def test_the_aura_build_marks_itself_from_the_pinned_source(self):
+        cases = {'monitor': (('monitor.c',), False), 'monitor-free': (('ctxr_exec.c',), True),
+                 'both': (('monitor.c', 'ctxr_exec.c'), True), 'renamed': (('other.c',), True)}
+        for name, (files, expected) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / 'src').mkdir()
+                (root / 'out/share/aura').mkdir(parents=True)
+                for file in files:
+                    (root / 'src' / file).write_text('')
+                subprocess.run(['bash', '-euc', self.marker_step()], cwd=root, check=True,
+                               env=dict(os.environ, out=str(root / 'out')))
+                self.assertEqual((root / 'out/share/aura/monitor-free').exists(), expected)
+
+
+class BuildCtxrStage2Tests(unittest.TestCase):
+    AURA = b'AURA-STAGE2-BINARY'
+    BOARDS = {'j274': 't8103', 'j700': 't8140', 'j616s': 't6040', 'j614s': 't6040', 'j713': 't8132'}
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.aura = self.root / 'aura.bin'
+        self.aura.write_bytes(self.AURA)
+        self.output = self.root / 'ctxr'
+
+    def run_build(self, boards=None, padding=None, aura=None):
+        padding = padding or {}
+        trees = b''.join(full_device_tree(board, chip, padding.get(board, 0))
+                         for board, chip in (boards or self.BOARDS).items())
+        combined = self.root / 'boot.bin'
+        combined.write_bytes((aura or self.AURA) + trees + gzip.compress(b'u-boot', mtime=0))
+        scripts = ROOT / 'scripts'
+        return subprocess.run(['bash', str(scripts / 'build-ctxr-stage2.sh'), str(scripts / 'check-stage2.py'),
+                               str(scripts / 'prepare-stage2.py'), str(scripts / 'prepare-ctxr-stage2.py'),
+                               str(combined), str(self.aura), str(self.output)],
+                              capture_output=True, text=True, env=dict(os.environ, TMPDIR=str(self.root)))
+
+    def built(self):
+        return sorted(path.name for path in self.output.iterdir()) if self.output.is_dir() else []
+
+    def test_each_macho_board_gets_its_file_and_digest(self):
+        result = self.run_build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.built(), [f'boot-ctxr-{board}{suffix}' for board in ('j614s', 'j616s', 'j700', 'j713')
+                                        for suffix in ('.bin', '.bin.sha256')])
+        image = (self.output / 'boot-ctxr-j700.bin').read_bytes()
+        self.assertEqual(check_stage2.check(image, self.AURA, ['j700'])['boards'], ['apple,j700'])
+        self.assertEqual((self.output / 'boot-ctxr-j700.bin.sha256').read_text().strip(), hashlib.sha256(image).hexdigest())
+
+    def test_a_missing_macho_board_does_not_stop_a_rebuild(self):
+        result = self.run_build(boards={'j274': 't8103', 'j713': 't8132'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.built(), ['boot-ctxr-j713.bin', 'boot-ctxr-j713.bin.sha256'])
+
+    def test_a_macho_board_over_the_limit_is_left_out_and_warned_about(self):
+        result = self.run_build(padding={'j700': prepare_ctxr.MAX_STAGE2_BYTES})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('boot-j700.bin', result.stderr)
+        self.assertNotIn('boot-ctxr-j700.bin', self.built())
+        self.assertIn('boot-ctxr-j713.bin', self.built())
+
+    def test_a_stage2_that_cannot_be_split_does_not_stop_a_rebuild(self):
+        result = self.run_build(aura=b'SOME-OTHER-AURA-BUILD')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('could not split', result.stderr)
+        self.assertEqual([name for name in self.built() if name.endswith('.bin')], [])
 
 
 class FollowChannelTests(unittest.TestCase):

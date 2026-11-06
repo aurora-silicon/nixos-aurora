@@ -363,6 +363,10 @@ in {
       mkdir -p $out/lib/m1n1 $out/share/aura/stage1
       cp build/aura.bin $out/lib/m1n1/m1n1.bin
       cp stage1/* $out/share/aura/stage1/
+      # An aura without the monitor: Stage 2 then stops updating boot.bin on Mach-O Macs.
+      if [ -f src/ctxr_exec.c ] || [ ! -f src/monitor.c ]; then
+        touch $out/share/aura/monitor-free
+      fi
     '';
     doCheck = false; # Upstream m1n1's Python suite is not the Aura test suite.
   });
