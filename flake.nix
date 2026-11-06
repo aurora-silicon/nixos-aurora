@@ -302,6 +302,7 @@
           "every profile selects the patched Plymouth" = lib.all (c:
             c.boot.plymouth.package.drvPath == pkgs.plymouth.drvPath
             && patchedWith "0001-ply-terminal-Keep-terminal-input-nonblocking.patch" c.boot.plymouth.package
+            && patchedWith "0002-drm-Reset-inherited-HDR-connector-state-before-SDR.patch" c.boot.plymouth.package
             && c.boot.plymouth.package.doCheck) [ kde gnome minimal ];
           "minimal images boot without a splash" = !minimal.boot.plymouth.enable;
           "the initrd asks for no TPM drivers, which the shared kernel lacks" = lib.all (c:

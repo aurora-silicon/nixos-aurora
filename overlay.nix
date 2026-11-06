@@ -92,6 +92,8 @@ in {
     patches = (old.patches or [ ]) ++ [
       (stableFile ./plymouth/0001-ply-terminal-Keep-terminal-input-nonblocking.patch)
       (stableFile ./plymouth/0001-systemd-units-Start-plymouthd-without-waiting-for-coldplug.patch)
+      # Clear the previous DRM master's HDR state before the SDR splash scans out.
+      (stableFile ./plymouth/0002-drm-Reset-inherited-HDR-connector-state-before-SDR.patch)
     ];
     doCheck = true;
     postCheck = (old.postCheck or "") + ''
@@ -105,6 +107,16 @@ in {
         -lply-splash-core -lply
       timeout 15s ./test-terminal-input
       echo 'Plymouth terminal-input PTY regression passed'
+      # The DRM regression includes the production renderer and mocks libdrm.
+      $CC -D_GNU_SOURCE -Wall \
+        -I. -I.. -I../src/libply -I../src/libply-splash-core \
+        $($PKG_CONFIG --cflags libdrm libevdev) \
+        ${stableFile ./plymouth/test-drm-sdr.c} -o test-drm-sdr \
+        -Lsrc/libply-splash-core -Lsrc/libply \
+        -Wl,-rpath,"$PWD/src/libply-splash-core" \
+        -Wl,-rpath,"$PWD/src/libply" \
+        -lply-splash-core -lply $($PKG_CONFIG --libs libdrm libevdev) -lm
+      timeout 15s ./test-drm-sdr
     '';
   });
   docker_29 = prev.docker_29.override { buildGoModule = dockerPolicyBuilder; };
