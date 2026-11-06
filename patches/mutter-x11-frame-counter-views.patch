@@ -1,0 +1,30 @@
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Sat, 31 Oct 2026 15:00:00 +1100
+Subject: [PATCH] compositor/x11: Assign frame counters only on an actor's views
+
+The compositor calls before_paint for every window on every stage view,
+while after_paint and frame_complete only run for actors belonging to the
+view. Assigning an X11 sync frame counter on an unrelated view associates
+the pending response with a frame which never sends FrameDrawn for that
+window. Multi-monitor unminimize tests can then hit the warning about a
+frame counter without a frame drawn time.
+
+Match the existing after_paint and presented filtering when assigning the
+counter. Keep handle_updates running for every window as before.
+
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+--- a/src/compositor/meta-window-actor-x11.c
++++ b/src/compositor/meta-window-actor-x11.c
+@@ -1121,7 +1121,9 @@
+ 
+   handle_updates (actor_x11);
+ 
+-  assign_frame_counter_to_frames (actor_x11);
++  if (g_list_find (clutter_actor_peek_stage_views (CLUTTER_ACTOR (actor)),
++                   stage_view))
++    assign_frame_counter_to_frames (actor_x11);
+ }
+ 
+ static void

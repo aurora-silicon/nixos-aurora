@@ -1,0 +1,29 @@
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Sat, 31 Oct 2026 15:00:00 +1100
+Subject: [PATCH] input-capture: Disable the session when its EIS client disconnects
+
+A client can close its EIS connection while capture is active. Relying on
+an empty seat binding to disable the session is racy: the disconnect
+notification need not be preceded by that event. Capture then remains
+active and the existing input-capture/disconnect test waits indefinitely
+for the Deactivated signal.
+
+Disable the session before dropping the client and seat. This releases
+capture and emits Deactivated while the session is active. An already
+closed session has already performed this cleanup.
+
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+--- a/src/backends/meta-input-capture-session.c
++++ b/src/backends/meta-input-capture-session.c
+@@ -420,6 +420,9 @@
+       break;
+ 
+     case EIS_EVENT_CLIENT_DISCONNECT:
++      /* A disconnected client cannot release its active capture itself. */
++      if (session->state != INPUT_CAPTURE_STATE_CLOSED)
++        meta_input_capture_session_disable (session);
+       g_clear_pointer (&session->eis_seat, eis_seat_unref);
+       g_clear_pointer (&session->eis_client, eis_client_unref);
+       break;

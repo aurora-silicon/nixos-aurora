@@ -42,7 +42,7 @@ NEEDS = {
     'avd-fw': ['avd-fw'],
     'upower': ['upower-aurora'],
     'speakerguardd': ['speakerguardd'],
-    'mutter': [],
+    'mutter': ['mutter'],
     'speakersafetyd': [],
     'bankstown': ['bankstown'],
     'neo-platform': ['aurora-neo-platform-config'],
