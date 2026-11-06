@@ -9,6 +9,12 @@ leaves the panel without its target colour space.
 
 `overlay.nix` builds the pinned kernel and its DTBs. The Apple Silicon module combines them with aura and U-Boot as `system.build.m1n1`; `modules/installed.nix` validates that image and refreshes the ESP through `aurora-install-stage2`, keeping the previous image.
 
+The distribution assembly path defaults to `m1n1/boot.bin`. If Stage 1 is
+configured to load `aurora/stage2.bin` instead, refresh that selected image
+through the reviewed deployment mechanism as well: writing an unused legacy
+path does not update the booted device tree. Confirm the Stage 1 selection
+before deployment; the presence of an ESP directory is not sufficient.
+
 `sources.json` pins the kernel through the merge of #1021,
 `e5ed737692b0ad07e212d210b568914b4fc01aca`. The kernel build checks the
 `apple,color-gamut` property in each of the three generated DTBs before
