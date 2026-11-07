@@ -744,7 +744,14 @@ in {
     sourceRoot = "${pins.aurora-sep-userspace.archive_root}/luks";
     nativeBuildInputs = [ final.pkg-config ];
     buildInputs = [ final.cryptsetup final.json_c ];
-    makeFlags = [ "PREFIX=${placeholder "out"}" "TOKENDIR=${placeholder "out"}/lib/cryptsetup" ];
+    makeFlags = [
+      "PREFIX=${placeholder "out"}"
+      "TOKENDIR=${placeholder "out"}/lib/cryptsetup"
+      "LIBEXECDIR=${placeholder "out"}/libexec"
+    ];
+    # install-initrd adds the initrd loader and units that
+    # aurora.sepLuks.initrd uses; the dracut/mkinitcpio parts are not needed.
+    installTargets = [ "install" "install-initrd" ];
     # The unit test needs the kernel keyring, which the Nix sandbox blocks
     # (it exits 77 then); the file-image tests run in CI.
     doCheck = true;
@@ -756,6 +763,7 @@ in {
     '';
     postInstall = ''
       install -Dm644 ../docs/luks-sep.md $out/share/doc/aurora-sep-luks/luks-sep.md
+      install -Dm644 ../docs/luks-sep-initrd.md $out/share/doc/aurora-sep-luks/luks-sep-initrd.md
     '';
     passthru.commit = pins.aurora-sep-userspace.commit;
     meta = {

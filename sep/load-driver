@@ -37,7 +37,31 @@ if [ "${AURORA_SEP_SESSION:-0}" != 1 ]; then
     exec keyctl session aurora-sep-load env AURORA_SEP_SESSION=1 "$0" "$@"
 fi
 
-modprobe apple_sep xart_writes=1 provision_keybag=1
+# Root unlocked by the Secure Enclave: the initrd loaded the driver in its
+# key-store-only phase. Finish that attach on the real root; modprobe would
+# do nothing for the loaded module and Touch ID would stay off. The SEP takes
+# one attach per boot, so the driver cannot be loaded a second time.
+case "$(cat /sys/module/apple_sep/parameters/keystore_only 2>/dev/null)" in
+1 | Y)
+    attached=false
+    for attr in /sys/bus/platform/drivers/apple_sep/*/complete_attach; do
+        [ -e "$attr" ] || continue
+        if ! echo 1 >"$attr"; then
+            log "could not finish the attach the initrd started"
+            exit 1
+        fi
+        attached=true
+    done
+    if [ "$attached" != true ]; then
+        log "the initrd loaded apple_sep for the key store, but it has no complete_attach"
+        exit 1
+    fi
+    log "finished the attach the initrd started for the key store"
+    ;;
+*)
+    modprobe apple_sep xart_writes=1 provision_keybag=1
+    ;;
+esac
 
 work=$(mktemp -d /run/aurora-sep-load.XXXXXX)
 cleanup() {
