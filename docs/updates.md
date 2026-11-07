@@ -44,7 +44,7 @@ including the MacBook Neo.
   fails the bootloader install loudly.
 - The aura build carries `share/aura/monitor-free` once its pinned source has no monitor. `overlay.nix`
   declares that in `auraMonitorFree`, and the aura build refuses a source that disagrees (`src/ctxr_exec.c`,
-  or no `src/monitor.c`). aura 1.0.0b6 is the first pin without the monitor (aura#77), so `auraMonitorFree`
+  or no `src/monitor.c`). aura 1.0.0b7 is the first pin without the monitor (aura#77), so `auraMonitorFree`
   is true.
 - Such an aura moves the kernel into the CTXR window, which only a kernel built with
   `CONFIG_ARM64_CTXR_EXECMEM` keeps its code inside. Evaluation refuses `auraMonitorFree` without
