@@ -30,12 +30,78 @@ in {
       # screens (gdm-fingerprint, and kde-fingerprint from the Plasma module);
       # the password at the login screens, the console login, su and ssh.
       # fprintAuth puts pam_fprintd in as "sufficient", ahead of the password.
-      security.pam.services = {
-        sudo.fprintAuth = true;
-        polkit-1.fprintAuth = true;
-        login.fprintAuth = false;
-        su.fprintAuth = false;
-        sshd = lib.mkIf config.services.openssh.enable { fprintAuth = false; };
+      # A password re-arms Touch ID after a lockout. pam_aurora_touchid runs
+      # straight after a pam_unix success, and pam_permit then ends the stack
+      # as "sufficient pam_unix" did; a failure jumps over both. Both lines
+      # exist only where pam_unix does.
+      security.pam.services = lib.mkMerge [
+        (lib.genAttrs ([ "sudo" "polkit-1" "login" ]
+          ++ lib.optional config.services.desktopManager.plasma6.enable "kde") (name:
+          let unix = config.security.pam.services.${name}.rules.auth.unix; in {
+            rules.auth = {
+              unix.control = lib.mkForce "[success=ok new_authtok_reqd=ok default=2]";
+              aurora-touchid-rearm = {
+                enable = unix.enable;
+                order = unix.order + 1;
+                control = "optional";
+                modulePath = "${pkgs.aurora-touchid-rearm}/lib/security/pam_aurora_touchid.so";
+              };
+              aurora-touchid-rearm-done = {
+                enable = unix.enable;
+                order = unix.order + 2;
+                control = "sufficient";
+                modulePath = "${pkgs.pam}/lib/security/pam_permit.so";
+              };
+            };
+          }))
+        {
+          # aurora-touchid-rearm checks the password once more here.
+          aurora-touchid-rearm.text = ''
+            auth required ${pkgs.pam}/lib/security/pam_unix.so
+            account required ${pkgs.pam}/lib/security/pam_unix.so
+          '';
+        }
+        {
+          sudo.fprintAuth = true;
+          polkit-1.fprintAuth = true;
+          login.fprintAuth = false;
+          su.fprintAuth = false;
+          sshd = lib.mkIf config.services.openssh.enable { fprintAuth = false; };
+        }
+      ];
+      systemd.sockets.aurora-touchid-rearm = {
+        description = "Touch ID re-arm after a password authentication";
+        wantedBy = [ "sockets.target" ];
+        socketConfig = {
+          ListenStream = "/run/aurora-touchid-rearm.sock";
+          SocketMode = "0666";
+          Accept = true;
+          MaxConnections = 8;
+        };
+      };
+      systemd.services."aurora-touchid-rearm@" = {
+        description = "Touch ID re-arm request";
+        serviceConfig = {
+          ExecStart = "${pkgs.aurora-touchid-rearm}/libexec/aurora-touchid-rearm";
+          StandardInput = "socket";
+          StandardOutput = "socket";
+          StandardError = "journal";
+          RuntimeMaxSec = 30;
+          CapabilityBoundingSet = [ "CAP_SYS_ADMIN" "CAP_DAC_READ_SEARCH" "CAP_AUDIT_WRITE" ];
+          NoNewPrivileges = true;
+          PrivateNetwork = true;
+          RestrictAddressFamilies = [ "AF_UNIX" "AF_NETLINK" ];
+          ProtectSystem = "full";
+          ProtectHome = true;
+          PrivateTmp = true;
+          ProtectKernelTunables = true;
+          ProtectKernelModules = true;
+          ProtectControlGroups = true;
+          LockPersonality = true;
+          RestrictRealtime = true;
+          RestrictNamespaces = true;
+          SystemCallArchitectures = "native";
+        };
       };
       # The Touch ID sensor is the power button: a short press suspends and a
       # 5 s press powers off wherever no desktop handles the button. In Plasma

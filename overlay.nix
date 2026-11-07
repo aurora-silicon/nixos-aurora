@@ -172,6 +172,7 @@ in {
       ./sep/0003-hide-lid-covered-readers-while-the-lid-is-closed.patch
       ./sep/0004-aurora-refuse-unbound-enrollment.patch
       ./sep/0005-aurora-support-v4-and-v5.patch
+      ./sep/0006-aurora-report-the-touch-id-lockout.patch
     ];
     postPatch = (old.postPatch or "") + ''
       install -Dm644 ${stableFile ./sep/apple-sep.h} aurora-uapi/linux/apple-sep.h
@@ -184,11 +185,37 @@ in {
   fprintd = prev.fprintd.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ map stableFile [
       ./sep/0001-preserve-print-on-device-delete-failure.patch
+      ./sep/0002-report-lockout-and-fall-back-to-the-password.patch
     ];
     postPatch = (old.postPatch or "") + ''
       ${final.python3.interpreter} ${stableFile ./sep/test_account_gate.py} src/device.c
     '';
   });
+  # Re-arms Touch ID with the password after a lockout: the PAM module that
+  # modules/sep.nix puts after pam_unix, and the root service it asks.
+  aurora-touchid-rearm = final.stdenv.mkDerivation {
+    pname = "aurora-touchid-rearm";
+    version = pins.aurora-touchid-rearm.version;
+    src = source "aurora-touchid-rearm";
+    buildInputs = [ final.pam ];
+    nativeCheckInputs = [ final.python3 ];
+    makeFlags = [
+      "-C" "touchid-rearm" "WARN=-Wall"
+      "LIBEXECDIR=${placeholder "out"}/libexec" "PAMDIR=${placeholder "out"}/lib/security"
+      "PAMCONFDIR=${placeholder "out"}/lib/pam.d" "UNITDIR=${placeholder "out"}/lib/systemd/system"
+      "DOCDIR=${placeholder "out"}/share/doc/aurora-touchid-rearm"
+    ];
+    doCheck = true;
+    checkTarget = "check";
+    AURORA_TEST_PAM_DIR = "${final.pam}/lib/security";
+    passthru.commit = pins.aurora-touchid-rearm.commit;
+    meta = {
+      description = "Re-arm Touch ID with the password after a lockout";
+      homepage = "https://github.com/aurora-silicon/aurora-sep-userspace";
+      license = final.lib.licenses.gpl2Only;
+      platforms = final.lib.platforms.linux;
+    };
+  };
   aurora-firstboot = final.callPackage ./firstboot.nix { };
   aurora-avd-firmware = final.callPackage ./avd-fw.nix {
     src = source "avd-fw";

@@ -1,0 +1,94 @@
+From: Ryan Murray <ryan@aurorasilicon.org>
+Subject: [PATCH] aurora: report the Touch ID lockout as its own error
+
+After too many failed matches the Secure Enclave stops matching, and the
+apple_sep driver ends every verify with SEP_BIO_STATUS_LOCKOUT (8) until a
+password authentication re-arms Touch ID. The aurora driver reported that
+as a general error, which fprintd turns into verify-unknown-error, so lock
+screens kept offering a fingerprint that could not work.
+
+Add FP_DEVICE_ERROR_LOCKED_OUT, for a device that refuses to match until
+the user authenticates another way, and report the lockout with it, in
+verify and in identify. With a kernel that never reports the lockout the
+driver behaves as before.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+diff --git a/libfprint/drivers/aurora/aurora.c b/libfprint/drivers/aurora/aurora.c
+index ab5b865..df41e3a 100644
+--- a/libfprint/drivers/aurora/aurora.c
++++ b/libfprint/drivers/aurora/aurora.c
+@@ -36,6 +36,10 @@
+ #define SEP_BIO_STATUS_UNFILED  6
+ #define SEP_BIO_STATUS_REJECTED 7
+ #endif
++/* Kernels that predate the lockout never report it. */
++#ifndef SEP_BIO_STATUS_LOCKOUT
++#define SEP_BIO_STATUS_LOCKOUT  8
++#endif
+ 
+ struct _FpiDeviceAurora
+ {
+@@ -164,6 +168,10 @@ aurora_status_reason (guint32 status)
+       return "too many captures in a row were not usable; "
+              "rest more of the finger flat on the sensor and enrol again";
+ 
++    case SEP_BIO_STATUS_LOCKOUT:
++      return "the secure enclave stopped matching after too many failed attempts; "
++             "authenticate with your password to use the fingerprint again";
++
+     default:
+       return NULL;
+     }
+@@ -174,6 +182,13 @@ aurora_failure_new (const gchar *operation, guint32 status)
+ {
+   const gchar *reason = aurora_status_reason (status);
+ 
++  /* Its own code, so that fprintd tells the user to use the password instead
++   * of retrying a reader that refuses every attempt. */
++  if (status == SEP_BIO_STATUS_LOCKOUT)
++    return fpi_device_error_new_msg (FP_DEVICE_ERROR_LOCKED_OUT,
++                                     "%s failed: %s (driver status %u)",
++                                     operation, reason, status);
++
+   if (reason == NULL)
+     return fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL,
+                                      "%s failed, driver status 0x%x",
+diff --git a/libfprint/fp-device.h b/libfprint/fp-device.h
+index e82cb53..714f1a6 100644
+--- a/libfprint/fp-device.h
++++ b/libfprint/fp-device.h
+@@ -143,6 +143,9 @@ typedef enum {
+  * @FP_DEVICE_ERROR_DATA_DUPLICATE: Enrolling template duplicates storaged templates
+  * @FP_DEVICE_ERROR_REMOVED: The device has been removed.
+  * @FP_DEVICE_ERROR_TOO_HOT: The device might be getting too hot
++ * @FP_DEVICE_ERROR_LOCKED_OUT: The device refuses to match after too many
++ *   failed attempts, until the user authenticates another way, such as with
++ *   a password
+  *
+  * Error codes for device operations. More specific errors from other domains
+  * such as #G_IO_ERROR or #G_USB_DEVICE_ERROR may also be reported.
+@@ -161,6 +164,7 @@ typedef enum {
+   /* Leave some room to add more DATA related errors */
+   FP_DEVICE_ERROR_REMOVED = 0x100,
+   FP_DEVICE_ERROR_TOO_HOT,
++  FP_DEVICE_ERROR_LOCKED_OUT,
+ } FpDeviceError;
+ 
+ GQuark fp_device_retry_quark (void);
+diff --git a/libfprint/fpi-device.c b/libfprint/fpi-device.c
+index a70db5c..0509edf 100644
+--- a/libfprint/fpi-device.c
++++ b/libfprint/fpi-device.c
+@@ -274,6 +274,10 @@ fpi_device_error_new (FpDeviceError error)
+       msg = "Device disabled to prevent overheating.";
+       break;
+ 
++    case FP_DEVICE_ERROR_LOCKED_OUT:
++      msg = "Too many failed attempts; authenticate with your password to use the fingerprint again.";
++      break;
++
+     default:
+       g_warning ("Unsupported error, returning general error instead!");
+       error = FP_DEVICE_ERROR_GENERAL;
