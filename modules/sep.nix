@@ -24,6 +24,9 @@ in {
       # Explicit service loading waits for /var and per-machine firmware. This only
       # suppresses early alias loading; the boot timer enables SEP on the real root.
       boot.blacklistedKernelModules = [ "apple_sep" ];
+      # The driver's defaults. Named to sort before aurora-sep.conf and
+      # nixos.conf, so a read-only setting in either comes later and wins.
+      environment.etc."modprobe.d/aurora-sep-defaults.conf".source = ../sep/aurora-sep-modprobe.conf;
       # aurora-xart reset-touchid starts Touch ID over when its keybag is stuck.
       environment.systemPackages = [ pkgs.aurora-sep pkgs.aurora-xart pkgs.libfprint ];
       services.fprintd.enable = true;

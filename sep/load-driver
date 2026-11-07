@@ -37,7 +37,9 @@ if [ "${AURORA_SEP_SESSION:-0}" != 1 ]; then
     exec keyctl session aurora-sep-load env AURORA_SEP_SESSION=1 "$0" "$@"
 fi
 
-modprobe apple_sep xart_writes=1 provision_keybag=1
+# Options come from modprobe.d, where /etc/modprobe.d/aurora-sep.conf replaces
+# the packaged defaults. Options given here would override both.
+modprobe apple_sep
 
 work=$(mktemp -d /run/aurora-sep-load.XXXXXX)
 cleanup() {
