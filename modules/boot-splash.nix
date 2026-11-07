@@ -36,6 +36,26 @@ let
     ${udevadm} trigger --action=add --subsystem-match=drm --settle
   '';
 in {
+  # The spinner needs no ACPI BGRT logo and runs in the systemd initrd.
+  boot.plymouth.enable = lib.mkDefault (config.aurora.desktop != "minimal");
+  boot.plymouth.package = lib.mkDefault pkgs.plymouth;
+  boot.plymouth.theme = lib.mkDefault "spinner";
+
+  # Plasma Login, like GDM, owns the splash until its greeter starts. Its
+  # display-manager.service is an alias, not a second service definition.
+  systemd.services.plasmalogin = lib.mkIf (config.services.displayManager.plasma-login-manager.enable && config.boot.plymouth.enable) {
+    conflicts = [ "plymouth-quit.service" ];
+    after = [ "plymouth-start.service" ];
+    onFailure = [ "plymouth-quit.service" ];
+    serviceConfig.ExecStartPre = [
+      "-${pkgs.coreutils}/bin/timeout --kill-after=2 20 ${lib.getExe' config.boot.plymouth.package "plymouth"} quit"
+    ];
+  };
+  # Starting this unit during a switch would stop the display manager.
+  systemd.services.plymouth-quit = lib.mkIf (config.services.displayManager.plasma-login-manager.enable && config.boot.plymouth.enable) {
+    wantedBy = lib.mkForce [ ];
+  };
+
   boot.loader.grub.font = lib.mkDefault null;
   # grub.nix sets its NixOS wallpaper with mkDefault, so a plain mkDefault
   # null would conflict with it; one step stronger still loses to a

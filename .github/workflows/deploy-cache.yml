@@ -10,7 +10,7 @@ on:
         type: boolean
         default: true
       allow-downgrade:
-        description: Allow a source pin to move backwards (rollback); requires stable-promotion approval
+        description: Allow cache, testing or source-pin rollback; requires stable-promotion approval
         type: boolean
         default: false
       dry-run:
@@ -79,14 +79,69 @@ jobs:
           name: channel-state
           path: channel-state.json
           retention-days: 30
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cache-site
+          path: site/
+          if-no-files-found: error
+          retention-days: 3
+
+  documentation:
+    # Build the current workflow checkout, independently of an older cache
+    # release selected for rollback. The site records its own source revision.
+    needs: approve
+    if: always() && (needs.approve.result == 'success' || needs.approve.result == 'skipped')
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+      - name: Build the option browser from this workflow revision
+        run: |
+          nix build --out-link documentation-site --print-build-logs .#checks.aarch64-linux.documentation-site
+          mkdir docs-site
+          cp -rL documentation-site/. docs-site/
+          test "$(cat docs-site/source-revision.txt)" = "$(git rev-parse HEAD)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: docs-site
+          path: docs-site/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+
+  compose:
+    needs: [assemble, documentation]
+    if: always() && needs.assemble.result == 'success' && needs.documentation.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cache-site
+          path: site
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: docs-site
+          path: documentation
+      - name: Assemble cache and documentation into one Pages site
+        run: python3 scripts/assemble-pages.py --site site --documentation documentation
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         if: ${{ !inputs.dry-run }}
         with:
           path: site
 
   deploy:
-    needs: assemble
-    if: always() && needs.assemble.result == 'success' && !inputs.dry-run
+    needs: compose
+    if: always() && needs.compose.result == 'success' && !inputs.dry-run
     runs-on: ubuntu-24.04
     environment:
       name: github-pages

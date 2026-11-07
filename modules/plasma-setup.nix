@@ -8,8 +8,9 @@
 # plasma-setup system user (/etc/plasmalogin.conf.d/99-plasma-setup.conf; it
 # picks that path because systemd reports plasmalogin.service enabled). That
 # session runs the wizard, which creates the owner (wheel) through its KAuth
-# helper, writes /etc/plasma-setup-done and logs out to the greeter. modules/firstboot.nix orders it after Aurora's disk
-# step. Accounts are found through /etc/login.defs (UID 1000-29999 on NixOS),
+# helper, writes /etc/plasma-setup-done and logs out to the greeter.
+# modules/firstboot.nix orders it after Aurora's desktop handoff. Accounts
+# are found through /etc/login.defs (UID 1000-29999 on NixOS),
 # so the nixbld build users (30001 and up) never count as an owner.
 let
   cfg = config.aurora.plasmaSetup;
@@ -19,7 +20,11 @@ in {
     type = lib.types.bool;
     default = config.aurora.desktop == "kde" && config.aurora.imageLayout != null;
     defaultText = lib.literalExpression ''config.aurora.desktop == "kde" && config.aurora.imageLayout != null'';
-    description = "Create the owner account at first boot with Plasma Setup.";
+    description = ''
+      Create the first owner account with Plasma Setup.
+      Requires Plasma Login Manager and mutable users. False omits this setup
+      integration without disabling KDE or removing existing accounts.
+    '';
   };
   config = lib.mkIf cfg.enable {
     assertions = [

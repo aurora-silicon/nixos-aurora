@@ -1,8 +1,11 @@
 import importlib.util
 import json
+import os
 import shutil
 from pathlib import Path
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -13,7 +16,7 @@ spec.loader.exec_module(validator)
 COMMIT = 'c208afc352e9d4c10ee71c883a369a9079dd7d84'
 
 
-class PayloadValidationTests(unittest.TestCase):
+class PayloadFixture:
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -36,6 +39,8 @@ class PayloadValidationTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(value.encode() if isinstance(value, str) else value)
 
+
+class PayloadValidationTests(PayloadFixture, unittest.TestCase):
     def test_complete_payload(self):
         validator.validate_payload(self.root, COMMIT)
 
@@ -74,13 +79,13 @@ class PayloadValidationTests(unittest.TestCase):
             validator.validate_payload(self.root, COMMIT)
 
 
-class RepositoryValidationTests(PayloadValidationTests):
+class RepositoryValidationTests(PayloadFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
         self.repo = self.root.parent / (self.root.name + '-repo')
         self.repo.mkdir()
         self.addCleanup(shutil.rmtree, self.repo)
-        for branch in validator.BRANCHES:
+        for branch in validator.supported_branches():
             tree = self.repo / branch
             shutil.copytree(self.root, tree / 'files')
             (tree / 'metadata').write_text(
@@ -95,6 +100,35 @@ class RepositoryValidationTests(PayloadValidationTests):
 
     def test_both_complete_branches(self):
         self.validate_repo()
+
+    def test_standalone_validator_uses_the_explicit_runtime_lock(self):
+        script = self.root / 'validate.py'
+        shutil.copyfile(validator.__file__, script)
+        # Nix copies these scripts independently; no sibling lock file exists.
+        lock = self.root / 'runtimes.json'
+        lock.write_text((ROOT / 'flatpak-gl/sdk-lock.json').read_text())
+        ostree = self.root / 'ostree'
+        ostree.write_text(f'#!{sys.executable}\n'
+                          'import pathlib, shutil, sys\n'
+                          'repo = pathlib.Path(sys.argv[1].split("=", 1)[1])\n'
+                          'shutil.copytree(repo / sys.argv[-2].rsplit("/", 1)[1], sys.argv[-1])\n')
+        ostree.chmod(0o755)
+        result = subprocess.run([sys.executable, str(script), '--repo', str(self.repo),
+                                 '--commit', COMMIT, '--sdk-lock', str(lock)],
+                                env={**os.environ, 'PATH': str(self.root) + os.pathsep + os.environ['PATH']},
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_runtime_list_is_read_from_the_supplied_lock(self):
+        lock = self.root / 'runtimes.json'
+        lock.write_text(json.dumps({'27.08': {'refs': {}}}))
+        self.assertEqual(validator.supported_branches(lock), ('27.08',))
+
+    def test_empty_runtime_policy_cannot_skip_payload_validation(self):
+        lock = self.root / 'runtimes.json'
+        lock.write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'at least one runtime'):
+            validator.supported_branches(lock)
 
     def test_missing_library_in_second_branch(self):
         (self.repo / '26.08/files/lib/libEGL_mesa.so.0').unlink()

@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,7 @@ def load(name, path):
 
 
 check_stage2 = load('check_stage2', ROOT / 'scripts/check-stage2.py')
+prepare_stage2 = load('prepare_stage2', ROOT / 'scripts/prepare-stage2.py')
 follow_channel = load('follow_channel', ROOT / 'scripts/follow-channel.py')
 
 
@@ -75,6 +77,64 @@ class CheckStage2Tests(unittest.TestCase):
                 check_stage2.check(image, aura, required)
 
 
+class PrepareStage2Tests(unittest.TestCase):
+    def prepare(self, image):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        combined, aura, output = root / 'combined', root / 'aura', root / 'boards'
+        combined.write_bytes(image)
+        aura.write_bytes(b'AURA-STAGE2-BINARY')
+        manifest = prepare_stage2.prepare(combined, aura, output)
+        return manifest, output
+
+    def test_board_payloads_preserve_options_and_pass_the_same_validator(self):
+        options = b'chosen.bootargs=quiet\ndisplay=auto\nmitigations=off\n'
+        image = stage2(options=options)
+        manifest, output = self.prepare(image)
+        self.assertEqual(set(manifest['boards']), {'j274ap', 'j700ap'})
+        self.assertEqual(manifest['deviceTreeCount'], 2)
+        for board in ('j274', 'j700'):
+            payload = (output / f'boot-{board}.bin').read_bytes()
+            checked = check_stage2.check(payload, b'AURA-STAGE2-BINARY', [board])
+            self.assertEqual(checked['boards'], [f'apple,{board}'])
+            self.assertEqual(checked['options'], options.decode().splitlines())
+            self.assertTrue(payload.endswith(options))
+
+    def test_checker_and_preparer_refuse_malformed_inputs(self):
+        aura = b'AURA-STAGE2-BINARY'
+        broken_tree = bytearray(device_tree('apple,j700'))
+        # Property name outside the strings block.
+        struct.pack_into('>I', broken_tree, 56, 0xffffffff)
+        images = [
+            stage2(options=b'\0binary'),
+            stage2() + gzip.compress(b'second member'),
+            stage2()[:-4],
+            aura + bytes(broken_tree) + gzip.compress(b'u-boot'),
+            aura + b'\xd0\x0d\xfe\xed',
+        ]
+        for image in images:
+            with self.subTest(image=image[-24:]):
+                with self.assertRaises(ValueError):
+                    check_stage2.check(image, aura)
+                with self.assertRaises(ValueError):
+                    self.prepare(image)
+
+    def test_checker_and_preparer_bound_uncompressed_next_stage(self):
+        aura = b'AURA-STAGE2-BINARY'
+        def image(size):
+            return aura + device_tree('apple,j700') + gzip.compress(b'x' * size)
+        # A small budget keeps the compressed input below the limit while
+        # exercising both the exact decompressed boundary and an overrun.
+        with patch('stage2.MAX_BYTES', 512):
+            self.assertEqual(check_stage2.check(image(512), aura)['ubootBytes'], 512)
+            self.prepare(image(512))
+            for operation in (lambda: check_stage2.check(image(513), aura),
+                              lambda: self.prepare(image(513))):
+                with self.assertRaisesRegex(ValueError, 'Uncompressed U-Boot size'):
+                    operation()
+
+
 @unittest.skipUnless(shutil.which('bash') and shutil.which('sha256sum'), 'bash and coreutils are required')
 class InstallStage2Tests(unittest.TestCase):
     def setUp(self):
@@ -109,13 +169,13 @@ class InstallStage2Tests(unittest.TestCase):
         path.write_text('#!/usr/bin/env bash\n' + script)
         path.chmod(0o755)
 
-    def run_install(self):
+    def run_install(self, device_tree=None):
         state = self.state
         self.stub('mountpoint', f'exit {0 if state["mounted"] == "1" else 1}\n')
         self.stub('findmnt', 'case " $* " in *FSTYPE*) echo ' + state['fstype'] + ';; *SOURCE*) echo /dev/fake1;; esac\n')
         self.stub('lsblk', f'echo {state["partuuid"]}\n')
         env = dict(os.environ, PATH=f'{self.stubs}:{os.environ["PATH"]}',
-                   AURORA_DEVICE_TREE_ESP=str(self.device_tree))
+                   AURORA_DEVICE_TREE_ESP=str(device_tree or self.device_tree))
         return subprocess.run(['bash', str(INSTALL), str(self.source), str(self.esp)], env=env,
                               capture_output=True, text=True)
 
@@ -151,6 +211,15 @@ class InstallStage2Tests(unittest.TestCase):
         self.assertEqual(self.run_install().returncode, 0)
         self.assertEqual(self.target.read_bytes(), stage2())
         self.assertFalse((self.esp / 'm1n1/boot.bin.old').exists())
+
+    def test_image_assembly_checks_the_image_partition_not_the_build_hosts_esp(self):
+        self.device_tree.write_bytes(b'ffff-0000\0')
+        self.assert_untouched(self.run_install())
+        image_record = self.source / 'image-esp-partuuid'
+        image_record.write_text(self.state['partuuid'] + '\n')
+        result = self.run_install(device_tree=image_record)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.target.read_bytes(), stage2())
 
     def test_missing_or_mismatched_inputs_are_refused(self):
         (self.source / 'boot.bin.sha256').write_text('0' * 64 + '\n')

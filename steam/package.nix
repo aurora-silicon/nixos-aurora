@@ -1,13 +1,19 @@
 # Aurora's steam-unwrapped: the aurora-steam-native launcher for Valve's
 # native ARM64 Linux client, wrapped by nixpkgs' steam FHS environment.
 # The first start installs Valve's client for the user from Valve's CDN.
-{ lib, stdenvNoCC, bash, python3, aurora-userpages, desktop-file-utils, src, commit }:
+{ lib, stdenvNoCC, bash, python3, aurora-userpages, desktop-file-utils
+, gtk4, libadwaita, wrapGAppsHook4, gobject-introspection, makeWrapper, src, commit }:
+let
+  playPython = python3.withPackages (p: [ p.pygobject3 ]);
+in
 stdenvNoCC.mkDerivation {
   pname = "steam-unwrapped";
   version = "0-aurora-${builtins.substring 0 7 commit}";
   inherit src;
-  nativeBuildInputs = [ desktop-file-utils ];
-  buildInputs = [ bash python3 ];
+  nativeBuildInputs = [ desktop-file-utils wrapGAppsHook4 gobject-introspection makeWrapper ];
+  patches = [ ./aurora-play-nixos.patch ];
+  dontWrapGApps = true;
+  buildInputs = [ bash python3 gtk4 libadwaita ];
   nativeCheckInputs = [ python3 ];
   postPatch = ''
     find . -name __pycache__ -prune -exec rm -rf {} +
@@ -16,6 +22,7 @@ stdenvNoCC.mkDerivation {
       --replace-fail 'exec "$AURORA_USERPAGES_LAUNCHER" 4k /bin/bash -c' \
                      'exec "$AURORA_USERPAGES_LAUNCHER" 4k ${bash}/bin/bash -c'
     patchShebangs --host bin libexec install-steam-arm64.py
+    sed -i '1c#!${playPython}/bin/python3' bin/aurora-play
     patchShebangs --build tests
     # The test's userpages stand-in is a bash script; the build sandbox has no /bin/bash.
     substituteInPlace tests/test-steam-native4k-launch-env.py --replace-fail '#!/bin/bash' '#!${bash}/bin/bash'
@@ -44,6 +51,15 @@ stdenvNoCC.mkDerivation {
       $out/share/icons/hicolor/scalable/apps/org.aurorasilicon.Play.svg
     runHook postInstall
   '';
+  preFixup = ''
+    wrapProgram $out/lib/aurora-steam-native/bin/aurora-play "''${gappsWrapperArgs[@]}"
+  '';
+  doInstallCheck = true;
+  installCheckPhase = ''
+    runHook preInstallCheck
+    HOME="$TMPDIR/play-home" $out/bin/aurora-play --help > /dev/null
+    runHook postInstallCheck
+  '';
   doCheck = true;
   checkPhase = ''
     runHook preCheck
@@ -51,6 +67,8 @@ stdenvNoCC.mkDerivation {
     for t in tests/test-steam-native4k-launch-env.py tests/test-offline-installer.py tests/test-aurora-play-settings.py; do
       python3 -I "$t"
     done
+    python3 ${./test-play.py} bin/aurora-play
+    python3 ${./test-installer.py} install-steam-arm64.py
     runHook postCheck
   '';
   passthru = { inherit commit; };

@@ -69,6 +69,34 @@ class SteamWrapperTests(unittest.TestCase):
                 )
                 self.assertEqual(lines[1], "argument with spaces")
 
+    def test_nixos_bootstrap_uses_system_launchers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home, lib = root / 'home', root / 'lib'
+            home.mkdir()
+            (lib / 'bin').mkdir(parents=True)
+            bash = shutil.which('bash')
+            userpages = root / 'userpages'
+            userpages.write_text(f'#!{bash}\nshift; exec "$@"\n')
+            userpages.chmod(0o755)
+            (lib / 'bin/steam-native4k').write_text(f'#!{bash}\nexit 0\n')
+            (lib / 'bin/steam-native4k').chmod(0o755)
+            (lib / 'install-steam-arm64.py').write_text(
+                'import os\nfrom pathlib import Path\n'
+                'assert os.environ["AURORA_SYSTEM_LAUNCHERS"] == "1"\n'
+                'p = Path.home() / ".steam/root/steamrtarm64"\n'
+                'p.mkdir(parents=True)\n'
+                '(p / "steam").write_text("fixture")\n')
+            wrapper = root / 'steam'
+            wrapper.write_text((ROOT / 'steam/steam').read_text()
+                .replace('@LIBDIR@', str(lib)).replace('@USERPAGES@', str(userpages))
+                .replace('@USER4K_HINT@', 'fixture'))
+            env = {**os.environ, 'HOME': str(home), 'USER': 'fixture'}
+            env.pop('AURORA_STEAM_ROOT', None)
+            env.pop('AURORA_USERPAGES_LAUNCHER', None)
+            result = subprocess.run([bash, str(wrapper)], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,20 +6,15 @@ This is an unsigned, build-local import. It neither publishes a binary cache
 nor admits a pull-request artifact to the signed cache publication workflow.
 """
 import argparse
-import importlib.util
 import json
 from pathlib import Path
 import re
 import subprocess
-import tempfile
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('cache_inputs', ROOT / 'scripts/collect-cache-inputs.py')
-cache_inputs = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(cache_inputs)
-spec = importlib.util.spec_from_file_location('image_closure', ROOT / 'scripts/verify-image-closure.py')
-image_closure = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(image_closure)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cache_inputs  # noqa: E402
 REPOSITORY = cache_inputs.REPOSITORY
 
 
@@ -62,55 +57,44 @@ def import_build(commit, packages):
         if listing['total_count'] > 100:
             raise ValueError('Unexpected artifact matrix size')
         for artifact in cache_inputs.newest_per_name(listing['artifacts']):
-            available.setdefault(artifact['name'], (run['id'], run['head_sha'], artifact))
+            if not artifact['expired']:
+                available.setdefault(artifact['name'], []).append((run['id'], run['head_sha'], artifact))
     for package in packages:
         if package == 'fex-mesa' and guest_available:
             continue
-        found = available.get('nix-' + package + '-closure')
-        if found is None:
+        candidates = available.get('nix-' + package + '-closure', [])
+        if not candidates:
             if package == 'fex-mesa':
                 raise ValueError('Build and attest fex-mesa for this commit before building its ARM image')
             # Native outputs may come from the signed cache or a normal Nix
             # source build. Candidate imports merely avoid repeated work.
             print(f'{package}: using standard Nix substitution or source build')
             continue
-        run_id, source_commit, artifact = found
-        if artifact['expired'] or artifact['size_in_bytes'] > 2 * 1024**3:
-            raise ValueError(f'{package}: bounded build artifact unavailable')
-        with tempfile.TemporaryDirectory(prefix='aurora-image-input-') as temporary:
-            staging = Path(temporary)
-            archive = staging / 'artifact.zip'
-            with archive.open('xb') as stream:
-                subprocess.run(['gh', 'api', f'repos/{REPOSITORY}/actions/artifacts/{artifact["id"]}/zip'],
-                               stdout=stream, check=True)
-            if 'sha256:' + cache_inputs.digest(archive) != artifact['digest']:
-                raise ValueError(f'{package}: artifact digest mismatch')
-            cache_inputs.verify_attestation(archive, source_commit)
-            # Reuse the publication tools' traversal, symlink, size and space gates.
-            cache_inputs.unpack(archive, staging / 'unpacked')
-            source = staging / 'unpacked'
-            build = json.loads((source / 'build.json').read_text())
-            if not cache_inputs.current_build(build, expected[package]):
-                if package == 'fex-mesa':
-                    raise ValueError('Build the current fex-mesa derivation before building its ARM image')
-                print(f'{package}: ignoring a stale candidate; using standard Nix substitution or source build')
-                continue
-            cache = source / 'cache'
-            if not set(expected[package]['outputs']) <= cache_inputs.store_paths(cache):
-                raise ValueError(f'{package}: cache omits a declared output')
-            subprocess.run(['nix', 'store', 'verify', '--store', cache.as_uri(), '--all', '--no-trust'], check=True)
-            hashes = image_closure.nar_hashes(json.loads(subprocess.check_output([
-                'nix', 'path-info', '--store', cache.as_uri(), '--json', '--recursive',
-                *expected[package]['outputs'],
-            ], text=True)))
-            if not hashes.keys() <= cache_inputs.store_paths(cache):
-                raise ValueError('An authenticated closure contains an unverified NAR')
-            if any(path in admitted_hashes and admitted_hashes[path] != value for path, value in hashes.items()):
-                raise ValueError('Conflicting authenticated NAR identities')
-            subprocess.run(['nix', 'copy', '--no-check-sigs', '--from', cache.as_uri(), *expected[package]['outputs']], check=True)
-            admitted_hashes.update(hashes)
-            proofs.append({'package': package, 'run': run_id, 'source_commit': source_commit, 'artifact': artifact['id'],
-                           'artifact_digest': artifact['digest'], 'expected': expected[package]})
+        imported = False
+        for run_id, source_commit, artifact in candidates:
+            with cache_inputs.authenticated_artifact(artifact, source_commit) as source:
+                verified = cache_inputs.verified_cache(source, expected[package])
+                if verified is None:
+                    continue
+                _, cache, paths = verified
+                hashes = cache_inputs.nar_hashes(json.loads(subprocess.check_output([
+                    'nix', 'path-info', '--store', cache.as_uri(), '--json', '--recursive',
+                    *expected[package]['outputs'],
+                ], text=True)))
+                if not hashes.keys() <= paths:
+                    raise ValueError('An authenticated closure contains an unverified NAR')
+                if any(path in admitted_hashes and admitted_hashes[path] != value for path, value in hashes.items()):
+                    raise ValueError('Conflicting authenticated NAR identities')
+                subprocess.run(['nix', 'copy', '--no-check-sigs', '--from', cache.as_uri(), *expected[package]['outputs']], check=True)
+                admitted_hashes.update(hashes)
+                proofs.append({'package': package, 'run': run_id, 'source_commit': source_commit, 'artifact': artifact['id'],
+                               'artifact_digest': artifact['digest'], 'expected': expected[package]})
+                imported = True
+                break
+        if not imported:
+            if package == 'fex-mesa':
+                raise ValueError('Build the current fex-mesa derivation before building its ARM image')
+            print(f'{package}: no current candidate; using standard Nix substitution or source build')
     return {'schema': 1, 'commit': commit, 'inputs': proofs, 'narHashes': admitted_hashes}
 
 

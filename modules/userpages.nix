@@ -4,9 +4,10 @@
     type = lib.types.bool;
     default = true;
     description = ''
-      Per-process 4K userspace pages: user4k=on on the kernel command line and
-      the userpages launcher (userpages 4k COMMAND). Turn them off with this
-      option, or with boot.kernelParams = [ "user4k=off" ].
+      Add `user4k=on` first on the kernel command line and install the
+      `userpages` launcher (`userpages 4k COMMAND`). False omits both.
+      `boot.kernelParams = [ "user4k=off" ];` overrides the boot selection
+      while retaining the launcher. Kernel-command-line changes need a reboot.
     '';
   };
   config = lib.mkIf config.aurora.userpages.enable {

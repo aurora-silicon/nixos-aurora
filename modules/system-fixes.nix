@@ -18,12 +18,20 @@ in {
   options.aurora.systemFixes.malcontentSignal = lib.mkOption {
     type = lib.types.bool;
     default = true;
-    description = "Allow malcontent's optional daemons to handle SIGTERM and stop promptly.";
+    description = ''
+      Add the signal-handling and exit-status drop-ins for malcontent's optional
+      daemons. This does not start or install absent daemons; false omits the
+      drop-ins and retains their packaged behavior.
+    '';
   };
   options.aurora.systemFixes.nmDispatcherPersist = lib.mkOption {
     type = lib.types.bool;
     default = true;
-    description = "Keep NetworkManager's dispatcher running until NetworkManager has stopped.";
+    description = ''
+      Run NetworkManager's dispatcher with `--persist` and stop it after
+      NetworkManager, avoiding failed event activation during shutdown. Used
+      only when NetworkManager is enabled; false retains its packaged lifecycle.
+    '';
   };
   config = lib.mkMerge [
     (lib.mkIf config.aurora.systemFixes.malcontentSignal {

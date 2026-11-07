@@ -39,7 +39,7 @@ def main():
     previous = None
     changed_paths = []
     before = event.get('before', '')
-    if not requested:
+    if not requested and os.environ['GITHUB_EVENT_NAME'] != 'workflow_dispatch':
         if (os.environ['GITHUB_EVENT_NAME'] == 'pull_request'
                 or os.environ.get('GITHUB_REF', '').startswith('refs/heads/ci/')
                 or not before.strip('0')):

@@ -25,7 +25,11 @@ in {
     type = lib.types.bool;
     default = config.aurora.desktop == "gnome" && config.aurora.imageLayout != null;
     defaultText = lib.literalExpression ''config.aurora.desktop == "gnome" && config.aurora.imageLayout != null'';
-    description = "Create the owner account at first boot with GNOME Initial Setup.";
+    description = ''
+      Create the first owner account with GNOME Initial Setup.
+      Requires GDM and mutable users. False omits Aurora's setup
+      integration without disabling GNOME or removing existing accounts.
+    '';
   };
   config = lib.mkIf cfg.enable {
     assertions = [
