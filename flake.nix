@@ -47,6 +47,7 @@
         plymouth = pkgs.plymouth;
         plymouth-theme-aurora = pkgs.plymouth-theme-aurora;
         firstboot = pkgs.aurora-firstboot;
+        power-budget = pkgs.aurora-power-budget;
         docker = pkgs.docker;
         sep = pkgs.aurora-sep;
         libfprint = pkgs.libfprint;

@@ -26,9 +26,22 @@ with `schedutil` and removing inherited boost writes. Stock tuned per-policy
 boost writes also fail with EINVAL on M2. That tuned-specific migration does
 not apply to PPD here.
 
-Power Saver remains unchanged. Meaningful Apple power saving needs a qualified
-package-power budget policy; do not approximate it with arbitrary frequency
-caps, and do not map Performance to the `performance` governor.
+## Power Saver
+
+Power Saver gets a CPU power budget from `aurora-power-budget`, built from
+[aurora-platform](https://github.com/aurora-silicon/aurora-platform/blob/main/power/README.md)
+and packaged here as `pkgs.aurora-power-budget` with the `aurora.powerBudget.enable` option (default: on wherever power-profiles-daemon is enabled).
+Like macOS Low Power Mode it is a short-window
+budget, not a fixed frequency table: while the profile daemon reports
+`power-saver`, every 100 ms the budget (the device tree energy model's power
+for every CPU at 0.6 x its cluster maximum) is spent on the frequency steps
+that buy the most CPU capacity per milliwatt, and each cluster is capped with
+`scaling_max_freq`. Thermal limits still win; the governor stays `schedutil`;
+light and single-threaded work is not capped. Balanced and Performance are
+untouched, and outside Power Saver the daemon only waits on D-Bus. The GPU,
+ANE, display and fan legs of Low Power Mode are not covered yet. Measurements
+are in the aurora-platform README. Performance is still never mapped to the
+`performance` governor.
 
 ## PWR acceptance plan
 

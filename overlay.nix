@@ -204,6 +204,7 @@ in {
     '';
   });
   aurora-firstboot = final.callPackage ./firstboot.nix { };
+  aurora-power-budget = final.callPackage ./power-budget.nix { };
   aurora-avd-firmware = final.callPackage ./avd-fw.nix {
     src = source "avd-fw";
     version = pins.avd-fw.version;
