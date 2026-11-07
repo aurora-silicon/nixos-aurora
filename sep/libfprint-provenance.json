@@ -1,14 +1,15 @@
 {
   "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
-  "commit": "213995241550b43de44b088baf45c97fb2d09d20",
+  "commit": "95776d69d1191e2b04a1b1db81cf88024ca2a393",
   "files": {
     "0004-aurora-refuse-unbound-enrollment.patch": "55793f885982b140beb5fc1b2ade65190a5bc73762369935327155eb7190c6b8",
     "0005-aurora-support-v4-and-v5.patch": "8024015e227ad9172dd5eec2fbe128e6c32f7621571c49f869386123cc08585d",
-    "apple-sep.h": "798c6e41a158453f5acff901c3e36d7d4ee29f43ffe3f72aac046e8b252ee62c",
+    "apple-sep.h": "3f1a5f3b23f1cdcca14e7e4b788d256daa671166fe17646c06dae01afe6bd39a",
     "test_interface.py": "73b95e4c39a2fe8c5496cd38545cc67df20c89cc1a88fc3aedf216e997b41da4",
     "libfprint-1.94.100-apple-sep.patch": "55aef4a2019568a13aea48064ed83858a7ce4902636f8e85e46877ce9d8ef172",
     "0002-aurora-report-unusable-captures-as-retries.patch": "6a594471084ce5d6e65e3edaccc7f10a62dd3bb1cfc2bcdfa6b3f2357906620a",
     "0003-hide-lid-covered-readers-while-the-lid-is-closed.patch": "58b3ec841207942bd48819a8e91a8cc7992e5ffae34285b7e9d3617c2750043f",
-    "0006-aurora-report-finger-lift-and-lockout.patch": "ab7883751d087e11f192a18f8744500eb271de6b7737837c7da398ddb11da246"
+    "0006-aurora-report-finger-lift-and-lockout.patch": "ab7883751d087e11f192a18f8744500eb271de6b7737837c7da398ddb11da246",
+    "0007-aurora-name-retry-causes-and-keep-waiting.patch": "e14bc4fb3a63ee28d3418d7c7e4823d3bd86e9da784f6e34fd2bef8b11a5f510"
   }
 }
