@@ -50,6 +50,9 @@ in {
     systemd.services.speakerguardd-v2-provision.path = tools;
     systemd.services.speakerguardd-v2-selfcheck.path = tools;
     systemd.services.speakerguardd-v2-seat.path = tools;
+    # Before every sleep: the amps unlinked and the supervisor stopped while
+    # awake; after the resume it starts again and grants.
+    systemd.services.speakerguardd-v2-sleep = { wantedBy = [ "sleep.target" ]; path = tools; };
     systemd.paths.speakerguardd-v2-seat.wantedBy = [ "multi-user.target" ];
     systemd.user.services.speakerguardd-v2-graph = { wantedBy = [ "pipewire.service" ]; path = tools; };
     systemd.user.services.speakerguardd-v2-session = { wantedBy = [ "pipewire.service" ]; path = tools; };

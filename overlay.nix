@@ -536,7 +536,7 @@ in {
     # The crates this package ships; the rig and benchmark crates stay out.
     crates = [ "-p" "sgv2-core" "-p" "sgv2-lv2" "-p" "sgv2-supervisor" "-p" "aurora-speaker-tuning" ];
     units = [ "speakerguardd.service" "speakerguardd-provision.service" "speakerguardd-selfcheck.service"
-              "speakerguardd-seat.service" "speakerguardd-seat.path" ];
+              "speakerguardd-seat.service" "speakerguardd-seat.path" "speakerguardd-sleep.service" ];
     userUnits = [ "speakerguardd-session.service" "speakerguardd-graph.service" ];
   in rustPackage "speakerguardd-v2" ./locks/speakerguardd-v2.Cargo.lock {
     cargoBuildFlags = crates;
@@ -592,7 +592,9 @@ in {
       grep -qx 'Requires=speakerguardd-v2-provision.service' $sd/speakerguardd-v2-selfcheck.service
       grep -qx "ExecStart=$lx/speakerguardd-provision seat --unit speakerguardd-v2.service" $sd/speakerguardd-v2-seat.service
       grep -qx "ExecStartPost=$lx/speakerguardd-provision activate --graph-unit speakerguardd-v2-graph.service" $sd/speakerguardd-v2-selfcheck.service
-      for u in speakerguardd-v2 speakerguardd-v2-provision speakerguardd-v2-selfcheck speakerguardd-v2-seat; do
+      grep -qx "ExecStart=$lx/speakerguardd-provision sleep --unit speakerguardd-v2.service" $sd/speakerguardd-v2-sleep.service
+      grep -qx "ExecStop=$lx/speakerguardd-provision wake --unit speakerguardd-v2.service" $sd/speakerguardd-v2-sleep.service
+      for u in speakerguardd-v2 speakerguardd-v2-provision speakerguardd-v2-selfcheck speakerguardd-v2-seat speakerguardd-v2-sleep; do
         grep -qx "ExecCondition=$lx/speakerguardd-gate v2" $sd/$u.service
       done
       if grep -Eq '^(OnFailure|OnSuccess)=|speakersafetyd|=speakerguardd\.service|/usr/' \
