@@ -8,12 +8,14 @@ which exposes these names to libva:
 ```text
 /run/opengl-driver/lib/dri/v4l2_request_drv_video.so
 /run/opengl-driver/lib/dri/asahi_drv_video.so -> v4l2_request_drv_video.so
+/run/opengl-driver/lib/dri/aurora_drv_video.so -> v4l2_request_drv_video.so
 ```
 
-The relative alias makes normal render-node discovery select the driver. The
-module sets no global `LIBVA_DRIVER_NAME`, browser preference, permission rule,
-or sandbox exception. It supersedes the older opt-in package supplied by the
-Apple-silicon module without enabling that module's global driver override.
+The relative aliases cover the older and current render-node driver names, so
+normal discovery selects the driver. The module sets no global
+`LIBVA_DRIVER_NAME`, browser preference, permission rule, or sandbox exception.
+It supersedes the older opt-in package supplied by the Apple-silicon module
+without enabling that module's global driver override.
 
 Validate with `env -u LIBVA_DRIVER_NAME vainfo --display drm`. For licensed
 H.264, HEVC, VP9 and AV1 clips, compare `ffmpeg -hwaccel vaapi` frame MD5 output

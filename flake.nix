@@ -81,6 +81,7 @@
         fex-mesa = pkgs.aurora-fex-mesa;
         flatpak-gl = pkgs.aurora-flatpak-gl;
         speakerguardd = pkgs.speakerguardd;
+        speakerguardd-v2 = pkgs.speakerguardd-v2;
         mutter = pkgs.mutter;
         speakersafetyd = pkgs.speakersafetyd;
         bankstown = pkgs.bankstown-lv2;
@@ -104,6 +105,57 @@
             && lib.hasInfix "After=var-swap-swapfile.swap" unit.text) profiles;
       in assert lib.assertMsg valid "Aurora clean-boot packaging parity failed";
         pkgs.runCommandNoCC "aurora-clean-boot-defaults" { } "touch $out";
+
+      # speakerguardd 1.0 is installed on every Mac with the fleet gate on both
+      # stacks; enable = false removes it and its gate.
+      speakerguardd-v2-gated = let
+        inherit (nixpkgs) lib;
+        probe = extra: ((makeSystem "minimal").extendModules { modules = [ extra ]; }).config;
+        on = probe { };
+        off = probe { aurora.speakerguardd.v2.enable = false; };
+        # The system's own build: its nixpkgs instance is not the flake's
+        # pkgs, so the store paths differ.
+        pkg = c: c.aurora.speakerguardd.v2.package;
+        has = c: (pkg c).pname == "speakerguardd-v2"
+          && builtins.elem (pkg c) c.environment.systemPackages
+          && builtins.elem (pkg c) c.systemd.packages;
+        unit = c: name: c.systemd.units.${name} or { enable = true; wantedBy = [ ]; text = ""; };
+        wanted = c: name: builtins.elem "multi-user.target" (unit c name).wantedBy;
+        # A plain string: hasInfix cannot take a pattern that refers to a
+        # store path.
+        gate = builtins.unsafeDiscardStringContext "${pkg on}/libexec/speakerguardd-v2/speakerguardd-gate legacy";
+        gated = c: name: lib.hasInfix "ExecCondition=${gate}" (unit c "${name}.service").text;
+      in assert lib.assertMsg (has on) "speakerguardd 1.0 must be installed by default";
+         assert lib.assertMsg (wanted on "speakerguardd-v2.service") "speakerguardd-v2.service must be wanted by multi-user.target";
+         assert lib.assertMsg (wanted on "speakerguardd-v2-seat.path") "speakerguardd-v2-seat.path must be wanted by multi-user.target";
+         assert lib.assertMsg ((unit on "speakersafetyd.service").enable && (unit on "speakerguardd.service").enable
+             && gated on "speakersafetyd" && gated on "speakerguardd")
+           "the older daemons must stay installed and enabled, behind the fleet gate";
+         assert lib.assertMsg (lib.hasInfix "use-feedback-guard" (unit on "speakersafetyd.service").text)
+           "the gate must not replace speakersafetyd's own ExecCondition";
+         assert lib.assertMsg (!has off && !wanted off "speakerguardd-v2.service"
+             && !gated off "speakersafetyd" && !gated off "speakerguardd")
+           "enable = false must remove speakerguardd 1.0 and its gate";
+         pkgs.runCommand "speakerguardd-v2-package-check" { } ''
+           p=${pkgs.speakerguardd-v2}
+           lx=$p/libexec/speakerguardd-v2
+           test -x $lx/speakerguardd
+           test -x $lx/speakerguardd-provision
+           test -x $lx/speakerguardd-gate
+           test -x $p/bin/aurora-speaker-tuning
+           test -f $p/lib/lv2/sgv2.lv2/manifest.ttl
+           test -f $p/lib/lv2/sgv2.lv2/libsgv2_lv2.so
+           test -f $p/share/speakerguardd/gate.json
+           grep -qx "ExecStart=$lx/speakerguardd \$SGV2_ARGS" $p/lib/systemd/system/speakerguardd-v2.service
+           grep -qx "ExecStart=$lx/speakerguardd-provision run" $p/lib/systemd/system/speakerguardd-v2-provision.service
+           test -f $p/lib/systemd/system/speakerguardd-v2-seat.path
+           test -f $p/lib/systemd/user/speakerguardd-v2-graph.service
+           grep -q "$p/share/speakerguardd/gate.json" $lx/speakerguardd-gate
+           test -f $lx/wiring.py
+           test ! -e $p/share/speakerguardd/machines.json
+           test ! -e $p/bin/speakerguardd
+           touch $out
+         '';
 
       ane-packaging = let
         firmware = pkgs.runCommand "ane-test-firmware" { } ''
