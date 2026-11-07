@@ -8,7 +8,7 @@ track the same merged content using each distribution's existing version scheme.
 | aurora-sep | 1-14 | 1-14 | 1.14 | Vendored integration from linux `7cc30f35ecea3e90ceedd44babbde128c1d487a6`, with the already merged Touch ID setup adaptations |
 | aurora-audio / asahi-audio | 4.1-7 | 4.1.aurora2-7 | 4.1-aurora7 | asahi-audio `d957fabbacbe7dd67b39f052b2ff21edea7ee038` |
 | speakerguardd | 0.1.12-1 | 0.1.12-1 | 0.1.12 | speakerguardd main `34aeed9085ad0f66cb8f266f997e11dd781470a6` |
-| speakerguardd-v2 (on every Mac beside speakerguardd; fleet gate: J274, J293, J313, J316s, J375C, J375D, J413, J473, J474s, J475C, J475D, J493, J616s on a v2 kernel) | 1.0.0~alpha.1-0.12.20261106git403b362efd09 | 1.0.0alpha.1-14 | 1.0.0-alpha.1 | speakerguardd v2 `403b362efd09f4481aca5e73cc827c3b2ddc6b09` |
+| speakerguardd-v2 (on every Mac beside speakerguardd; fleet gate: J274, J293, J313, J316s, J375C, J375D, J413, J473, J474s, J475C, J475D, J493, J616s on a v2 kernel) | 1.0.0~alpha.1-0.13.20261107git6d13c704202e | 1.0.0alpha.1-15 | 1.0.0-alpha.1 | speakerguardd v2 `6d13c704202e7aec7cbe552f6fc3612259a372c4` |
 
 Arch retains `4.1.aurora2` so this remains an upgrade from `4.1.aurora2-4`.
 Nix keeps the upstream audio version in sources.json and adds the Fedora
