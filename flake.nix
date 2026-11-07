@@ -250,7 +250,8 @@
                 patched = suffix: lib.any (patch: lib.hasSuffix suffix (toString patch)) (package.patches or [ ]);
               in package.doCheck
                 && patched "-1005-filter-graph-follow-plugin-latency-after-activation.patch"
-                && patched "-1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch";
+                && patched "-1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch"
+                && patched "-1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch";
               "PipeWire and WirePlumber use the pinned audio and UCM profiles" =
                 lib.elem value.pkgs.asahi-audio config.services.pipewire.configPackages
                 && lib.elem value.pkgs.asahi-audio config.services.pipewire.wireplumber.configPackages
