@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 18:39:55 +1100
+Subject: [PATCH] onscreen/native: Use variable refresh rate on the whole
+ desktop of built-in panels
+
+Variable refresh rate is only turned on while a fullscreen surface is on
+the view. That suits external monitors, many of which flicker or shift
+brightness when the refresh rate of a desktop changes. A built-in panel
+that offers variable refresh rate is made to run that way all the time,
+as a ProMotion style panel does on its own platform.
+
+With VRR_ENABLED off, the kernel driver of such a panel keeps its
+minimum refresh rate at the mode's nominal rate, so a window showing
+low frame rate content, such as a video playing at 30 fps, makes the
+panel repeat every frame at 120 Hz. With VRR_ENABLED on, the panel
+waits for the next frame instead.
+
+When a built-in output is in a variable refresh rate mode, keep variable
+refresh rate on for its whole desktop, not only for fullscreen surfaces.
+External outputs keep the fullscreen-only behaviour, and a built-in
+output in a fixed refresh rate mode stays fixed, so choosing the fixed
+mode in Settings still turns it off.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+---
+ src/backends/native/meta-onscreen-native.c | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/src/backends/native/meta-onscreen-native.c b/src/backends/native/meta-onscreen-native.c
+index a3b40df..b90a939 100644
+--- a/src/backends/native/meta-onscreen-native.c
++++ b/src/backends/native/meta-onscreen-native.c
+@@ -2396,8 +2396,22 @@ maybe_update_vrr (MetaOnscreenNative *onscreen_native,
+   MetaKmsUpdate *kms_update;
+   gboolean vrr_enabled = FALSE;
+ 
++  /*
++   * Variable refresh rate normally runs only while a fullscreen surface is
++   * on the view, as many external monitors flicker or shift brightness when
++   * the refresh rate of a desktop changes. A built-in panel in a variable
++   * refresh rate mode is made to run that way all the time: let its whole
++   * desktop use it, so the panel follows the frames of windows showing low
++   * frame rate content instead of repeating them at the nominal rate.
++   */
+   if (meta_output_is_vrr_enabled (onscreen_native->output))
+-    vrr_enabled = onscreen_native->vrr_allowed;
++    {
++      const MetaOutputInfo *output_info =
++        meta_output_get_info (onscreen_native->output);
++
++      vrr_enabled = onscreen_native->vrr_allowed ||
++                    meta_output_info_is_builtin (output_info);
++    }
+ 
+   if (vrr_enabled != onscreen_native->vrr_enabled)
+     {
+-- 
+2.50.1 (Apple Git-155)
+

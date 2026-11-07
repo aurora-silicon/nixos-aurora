@@ -454,10 +454,14 @@ in {
   # in BT.2100 mode mutter then keeps that backlight as the brightness control
   # and puts its reference white at the reported PQ level (PQ 100 cd/m² on
   # Apple's EDR panels) instead of 203 cd/m².
+  # A built-in panel in a variable refresh rate mode uses it on its whole
+  # desktop, not only for fullscreen surfaces, so an idle desktop lets the
+  # panel drop to its minimum rate.
   mutter = prev.mutter.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ map stableFile [
       ./patches/mutter-prefer-variable-refresh-rate.patch
       ./patches/mutter-pq-reference-luminance.patch
+      ./patches/mutter-builtin-desktop-vrr.patch
     ];
   });
   # nixpkgs exposes a symlink join here: overriding its src does not replace
