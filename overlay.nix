@@ -133,11 +133,6 @@ in {
         ./patches/kinfocenter-unknown-memory.patch
       ];
     });
-    powerdevil = kdePrev.powerdevil.overrideAttrs (old: {
-      patches = (old.patches or [ ]) ++ map stableFile [
-        ./patches/powerdevil-no-empty-keyboard-backlight.patch
-      ];
-    });
     # NixOS paths: the completion flag in /etc (not the package's etc), and the
     # system profile for the account helper's useradd, usermod and chpasswd.
     plasma-setup = kdePrev.plasma-setup.overrideAttrs (old: {
