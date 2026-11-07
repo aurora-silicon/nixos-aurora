@@ -2,9 +2,12 @@
 # An installed Aurora NixOS system (the image's /etc/nixos flake imports this).
 #
 # - Every bootloader install (nixos-rebuild switch or boot) refreshes the ESP
-#   Stage 2 exactly as update-m1n1 does on ALARM and Fedora: aura, every Apple
-#   device tree of the new kernel and U-Boot, written only when it changes,
-#   with the previous file kept as m1n1/boot.bin.old. Stage 1 is never written.
+#   Stage 2 exactly as update-m1n1 does on ALARM and Fedora: aura, the new
+#   kernel's Apple device trees and U-Boot, written only when it changes, with
+#   the previous file kept as .old. Every Mac gets m1n1/boot.bin with every tree
+#   until aura has no monitor. Then a Mac that boots a Mach-O Stage 1 gets
+#   m1n1/boot-ctxr.bin with its own board's trees, and its m1n1/boot.bin stays
+#   as it is. Stage 1 is never written.
 # - aurora-update takes the newest signed update of the channel /etc/nixos
 #   follows, in one command. Nothing upgrades unattended.
 let
@@ -23,6 +26,12 @@ let
       --aura ${aura}/lib/m1n1/m1n1.bin ${lib.concatMapStringsSep " " (board: "--require-board ${board}") cfg.requiredBoards} \
       > $out/manifest.json
     sha256sum $out/boot.bin | cut -d' ' -f1 > $out/boot.bin.sha256
+    if [[ -e ${aura}/share/aura/monitor-free ]]; then
+      touch $out/monitor-free
+      ${pkgs.runtimeShell} ${../scripts/build-ctxr-stage2.sh} ${../scripts/check-stage2.py} \
+        ${../scripts/prepare-stage2.py} ${../scripts/prepare-ctxr-stage2.py} \
+        $out/boot.bin ${aura}/lib/m1n1/m1n1.bin $out/ctxr
+    fi
   '';
   installStage2 = pkgs.writeShellApplication {
     name = "aurora-install-stage2";
@@ -57,6 +66,15 @@ in {
     };
   };
   config = {
+    # An aura without the monitor moves the kernel into the CTXR window, and only
+    # a kernel built with CONFIG_ARM64_CTXR_EXECMEM keeps its code inside it. This
+    # checks the kernel this system boots, so an overridden kernel is checked too.
+    assertions = [{
+      assertion = !(aura.auroraMonitorFree or false)
+        || (config.boot.kernelPackages.kernel.auroraCtxrExecmem or false);
+      message = "This aura has no monitor, so the kernel needs CONFIG_ARM64_CTXR_EXECMEM=y "
+        + "(kernelCtxrExecmem in overlay.nix, with a kernel pin that has it).";
+    }];
     # The Apple Silicon module would copy its Stage 2 over the ESP file on
     # every install without a backup or checks; Aurora installs it below.
     boot.loader.grub.extraFiles = lib.mkForce { };

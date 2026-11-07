@@ -39,16 +39,38 @@ including the MacBook Neo.
 - At install time `aurora-install-stage2` (`scripts/install-stage2.sh`) checks the input against its
   recorded digest and that the ESP is the mounted FAT partition this Mac booted from
   (`/proc/device-tree/chosen/asahi,efi-system-partition` when present) with an `m1n1` directory. An
-  unchanged file is left alone. A changed one is written to `boot.bin.new`, verified, the previous file is
-  kept as `m1n1/boot.bin.old` and the new one renamed into place. Any refusal leaves the ESP unchanged and
+  unchanged file is left alone. A changed one is written to `<name>.new`, verified, the previous file is
+  kept as `m1n1/<name>.old` and the new one renamed into place. Any refusal leaves the ESP unchanged and
   fails the bootloader install loudly.
+- The aura build carries `share/aura/monitor-free` once its pinned source has no monitor. `overlay.nix`
+  declares that in `auraMonitorFree`, and the aura build refuses a source that disagrees (`src/ctxr_exec.c`,
+  or no `src/monitor.c`), so the aura#77 pin has to set it. Until then every Mac updates `boot.bin`.
+- Such an aura moves the kernel into the CTXR window, which only a kernel built with
+  `CONFIG_ARM64_CTXR_EXECMEM` keeps its code inside. Evaluation refuses `auraMonitorFree` without
+  `kernelCtxrExecmem`, and the kernel build checks that flag against its resolved configuration, so it can
+  be set only with a kernel pin that has aurora-silicon/linux#985. The 4731456 pin has it and `kernel/config`
+  turns it on, so `kernelCtxrExecmem` is true.
+- With the marker, a Mac that boots a Mach-O Stage 1 (`/proc/device-tree/compatible` names one of the chips
+  in the installer's `AuraStage1Format.usesMachO`: T8130 and later, T6040 and later) gets
+  `m1n1/boot-ctxr.bin`, from the build's `ctxr/boot-ctxr-<board>.bin`, with only this board's device trees.
+  `m1n1/boot.bin` is never touched, because the padded Stage 1 these Macs enroll chainloads `boot-ctxr.bin`.
+  M1 to M3 Macs only ever use `boot.bin`.
+- A problem with one board's file never stops a rebuild. `scripts/build-ctxr-stage2.sh` warns and leaves the
+  file out, and a Mach-O Mac whose board has no file gets a warning and an unchanged ESP.
+- An image build has no device tree to read, because its Stage 2 comes from the Apple Silicon module's
+  `extraFiles`. If its aura has the marker, `scripts/prepare-ctxr-stage2.py` adds `boot-ctxr.bin`, a copy of
+  `boot.bin`, to the image's ESP, and `boot-ctxr-<board>.bin`, a copy of `boot-<board>.bin`, for each Mach-O
+  board. The installer picks the board's file over the combined one. The script fails the image if any of
+  them is over 16 MiB. Without the marker the image has no `boot-ctxr.bin`, and the installer refuses it on
+  Mach-O Macs, so no Mac gets a `boot-ctxr.bin` that rebuilds don't refresh.
 - Stage 1 (`aurora/stage1.bin`, `aurora/stage1.macho` and the boot object) is never written; it belongs
   to the installer.
 - The Apple Silicon module's own copy (`boot.loader.grub.extraFiles`, an unchecked overwrite with no
   backup) is removed on installed systems. `aurora.stage2.enable = false` stops Stage 2 updates entirely.
 
 Recovery: boot the previous NixOS generation from GRUB if the new kernel misbehaves; if Stage 2 itself
-does not boot, restore `m1n1/boot.bin.old` over `m1n1/boot.bin` from macOS or the recovery environment.
+does not boot, restore `m1n1/boot.bin.old` over `m1n1/boot.bin` (`boot-ctxr.bin.old` over `boot-ctxr.bin`
+on a Mach-O Mac) from macOS or the recovery environment.
 
 `tests/test_stage2.py` runs the real installer script against a temporary ESP (only the mount and partition
 queries are stubbed) and covers update with backup, no-op, refusal on every failed check, Stage 1 left
@@ -65,7 +87,7 @@ sudo nix flake update aurora --flake /etc/nixos
 sudo nixos-rebuild switch --flake /etc/nixos#aurora
 ```
 
-The first switch installs `aurora-update` and refreshes Stage 2 (keeping `m1n1/boot.bin.old`); later
+The first switch installs `aurora-update` and refreshes Stage 2 (keeping the previous file as `.old`); later
 updates are `sudo aurora-update`.
 
 ## Channels

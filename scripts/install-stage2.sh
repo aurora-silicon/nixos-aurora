@@ -1,31 +1,66 @@
 #!/usr/bin/env bash
-# Install the combined Stage 2 on this Mac's ESP the way update-m1n1 does on
-# ALARM and Fedora: write m1n1/boot.bin only when it changes and keep the
-# previous file as m1n1/boot.bin.old. It never writes Stage 1 or anything
-# else on the ESP, and it refuses (leaving the ESP as it was) when an input
-# is missing, the input does not match its recorded digest, the ESP is not
-# the mounted FAT partition this Mac booted from, or the written copy does
-# not verify.
+# Install the Stage 2 on this Mac's ESP the way update-m1n1 does on ALARM and
+# Fedora: write it only when it changes and keep the previous file as .old.
+# Every Mac uses the combined m1n1/boot.bin until aura has no monitor. Then a
+# Mac that boots a Mach-O Stage 1 uses m1n1/boot-ctxr.bin with only its board's
+# device trees, and its m1n1/boot.bin is never touched. It writes nothing else
+# on the ESP, Stage 1 included, and it refuses (leaving the ESP as it was) when
+# the input does not match its recorded digest, the ESP is not the mounted FAT
+# partition this Mac booted from, or the written copy does not verify. A Mach-O
+# Mac whose board has no file in this build only gets a warning.
 #
 #   install-stage2.sh STAGE2_DIR ESP_MOUNTPOINT
 #
-# STAGE2_DIR holds boot.bin and boot.bin.sha256 from the checked build.
+# STAGE2_DIR holds boot.bin and its .sha256 from the checked build. With aura's
+# monitor gone it also holds monitor-free and ctxr/boot-ctxr-<board>.bin with
+# their .sha256.
 set -euo pipefail
 
 source_dir=${1:-}
 esp=${2:-}
 # Where the booted Stage 2 records the partition UUID of its ESP.
 device_tree_esp=${AURORA_DEVICE_TREE_ESP:-/proc/device-tree/chosen/asahi,efi-system-partition}
+device_tree_compatible=${AURORA_DEVICE_TREE_COMPATIBLE:-/proc/device-tree/compatible}
 
 refuse() {
   echo "aurora-install-stage2: $*; the ESP Stage 2 was left unchanged" >&2
   exit 1
 }
 
+# The board of a Mac that boots a Mach-O Stage 1, nothing on any other machine.
+# The chips are the installer's: AuraStage1Format.usesMachO.
+macho_board() {
+  [[ -r $device_tree_compatible ]] || return 0
+  local entry first=''
+  while IFS= read -r -d '' entry; do
+    [[ -n $first ]] || first=${entry#apple,}
+    case $entry in
+      apple,t81[3-9a-f]?|apple,t8[2-9a-f]??|apple,t60[4-9a-f]?|apple,t6[1-9a-f]??)
+        echo "$first"
+        return 0
+        ;;
+    esac
+  done < "$device_tree_compatible"
+}
+
 [[ -n $source_dir && -n $esp ]] || refuse 'usage: install-stage2.sh STAGE2_DIR ESP_MOUNTPOINT'
-source=$source_dir/boot.bin
-[[ -f $source && -s $source && -f $source_dir/boot.bin.sha256 ]] || refuse "missing Stage 2 input in $source_dir"
-expected=$(<"$source_dir/boot.bin.sha256")
+board=''
+if [[ -e $source_dir/monitor-free ]]; then
+  board=$(macho_board)
+fi
+if [[ -n $board ]]; then
+  source=$source_dir/ctxr/boot-ctxr-$board.bin
+  name=boot-ctxr.bin
+  if [[ ! -s $source || ! -f $source.sha256 ]]; then
+    echo "aurora-install-stage2: warning: this build has no Stage 2 for $board, so m1n1/boot-ctxr.bin was left unchanged" >&2
+    exit 0
+  fi
+else
+  source=$source_dir/boot.bin
+  name=boot.bin
+  [[ -f $source && -s $source && -f $source.sha256 ]] || refuse "missing Stage 2 input $source"
+fi
+expected=$(<"$source.sha256")
 [[ $expected =~ ^[0-9a-f]{64}$ ]] || refuse 'invalid Stage 2 digest record'
 [[ $(sha256sum "$source" | cut -d' ' -f1) == "$expected" ]] || refuse 'the Stage 2 input does not match its digest'
 
@@ -40,7 +75,7 @@ if [[ -r $device_tree_esp ]]; then
 fi
 [[ -d $esp/m1n1 ]] || refuse "$esp has no m1n1 directory"
 
-target=$esp/m1n1/boot.bin
+target=$esp/m1n1/$name
 if [[ -f $target ]] && cmp -s "$source" "$target"; then
   exit 0
 fi
@@ -57,4 +92,4 @@ if [[ -f $target ]]; then
 fi
 mv -f "$staged" "$target"
 sync "$target"
-echo "Stage 2 updated at $target; the previous one is m1n1/boot.bin.old"
+echo "Stage 2 updated at $target; the previous one is m1n1/$name.old"
