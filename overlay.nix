@@ -88,6 +88,11 @@ let
     compilerTools = mesaCompilerTools;
   };
 in {
+  libvaV4l2RequestAvd = final.callPackage ./libva-v4l2-request-avd.nix {
+    src = source "libva-v4l2-request-avd";
+    version = pins.libva-v4l2-request-avd.version;
+    portabilityPatch = stableFile ./patches/libva-v4l2-request-offline-test-portability.patch;
+  };
   plymouth = prev.plymouth.overrideAttrs (old: {
     version = "${old.version}-aurora2";
     # Keep the upstream archive tag when only changing the carry release.
@@ -98,6 +103,8 @@ in {
       (stableFile ./plymouth/0001-ply-terminal-Keep-terminal-input-nonblocking.patch)
       (stableFile ./plymouth/0001-systemd-units-Start-plymouthd-without-waiting-for-coldplug.patch)
       (stableFile ./plymouth/0001-Fix-splash-keyboard-lifetime.patch)
+      # Clear the previous DRM master's HDR state before the SDR splash scans out.
+      (stableFile ./plymouth/0002-drm-Reset-inherited-HDR-connector-state-before-SDR.patch)
     ];
     doCheck = true;
     postCheck = (old.postCheck or "") + ''
@@ -113,6 +120,16 @@ in {
         -lply-splash-core -lply
       timeout 15s ./test-terminal-input
       echo 'Plymouth terminal-input PTY regression passed'
+      # The DRM regression includes the production renderer and mocks libdrm.
+      $CC -D_GNU_SOURCE -Wall \
+        -I. -I.. -I../src/libply -I../src/libply-splash-core \
+        $($PKG_CONFIG --cflags libdrm libevdev) \
+        ${stableFile ./plymouth/test-drm-sdr.c} -o test-drm-sdr \
+        -Lsrc/libply-splash-core -Lsrc/libply \
+        -Wl,-rpath,"$PWD/src/libply-splash-core" \
+        -Wl,-rpath,"$PWD/src/libply" \
+        -lply-splash-core -lply $($PKG_CONFIG --libs libdrm libevdev) -lm
+      timeout 15s ./test-drm-sdr
     '';
   });
   docker_29 = prev.docker_29.override { buildGoModule = dockerPolicyBuilder; };
@@ -206,6 +223,30 @@ in {
   # so GNOME's About page and desktop tools show the internal disk's capacity.
   udisks = prev.udisks.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [ (stableFile ./patches/udisks-nvme-namespace-size.patch) ];
+  });
+  # PipeWire with the patches fedora-aurora and alarm-aurora carry, for the
+  # daemon (modules/audio.nix sets it as services.pipewire.package). It is a
+  # separate attribute, not a replacement for pipewire: clients that link
+  # libpipewire (SDL, Qt, the portals, the compositors) keep nixpkgs' cached
+  # builds, and the fixed code runs where the speaker graph runs, in the
+  # daemon's filter-chain. 1006: filter-graph keeps the software volume at
+  # unity on every volume or mute update, so a repeated write no longer
+  # applies the speaker volume twice (-31 dB at a 30 % slider). 1005: it
+  # follows its plugins' latency after activation. 1007: spa-alsa waits a
+  # period after a refused start and reports refusals at most once per 5 s. 1000-1004: AirPlay (RAOP)
+  # sender fixes. nixpkgs runs the meson suite, with both new tests.
+  aurora-pipewire = prev.pipewire.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ map stableFile [
+      ./patches/pipewire/1000-module-raop-match-an-RTSP-reply-without-CSeq-to-the-.patch
+      ./patches/pipewire/1001-module-raop-sink-say-why-a-receiver-session-was-drop.patch
+      ./patches/pipewire/1002-module-raop-sink-default-sess.latency.msec-to-whole-.patch
+      ./patches/pipewire/1003-module-raop-discover-reload-a-sink-that-unloaded-its.patch
+      ./patches/pipewire/1004-module-raop-sink-give-up-on-a-session-that-never-rea.patch
+      ./patches/pipewire/1005-filter-graph-follow-plugin-latency-after-activation.patch
+      ./patches/pipewire/1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch
+      ./patches/pipewire/1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch
+    ];
+    doCheck = true;
   });
   upower = prev.upower.overrideAttrs (old: {
     src = source "upower-aurora";
@@ -315,8 +356,10 @@ in {
         # requirements on top.
         configurePhase = ''
           runHook preConfigure
-          mkdir build
-          export buildRoot="$PWD/build"
+          # nixpkgs installs this tree beside source/ in the dev output.
+          # Keep it outside source/ so its postInstall move cannot target itself.
+          export buildRoot="$NIX_BUILD_TOP/build"
+          mkdir -- "$buildRoot"
           cp ${kernelBaseFile} "$buildRoot/.config"
           chmod u+w "$buildRoot/.config"
           bash scripts/kconfig/merge_config.sh -m -O "$buildRoot" \
@@ -326,7 +369,6 @@ in {
           make "''${makeFlags[@]}" prepare
           test "$(cat "$buildRoot/include/config/kernel.release")" = 7.3.0
           buildFlags+=("KBUILD_BUILD_TIMESTAMP=$(date -u -d @$SOURCE_DATE_EPOCH)")
-          cd "$buildRoot"
         '';
         postConfigure = ''
           python3 ${stableFile ./kernel/validate-config.py} arch/arm64/configs/asahi.config \
@@ -445,10 +487,14 @@ in {
   # in BT.2100 mode mutter then keeps that backlight as the brightness control
   # and puts its reference white at the reported PQ level (PQ 100 cd/m² on
   # Apple's EDR panels) instead of 203 cd/m².
+  # A built-in panel in a variable refresh rate mode uses it on its whole
+  # desktop, not only for fullscreen surfaces, so an idle desktop lets the
+  # panel drop to its minimum rate.
   mutter = prev.mutter.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ map stableFile [
       ./patches/mutter-prefer-variable-refresh-rate.patch
       ./patches/mutter-pq-reference-luminance.patch
+      ./patches/mutter-builtin-desktop-vrr.patch
     ];
   });
   # nixpkgs exposes a symlink join here: overriding its src does not replace
@@ -515,6 +561,89 @@ in {
       chmod +x $out/libexec/speakerguardd/use-feedback-guard
       patchShebangs $out/libexec/speakerguardd/use-feedback-guard
     '';
+  };
+  # speakerguardd 1.0 (the v2 branch): a new program, packaged beside the 0.1
+  # daemon above. modules/speakerguardd-v2.nix installs it and holds the
+  # opt-in that makes it the speaker protection (aurora.speakerguardd.v2).
+  speakerguardd-v2 = let
+    # The crates this package ships; the rig and benchmark crates stay out.
+    crates = [ "-p" "sgv2-core" "-p" "sgv2-lv2" "-p" "sgv2-supervisor" "-p" "aurora-speaker-tuning" ];
+    units = [ "speakerguardd.service" "speakerguardd-provision.service" "speakerguardd-selfcheck.service"
+              "speakerguardd-seat.service" "speakerguardd-seat.path" "speakerguardd-sleep.service" ];
+    userUnits = [ "speakerguardd-session.service" "speakerguardd-graph.service" ];
+  in rustPackage "speakerguardd-v2" ./locks/speakerguardd-v2.Cargo.lock {
+    cargoBuildFlags = crates;
+    cargoTestFlags = crates;
+    # Provisioning, the gate, the self-check and the session helper are
+    # Python; their shebangs are patched to this interpreter. The tools they
+    # call come from the units' path (modules/speakerguardd-v2.nix), except
+    # the gate's, which also runs as the older daemons' ExecCondition.
+    buildInputs = [ final.python3 ];
+    nativeCheckInputs = [ final.python3 ];
+    postCheck = "python3 -I packaging/session/test_provision.py";
+    postInstall = ''
+      lx=$out/libexec/speakerguardd-v2
+      mkdir -p $lx $out/lib/lv2/sgv2.lv2 $out/lib/systemd/system $out/lib/systemd/user
+      mv $out/bin/speakerguardd $lx/speakerguardd
+      mv $out/lib/libsgv2_lv2.so $out/lib/lv2/sgv2.lv2/libsgv2_lv2.so
+      rm -f $out/lib/*.rlib $out/lib/*.a
+      cp crates/sgv2-lv2/lv2/sgv2.lv2/*.ttl $out/lib/lv2/sgv2.lv2/
+      # Every plugin the bundle names must be the library installed beside it.
+      if grep -ho 'lv2:binary <[^>]*>' $out/lib/lv2/sgv2.lv2/*.ttl | grep -v '<libsgv2_lv2.so>'; then
+        echo 'The sgv2 bundle names a library this package does not install' >&2; exit 1
+      fi
+      for f in speakerguardd-provision speakerguardd-gate speakerguardd-selfcheck speakerguardd-session; do
+        install -Dm755 packaging/session/$f $lx/$f
+        substituteInPlace $lx/$f --replace-quiet /usr/share/speakerguardd/ $out/share/speakerguardd/
+      done
+      install -Dm644 packaging/session/wiring.py packaging/session/gen.py -t $lx
+      substituteInPlace $lx/speakerguardd-gate $lx/speakerguardd-provision \
+        --replace-fail 'default="aurora-speaker-tuning"' "default=\"$out/bin/aurora-speaker-tuning\""
+      substituteInPlace $lx/speakerguardd-gate --replace-fail '["amixer",' '["${final.alsa-utils}/bin/amixer",'
+      patchShebangs --host $lx
+      # The fleet gate's data (qualified boards per protection unit), unchanged
+      # from upstream. Every per-board value is derived from the Mac's device
+      # tree and tuning at run time (wiring.py); no machine table is shipped.
+      install -Dm644 packaging/session/gate.json -t $out/share/speakerguardd
+      # The per-machine graphs, as reference data: provisioning generates the
+      # machine's own from the self-check's record.
+      install -Dm644 packaging/pipewire/sgv2-*.conf -t $out/share/speakerguardd/pipewire
+      install -Dm644 packaging/wireplumber/60-sgv2-*.conf -t $out/share/speakerguardd/wireplumber
+      install -Dm644 packaging/etc/speakerguardd.conf.example docs/NEW-PLATFORM.md -t $out/share/doc/speakerguardd-v2
+      # The upstream units, under their own names so they install beside the
+      # 0.1 unit, with the programs where this package installs them.
+      rename() {
+        sed -e "s@/usr/libexec/speakerguardd/@$lx/@g" -e "s@^ExecStart=/usr/bin/speakerguardd @ExecStart=$lx/speakerguardd @" \
+            -e "s@/usr/share/speakerguardd/@$out/share/speakerguardd/@g" \
+            -e 's@\bspeakerguardd\(-[a-z]\+\)\?\.\(service\|path\)\b@speakerguardd-v2\1.\2@g' "$1" > "$2"
+      }
+      for u in ${toString units}; do rename packaging/systemd/$u $out/lib/systemd/system/''${u/speakerguardd/speakerguardd-v2}; done
+      for u in ${toString userUnits}; do rename packaging/systemd/$u $out/lib/systemd/user/''${u/speakerguardd/speakerguardd-v2}; done
+      sd=$out/lib/systemd/system
+      grep -qx "ExecStart=$lx/speakerguardd \$SGV2_ARGS" $sd/speakerguardd-v2.service
+      grep -qx 'Requires=speakerguardd-v2-provision.service speakerguardd-v2-selfcheck.service' $sd/speakerguardd-v2.service
+      grep -qx 'Requires=speakerguardd-v2-provision.service' $sd/speakerguardd-v2-selfcheck.service
+      grep -qx "ExecStart=$lx/speakerguardd-provision seat --unit speakerguardd-v2.service" $sd/speakerguardd-v2-seat.service
+      grep -qx "ExecStartPost=$lx/speakerguardd-provision activate --graph-unit speakerguardd-v2-graph.service" $sd/speakerguardd-v2-selfcheck.service
+      grep -qx "ExecStart=$lx/speakerguardd-provision sleep --unit speakerguardd-v2.service" $sd/speakerguardd-v2-sleep.service
+      grep -qx "ExecStop=$lx/speakerguardd-provision wake --unit speakerguardd-v2.service" $sd/speakerguardd-v2-sleep.service
+      for u in speakerguardd-v2 speakerguardd-v2-provision speakerguardd-v2-selfcheck speakerguardd-v2-seat speakerguardd-v2-sleep; do
+        grep -qx "ExecCondition=$lx/speakerguardd-gate v2" $sd/$u.service
+      done
+      if grep -Eq '^(OnFailure|OnSuccess)=|speakersafetyd|=speakerguardd\.service|/usr/' \
+          $sd/speakerguardd-v2* $out/lib/systemd/user/speakerguardd-v2*; then
+        echo 'A speakerguardd 1.0 unit chains to or names another daemon, or names a /usr path' >&2; exit 1
+      fi
+      install -Dm644 -t $out/share/licenses/speakerguardd-v2 LICENSE crates/aurora-speaker-tuning/LICENSE-aurora-audio-dsp
+    '';
+    meta = {
+      description = "In-graph speaker protection for Apple Silicon Macs (speakerguardd 1.0, preview)";
+      homepage = "https://github.com/aurora-silicon/speakerguardd/tree/v2";
+      # aurora-speaker-tuning is based on aurora-audio-dsp by saku, also MIT.
+      license = final.lib.licenses.mit;
+      platforms = [ "aarch64-linux" ];
+      mainProgram = "aurora-speaker-tuning";
+    };
   };
   bankstown-lv2 = prev.bankstown-lv2.overrideAttrs (old: {
     src = source "bankstown";

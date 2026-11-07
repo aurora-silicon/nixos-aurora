@@ -1,7 +1,7 @@
 {
   description = "Aurora NixOS for Apple Silicon";
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/e7439b6b14ad3cc35d05608ebca9bce01a25f5f8";
+    nixpkgs.url = "github:NixOS/nixpkgs/1d060086d60cb76a40cf37109f979d88a5bd6396";
     apple-silicon.url = "github:nix-community/nixos-apple-silicon/12cd234285d3037cedfab979aa70b75284a59afc";
     apple-silicon.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -9,7 +9,13 @@
     let
       system = "aarch64-linux";
       overlays = [ apple-silicon.overlays.default self.overlays.default ];
-      pkgs = import nixpkgs { inherit system overlays; };
+      pkgs = import nixpkgs {
+        inherit system overlays;
+        # Steam's ARM64 runtime includes GTK 2; retain its deprecation warning.
+        # Remove this exception when Steam no longer needs GTK 2.
+        # https://github.com/NixOS/nixpkgs/issues/410814
+        config.problems.handlers."gtk+".broken = "warn";
+      };
       makeSystem = desktop: nixpkgs.lib.nixosSystem {
         inherit system;
         modules = [ apple-silicon.nixosModules.default self.nixosModules.default
@@ -46,6 +52,7 @@
         libfprint = pkgs.libfprint;
         fprintd = pkgs.fprintd;
         avd-fw = pkgs.aurora-avd-firmware;
+        libva-v4l2-request-avd = pkgs.libvaV4l2RequestAvd;
         omarchy-ane-tools = pkgs.omarchy-ane-tools;
         mil-hwx-compiler = pkgs.mil-hwx-compiler;
         upower = pkgs.upower;
@@ -70,11 +77,13 @@
           '';
         };
         alsa-utils = pkgs.aurora-alsa-utils;
+        pipewire = pkgs.aurora-pipewire;
         audio = pkgs.asahi-audio;
         ucm = pkgs.alsa-ucm-conf-asahi;
         fex-mesa = pkgs.aurora-fex-mesa;
         flatpak-gl = pkgs.aurora-flatpak-gl;
         speakerguardd = pkgs.speakerguardd;
+        speakerguardd-v2 = pkgs.speakerguardd-v2;
         mutter = pkgs.mutter;
         speakersafetyd = pkgs.speakersafetyd;
         bankstown = pkgs.bankstown-lv2;
@@ -98,6 +107,57 @@
             && lib.hasInfix "After=var-swap-swapfile.swap" unit.text) profiles;
       in assert lib.assertMsg valid "Aurora clean-boot packaging parity failed";
         pkgs.runCommandNoCC "aurora-clean-boot-defaults" { } "touch $out";
+
+      # speakerguardd 1.0 is installed on every Mac with the fleet gate on both
+      # stacks; enable = false removes it and its gate.
+      speakerguardd-v2-gated = let
+        inherit (nixpkgs) lib;
+        probe = extra: ((makeSystem "minimal").extendModules { modules = [ extra ]; }).config;
+        on = probe { };
+        off = probe { aurora.speakerguardd.v2.enable = false; };
+        # The system's own build: its nixpkgs instance is not the flake's
+        # pkgs, so the store paths differ.
+        pkg = c: c.aurora.speakerguardd.v2.package;
+        has = c: (pkg c).pname == "speakerguardd-v2"
+          && builtins.elem (pkg c) c.environment.systemPackages
+          && builtins.elem (pkg c) c.systemd.packages;
+        unit = c: name: c.systemd.units.${name} or { enable = true; wantedBy = [ ]; text = ""; };
+        wanted = c: name: builtins.elem "multi-user.target" (unit c name).wantedBy;
+        # A plain string: hasInfix cannot take a pattern that refers to a
+        # store path.
+        gate = builtins.unsafeDiscardStringContext "${pkg on}/libexec/speakerguardd-v2/speakerguardd-gate legacy";
+        gated = c: name: lib.hasInfix "ExecCondition=${gate}" (unit c "${name}.service").text;
+      in assert lib.assertMsg (has on) "speakerguardd 1.0 must be installed by default";
+         assert lib.assertMsg (wanted on "speakerguardd-v2.service") "speakerguardd-v2.service must be wanted by multi-user.target";
+         assert lib.assertMsg (wanted on "speakerguardd-v2-seat.path") "speakerguardd-v2-seat.path must be wanted by multi-user.target";
+         assert lib.assertMsg ((unit on "speakersafetyd.service").enable && (unit on "speakerguardd.service").enable
+             && gated on "speakersafetyd" && gated on "speakerguardd")
+           "the older daemons must stay installed and enabled, behind the fleet gate";
+         assert lib.assertMsg (lib.hasInfix "use-feedback-guard" (unit on "speakersafetyd.service").text)
+           "the gate must not replace speakersafetyd's own ExecCondition";
+         assert lib.assertMsg (!has off && !wanted off "speakerguardd-v2.service"
+             && !gated off "speakersafetyd" && !gated off "speakerguardd")
+           "enable = false must remove speakerguardd 1.0 and its gate";
+         pkgs.runCommand "speakerguardd-v2-package-check" { } ''
+           p=${pkgs.speakerguardd-v2}
+           lx=$p/libexec/speakerguardd-v2
+           test -x $lx/speakerguardd
+           test -x $lx/speakerguardd-provision
+           test -x $lx/speakerguardd-gate
+           test -x $p/bin/aurora-speaker-tuning
+           test -f $p/lib/lv2/sgv2.lv2/manifest.ttl
+           test -f $p/lib/lv2/sgv2.lv2/libsgv2_lv2.so
+           test -f $p/share/speakerguardd/gate.json
+           grep -qx "ExecStart=$lx/speakerguardd \$SGV2_ARGS" $p/lib/systemd/system/speakerguardd-v2.service
+           grep -qx "ExecStart=$lx/speakerguardd-provision run" $p/lib/systemd/system/speakerguardd-v2-provision.service
+           test -f $p/lib/systemd/system/speakerguardd-v2-seat.path
+           test -f $p/lib/systemd/user/speakerguardd-v2-graph.service
+           grep -q "$p/share/speakerguardd/gate.json" $lx/speakerguardd-gate
+           test -f $lx/wiring.py
+           test ! -e $p/share/speakerguardd/machines.json
+           test ! -e $p/bin/speakerguardd
+           touch $out
+         '';
 
       ane-packaging = let
         firmware = pkgs.runCommand "ane-test-firmware" { } ''
@@ -186,6 +246,13 @@
               "the display chain and its PMP come up before the root is unlocked" =
                 lib.all (m: lib.elem m config.boot.initrd.availableKernelModules)
                   [ "apple-pmp" "mux-apple-display-crossbar" "appledrm" ];
+              "the PipeWire daemon carries the filter-graph volume and latency fixes" = let
+                package = config.services.pipewire.package;
+                patched = suffix: lib.any (patch: lib.hasSuffix suffix (toString patch)) (package.patches or [ ]);
+              in package.doCheck
+                && patched "-1005-filter-graph-follow-plugin-latency-after-activation.patch"
+                && patched "-1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch"
+                && patched "-1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch";
               "PipeWire and WirePlumber use the pinned audio and UCM profiles" =
                 lib.elem value.pkgs.asahi-audio config.services.pipewire.configPackages
                 && lib.elem value.pkgs.asahi-audio config.services.pipewire.wireplumber.configPackages
@@ -307,6 +374,7 @@
             && patchedWith "0001-ply-terminal-Keep-terminal-input-nonblocking.patch" c.boot.plymouth.package
             && patchedWith "0001-Fix-splash-keyboard-lifetime.patch" c.boot.plymouth.package
             && c.boot.plymouth.package.scriptKeyboardLifetime >= 1
+            && patchedWith "0002-drm-Reset-inherited-HDR-connector-state-before-SDR.patch" c.boot.plymouth.package
             && c.boot.plymouth.package.doCheck) [ kde gnome minimal ];
           "minimal images boot without a splash" = !minimal.boot.plymouth.enable;
           "the initrd asks for no TPM drivers, which the shared kernel lacks" = lib.all (c:

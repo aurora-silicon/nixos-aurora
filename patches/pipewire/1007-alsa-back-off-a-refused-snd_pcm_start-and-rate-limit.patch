@@ -1,0 +1,105 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 17:29:00 +1100
+Subject: [PATCH] alsa: back off a refused snd_pcm_start and rate-limit its
+ report
+
+When the driver refuses snd_pcm_start, do_start() logged an error and
+left the stream not started, and alsa_write_frames() tried again on every
+write. A driver that refuses starts by policy, as Aurora's macaudio
+does for a speaker PCM while speaker protection is not granted, then got
+about 700 attempts and 700 error lines in the 30 ms after a resume from
+system sleep, until protection was granted again.
+
+Wait one period (the stream threshold) before the next start attempt
+after a refusal, and report refusals at most once per 5 s with the number
+suppressed: -EPERM, a policy refusal, at info level, anything else as
+before at error level.
+
+Signed-off-by: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Assisted-by: LLM
+---
+ spa/plugins/alsa/alsa-pcm.c | 31 +++++++++++++++++++++++++++----
+ spa/plugins/alsa/alsa-pcm.h |  2 ++
+ 2 files changed, 29 insertions(+), 4 deletions(-)
+
+diff --git a/spa/plugins/alsa/alsa-pcm.c b/spa/plugins/alsa/alsa-pcm.c
+index 16e69d7..7e9ce18 100644
+--- a/spa/plugins/alsa/alsa-pcm.c
++++ b/spa/plugins/alsa/alsa-pcm.c
+@@ -1070,6 +1070,8 @@ int spa_alsa_init(struct state *state, const struct spa_dict *info)
+ 
+ 	state->rate_limit.interval = 2 * SPA_NSEC_PER_SEC;
+ 	state->rate_limit.burst = 1;
++	state->start_limit.interval = 5 * SPA_NSEC_PER_SEC;
++	state->start_limit.burst = 1;
+ 
+ 	bind_ctls_for_params(state);
+ 
+@@ -2779,17 +2781,37 @@ static inline int do_drop(struct state *state)
+ 	return 0;
+ }
+ 
++static uint64_t get_time_ns(struct state *state);
++
+ static inline int do_start(struct state *state)
+ {
+-	int res;
++	int res, suppressed;
+ 	if (SPA_UNLIKELY(!state->alsa_started)) {
+ 		spa_log_debug(state->log, "%p: snd_pcm_start linked:%u", state, state->linked);
+ 		if (!state->linked && (res = snd_pcm_start(state->hndl)) < 0) {
+-			spa_log_error(state->log, "%s: snd_pcm_start: %s",
+-					state->name, snd_strerror(res));
++			/* A refused start is retried from the write path on every
++			 * cycle. Wait one period before the next attempt, and report
++			 * it at most once per interval: a driver that refuses starts
++			 * by policy (-EPERM: a speaker PCM held at its floor while
++			 * protection is not granted) otherwise logs every try, about
++			 * 700 lines in 30 ms after a resume. */
++			uint64_t now = get_time_ns(state);
++			uint64_t period = state->rate > 0 && state->threshold > 0 ?
++				(uint64_t)state->threshold * SPA_NSEC_PER_SEC / state->rate :
++				SPA_NSEC_PER_MSEC * 10;
++			state->start_retry_time = now + period;
++			if ((suppressed = spa_ratelimit_test(&state->start_limit, now)) >= 0) {
++				if (res == -EPERM)
++					spa_log_info(state->log, "%s: snd_pcm_start: %s, retrying (%d suppressed)",
++							state->name, snd_strerror(res), suppressed);
++				else
++					spa_log_error(state->log, "%s: snd_pcm_start: %s (%d suppressed)",
++							state->name, snd_strerror(res), suppressed);
++			}
+ 			return res;
+ 		}
+ 		state->alsa_started = true;
++		state->start_retry_time = 0;
+ 	}
+ 	return 0;
+ }
+@@ -3346,7 +3368,8 @@ again:
+ 
+ 	state->sample_count += total_written;
+ 
+-	if (SPA_UNLIKELY(!state->alsa_started && (total_written > 0 || frames == 0)))
++	if (SPA_UNLIKELY(!state->alsa_started && (total_written > 0 || frames == 0)) &&
++	    (state->start_retry_time == 0 || get_time_ns(state) >= state->start_retry_time))
+ 		do_start(state);
+ 
+ 	update_sources(state, true);
+diff --git a/spa/plugins/alsa/alsa-pcm.h b/spa/plugins/alsa/alsa-pcm.h
+index c6b4234..4b9f37d 100644
+--- a/spa/plugins/alsa/alsa-pcm.h
++++ b/spa/plugins/alsa/alsa-pcm.h
+@@ -112,6 +112,8 @@ struct state {
+ 
+ 	FILE *log_file;
+ 	struct spa_ratelimit rate_limit;
++	struct spa_ratelimit start_limit;	/* refused snd_pcm_start reports */
++	uint64_t start_retry_time;		/* no new start before this (CLOCK_MONOTONIC ns) */
+ 
+ 	uint32_t card_index;
+ 	struct card *card;
+-- 
+2.54.0
+

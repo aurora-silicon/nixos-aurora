@@ -35,6 +35,10 @@ stdenvNoCC.mkDerivation {
     sed -e "s,@LIBDIR@,$lib," -e "s,@USERPAGES@,${aurora-userpages}/bin/userpages," \
       -e 's|@USER4K_HINT@|keep aurora.userpages.enable on (it adds user4k=on to boot.kernelParams), rebuild and reboot|' \
       ${./steam} > $out/bin-steam
+    # NixOS mounts the FEX guest graphics provider (aurora.fexMesa) here,
+    # not at the launch loop's /usr/share/guestos default.
+    sed -i '/^exec "\$lib\/bin\/steam-native4k" "\$@"$/i export AURORA_FEX_GRAPHICS_PROVIDER=''${AURORA_FEX_GRAPHICS_PROVIDER:-/var/lib/aurora/fex/mesa-rootfs/graphics_provider.json}' $out/bin-steam
+    grep -qx 'export AURORA_FEX_GRAPHICS_PROVIDER=''${AURORA_FEX_GRAPHICS_PROVIDER:-/var/lib/aurora/fex/mesa-rootfs/graphics_provider.json}' $out/bin-steam
     if grep -n '@[A-Z0-9_]*@' $out/bin-steam; then exit 1; fi
     install -Dm755 $out/bin-steam $out/bin/steam && rm $out/bin-steam
     ln -s $lib/bin/aurora-play $out/bin/aurora-play

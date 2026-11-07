@@ -36,12 +36,14 @@ NEEDS = {
     'fex-mesa': ['mesa-aurora'],
     'flatpak-gl': ['mesa-aurora'],
     'alsa-utils': ['alsa-utils'],
+    'pipewire': [],  # nixpkgs' pinned release, with the local patches
     'audio': ['aurora-audio'],
     'ucm': ['alsa-ucm-conf-aurora'],
     'firstboot': ['aurora-firstboot'],
     'libfprint': ['libfprint'],
     'fprintd': [],  # nixpkgs' pinned release, with the local companion patch
     'avd-fw': ['avd-fw'],
+    'libva-v4l2-request-avd': ['libva-v4l2-request-avd'],
     'omarchy-ane-tools': ['omarchy-ane-tools'],
     'mil-hwx-compiler': ['mil-hwx-compiler', 'mil-hwx-compiler/gnustep-base'],
     'upower': ['upower-aurora'],

@@ -1,0 +1,128 @@
+From 54070c405b4491838291da9049e97f5a2c2349e4 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Tue, 3 Nov 2026 00:32:10 +1100
+Subject: [PATCH] drm: Reset inherited HDR connector state before SDR scanout
+
+A legacy SetCrtc leaves the previous DRM master's HDR metadata and
+colorspace in place. When a compositor drops master before closing its
+file, last-close cleanup cannot establish SDR for the splash. Its pixels
+can then be presented as PQ/BT.2020 at the display's HDR brightness.
+
+Clear both properties together on the head's connectors before scanning
+out an SDR buffer, and retry a failed reset on the next redraw. Recheck
+on activation and retain the legacy path on drivers without atomic
+support.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ src/plugins/renderers/drm/plugin.c | 79 ++++++++++++++++++++++++++++++
+ 1 file changed, 79 insertions(+)
+
+diff --git a/src/plugins/renderers/drm/plugin.c b/src/plugins/renderers/drm/plugin.c
+index 52c9c16..a6c141c 100644
+--- a/src/plugins/renderers/drm/plugin.c
++++ b/src/plugins/renderers/drm/plugin.c
+@@ -697,6 +697,81 @@ ply_renderer_head_clear_plane_rotation (ply_renderer_backend_t *backend,
+         }
+ }
+ 
++static bool
++ply_renderer_head_reset_sdr (ply_renderer_backend_t *backend,
++                             ply_renderer_head_t    *head)
++{
++        drmModeAtomicReq *request;
++        uint32_t *connector_ids;
++        uint32_t j;
++        int i, number_of_connectors;
++        bool changed = false;
++        bool success = false;
++
++        /* Legacy KMS drivers cannot have inherited atomic HDR state. */
++        if (drmSetClientCap (backend->device_fd, DRM_CLIENT_CAP_ATOMIC, 1) != 0)
++                return true;
++
++        request = drmModeAtomicAlloc ();
++        if (request == NULL)
++                goto out;
++
++        connector_ids = (uint32_t *) ply_array_get_uint32_elements (head->connector_ids);
++        number_of_connectors = ply_array_get_size (head->connector_ids);
++
++        /* Connector colour properties survive a DRM master handoff. Clear both
++         * together: SDR pixels must not inherit the compositor's PQ/BT.2020,
++         * even if it still has its file open after dropping master.
++         */
++        for (i = 0; i < number_of_connectors; i++) {
++                drmModeObjectProperties *properties;
++
++                properties = drmModeObjectGetProperties (backend->device_fd,
++                                                         connector_ids[i],
++                                                         DRM_MODE_OBJECT_CONNECTOR);
++                if (properties == NULL)
++                        goto out_request;
++
++                for (j = 0; j < properties->count_props; j++) {
++                        drmModePropertyRes *property;
++                        bool reset;
++                        int ret = 0;
++
++                        property = drmModeGetProperty (backend->device_fd, properties->props[j]);
++                        if (property == NULL) {
++                                drmModeFreeObjectProperties (properties);
++                                goto out_request;
++                        }
++
++                        /* Zero is the null HDR blob and the Default colorspace. */
++                        reset = strcmp (property->name, "HDR_OUTPUT_METADATA") == 0 ||
++                                strcmp (property->name, "Colorspace") == 0;
++                        if (reset && properties->prop_values[j] != 0) {
++                                ret = drmModeAtomicAddProperty (request, connector_ids[i],
++                                                               property->prop_id, 0);
++                                changed = true;
++                        }
++                        drmModeFreeProperty (property);
++                        if (ret < 0) {
++                                drmModeFreeObjectProperties (properties);
++                                goto out_request;
++                        }
++                }
++                drmModeFreeObjectProperties (properties);
++        }
++
++        success = !changed || drmModeAtomicCommit (backend->device_fd, request,
++                                                  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL) == 0;
++out_request:
++        drmModeAtomicFree (request);
++out:
++        drmSetClientCap (backend->device_fd, DRM_CLIENT_CAP_ATOMIC, 0);
++        if (!success)
++                ply_trace ("Couldn't reset inherited HDR state for controller %u: %m",
++                           head->controller_id);
++        return success;
++}
++
+ static bool
+ ply_renderer_head_set_scan_out_buffer (ply_renderer_backend_t *backend,
+                                        ply_renderer_head_t    *head,
+@@ -712,6 +787,9 @@ ply_renderer_head_set_scan_out_buffer (ply_renderer_backend_t *backend,
+         ply_trace ("Setting scan out buffer of %ldx%ld head to our buffer",
+                    head->area.width, head->area.height);
+ 
++        if (!ply_renderer_head_reset_sdr (backend, head))
++                return false;
++
+         /* Set gamma table, do this only once */
+         if (head->gamma) {
+                 drmModeCrtcSetGamma (backend->device_fd,
+@@ -946,6 +1024,7 @@ activate (ply_renderer_backend_t *backend)
+         while (node != NULL) {
+                 head = (ply_renderer_head_t *) ply_list_node_get_data (node);
+                 /* Flush out any pending drawing to the buffer */
++                head->scan_out_buffer_needs_reset = true;
+                 flush_head (backend, head);
+                 node = ply_list_get_next_node (backend->heads, node);
+         }
+-- 
+2.50.1 (Apple Git-155)
+

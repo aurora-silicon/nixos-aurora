@@ -3,7 +3,7 @@
   imports = [ ./ane.nix ./firmware.nix ./platform.nix ./audio.nix ./system-fixes.nix
     ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix ./dbus.nix
     ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix
-    ./userpages.nix ./boot-splash.nix ];
+    ./userpages.nix ./boot-splash.nix ./speakerguardd-v2.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";
@@ -20,6 +20,10 @@
   config = {
     hardware.asahi.enable = true;
     nixpkgs.hostPlatform = "aarch64-linux";
+    # Keep Steam's GTK 2 runtime available with a warning, as in flake.nix.
+    # Remove this exception when Steam no longer needs GTK 2.
+    # https://github.com/NixOS/nixpkgs/issues/410814
+    nixpkgs.config.problems.handlers."gtk+".broken = lib.mkDefault "warn";
     nix.settings.extra-substituters = [ "https://aurorasilicon.org/nixos-aurora/cache" ];
     nix.settings.extra-trusted-public-keys = [ (lib.removeSuffix "\n" (builtins.readFile ../keys/cache.pub)) ];
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
@@ -62,7 +66,6 @@
     # Quiet by default: failures still reach the console, and systemd shows
     # status only when a unit fails or stalls.
     boot.consoleLogLevel = lib.mkDefault 3;
-    boot.initrd.verbose = lib.mkDefault false;
     boot.kernelParams = [ "quiet" "rd.udev.log_level=3" "udev.log_level=3" "systemd.show_status=auto" ];
     # Desktop images boot to a splash; first boot asks for the disk password
     # on it, as every later boot does. The Aurora theme draws the logo aura
@@ -91,7 +94,11 @@
           ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
       '';
     hardware.graphics.enable = true;
-    hardware.graphics.extraPackages = [ pkgs.aurora-rusticl pkgs.aurora-lavapipe ];
+    hardware.graphics.extraPackages = [
+      pkgs.aurora-rusticl
+      pkgs.aurora-lavapipe
+      pkgs.libvaV4l2RequestAvd
+    ];
     services.desktopManager.plasma6.enable = config.aurora.desktop == "kde";
     # Plasma Login Manager, as on Fedora 44 and Aurora Alarm: its greeter runs
     # on KWin Wayland at the display's scale.
