@@ -36,6 +36,7 @@ stdenv.mkDerivation {
     test -f "$out/lib/dri/v4l2_request_drv_video.so"
     test -L "$out/lib/dri/asahi_drv_video.so"
     test "$(readlink "$out/lib/dri/asahi_drv_video.so")" = v4l2_request_drv_video.so
+    test -L "$out/lib/dri/aurora_drv_video.so"
     test "$(readlink "$out/lib/dri/aurora_drv_video.so")" = v4l2_request_drv_video.so
   '';
 
