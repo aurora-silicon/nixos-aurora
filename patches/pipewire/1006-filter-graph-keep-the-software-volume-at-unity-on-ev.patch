@@ -1,0 +1,334 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Sat, 7 Nov 2026 14:50:31 +1100
+Subject: [PATCH 1006/1006] filter-graph: keep the software volume at unity on
+ every volume update
+
+When the graph carries the volume on its own controls (capture.volumes
+or playback.volumes), impl_set_props() sets softVolumes to 1.0 so the
+converter after it does not apply the volume again.  It only did that
+when the volume or mute state changed.  An update that repeats the
+current values (a desktop re-sending the slider position, an unmute of
+a sink that is not muted, a session manager restoring the same volume)
+went through with the caller's softVolumes, or, for a mute-only update,
+with no softVolumes at all, in which case audioconvert falls back to
+the channel volumes.  Either way the converter applied the channel
+volume in software on top of the graph's control: the output dropped by
+the volume a second time (-31 dB at a 30 % cubic slider, -12 dB at
+63 %) on every band, and stayed there until the next real change.
+
+Set the soft volumes to unity (0 when muted) for every Props update
+that has a volume or mute property when the graph has volume controls,
+and only re-sync the controls when something changed.  Graphs without
+volume controls still pass softVolumes on unmodified (#5344).
+
+Add a test that sends a volume, the same volume again (with and
+without softVolumes), a mute-only unmute, mute and unmute, and checks
+softVolumes/softMute in the props passed on; and that a graph without
+volume controls passes softVolumes through.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ spa/plugins/filter-graph/filter-graph.c |  29 +++-
+ test/meson.build                        |   8 +
+ test/test-filter-graph-volume.c         | 193 ++++++++++++++++++++++++
+ 3 files changed, 222 insertions(+), 8 deletions(-)
+ create mode 100644 test/test-filter-graph-volume.c
+
+diff --git a/spa/plugins/filter-graph/filter-graph.c b/spa/plugins/filter-graph/filter-graph.c
+index f111618..88f26d3 100644
+--- a/spa/plugins/filter-graph/filter-graph.c
++++ b/spa/plugins/filter-graph/filter-graph.c
+@@ -792,7 +792,7 @@ static int impl_set_props(void *object, enum spa_direction direction, const stru
+ 	float soft_vols[MAX_CHANNELS];
+ 	uint32_t n_soft_vols = 0;
+ 	bool soft_mute = false, have_soft_mute = false;
+-	bool do_volume = false;
++	bool do_volume = false, have_volume = false;
+ 
+ 	spa_pod_dynamic_builder_init(&b, buf, sizeof(buf), 1024);
+ 	spa_pod_builder_push_object(&b.b, &f[0], SPA_TYPE_OBJECT_Props, SPA_PARAM_Props);
+@@ -806,6 +806,7 @@ static int impl_set_props(void *object, enum spa_direction direction, const stru
+ 		case SPA_PROP_mute:
+ 		{
+ 			bool mute;
++			have_volume = true;
+ 			if (spa_pod_get_bool(&prop->value, &mute) == 0) {
+ 				if (vol->mute != mute) {
+ 					vol->mute = mute;
+@@ -820,6 +821,7 @@ static int impl_set_props(void *object, enum spa_direction direction, const stru
+ 			uint32_t i, n_vols;
+ 			float vols[MAX_CHANNELS];
+ 
++			have_volume = true;
+ 			if ((n_vols = spa_pod_copy_array(&prop->value, SPA_TYPE_Float, vols,
+ 					SPA_N_ELEMENTS(vols))) > 0) {
+ 				if (vol->n_volumes != n_vols)
+@@ -837,10 +839,12 @@ static int impl_set_props(void *object, enum spa_direction direction, const stru
+ 			break;
+ 		}
+ 		case SPA_PROP_softVolumes:
++			have_volume = true;
+ 			n_soft_vols = spa_pod_copy_array(&prop->value, SPA_TYPE_Float, soft_vols,
+ 					SPA_N_ELEMENTS(soft_vols));
+ 			break;
+ 		case SPA_PROP_softMute:
++			have_volume = true;
+ 			if (spa_pod_get_bool(&prop->value, &soft_mute) == 0)
+ 				have_soft_mute = true;
+ 			break;
+@@ -849,16 +853,25 @@ static int impl_set_props(void *object, enum spa_direction direction, const stru
+ 			break;
+ 		}
+ 	}
+-	if (do_volume && vol->n_ports != 0) {
+-		uint32_t i;
+-
+-		for (i = 0; i < vol->n_volumes; i++)
+-			soft_vols[i] = (vol->mute || vol->volumes[i] == 0.0f) ? 0.0f : 1.0f;
+-		n_soft_vols = vol->n_volumes;
++	if (have_volume && vol->n_ports != 0) {
++		/* The graph applies the volume, so the software volume after it
++		 * must stay at unity (or 0 when muted). Do this for every Props
++		 * that carries a volume or mute, also when the values did not
++		 * change: passing the given softVolumes on, or leaving them out
++		 * so that the channelVolumes are used, applies the volume a
++		 * second time in software. */
++		uint32_t i, n = vol->n_volumes > 0 ? vol->n_volumes : n_soft_vols;
++
++		for (i = 0; i < n; i++)
++			soft_vols[i] = (vol->mute ||
++					(i < vol->n_volumes && vol->volumes[i] == 0.0f)) ?
++				0.0f : 1.0f;
++		n_soft_vols = n;
+ 		soft_mute = vol->mute;
+ 		have_soft_mute = true;
+ 
+-		sync_volume(graph, vol);
++		if (do_volume)
++			sync_volume(graph, vol);
+ 	}
+ 	if (have_soft_mute) {
+ 		spa_pod_builder_prop(&b.b, SPA_PROP_softMute, 0);
+diff --git a/test/meson.build b/test/meson.build
+index 625240c..38a6a85 100644
+--- a/test/meson.build
++++ b/test/meson.build
+@@ -115,6 +115,14 @@ test('test-filter-graph-latency',
+     depends: latency_step_plugin
+ )
+ 
++test('test-filter-graph-volume',
++    executable('test-filter-graph-volume',
++               'test-filter-graph-volume.c',
++               include_directories: pwtest_inc,
++               dependencies: [spa_dep],
++               link_with: [pwtest_lib])
++)
++
+ test('test-support',
+     executable('test-support',
+                'test-support.c',
+diff --git a/test/test-filter-graph-volume.c b/test/test-filter-graph-volume.c
+new file mode 100644
+index 0000000..8abe4eb
+--- /dev/null
++++ b/test/test-filter-graph-volume.c
+@@ -0,0 +1,193 @@
++/* PipeWire */
++/* SPDX-FileCopyrightText: Copyright © 2026 Aurora Silicon */
++/* SPDX-License-Identifier: MIT */
++
++/* When the graph carries the volume on one of its controls (capture.volumes),
++ * the software volume after it must stay at unity for every Props update that
++ * mentions a volume or mute, also when nothing changed. Otherwise the
++ * converter applies the channel volumes a second time. A graph without
++ * volume controls passes softVolumes on unmodified. */
++
++#include "pwtest.h"
++
++#include <pipewire/pipewire.h>
++#include <spa/filter-graph/filter-graph.h>
++#include <spa/param/audio/raw.h>
++#include <spa/param/props.h>
++#include <spa/pod/builder.h>
++#include <spa/pod/iter.h>
++#include <spa/utils/string.h>
++
++struct data {
++	int n_apply;
++	uint32_t n_soft;
++	float soft[8];
++	bool have_soft_mute;
++	bool soft_mute;
++};
++
++static void apply_props(void *object, enum spa_direction direction, const struct spa_pod *props)
++{
++	struct data *d = object;
++	const struct spa_pod_object *obj = (const struct spa_pod_object *)props;
++	const struct spa_pod_prop *prop;
++
++	d->n_apply++;
++	d->n_soft = 0;
++	d->have_soft_mute = false;
++	SPA_POD_OBJECT_FOREACH(obj, prop) {
++		switch (prop->key) {
++		case SPA_PROP_softVolumes:
++			d->n_soft = spa_pod_copy_array(&prop->value, SPA_TYPE_Float,
++					d->soft, SPA_N_ELEMENTS(d->soft));
++			break;
++		case SPA_PROP_softMute:
++			if (spa_pod_get_bool(&prop->value, &d->soft_mute) == 0)
++				d->have_soft_mute = true;
++			break;
++		}
++	}
++}
++
++static const struct spa_filter_graph_events graph_events = {
++	SPA_VERSION_FILTER_GRAPH_EVENTS,
++	.apply_props = apply_props,
++};
++
++/* Props with any of: channel volume (vol >= 0), soft volume (soft >= 0), mute (mute >= 0) */
++static void set_props(struct spa_filter_graph *graph, float vol, float soft, int mute)
++{
++	uint8_t buffer[1024];
++	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
++	struct spa_pod_frame f;
++	const struct spa_pod *props;
++
++	spa_pod_builder_push_object(&b, &f, SPA_TYPE_OBJECT_Props, SPA_PARAM_Props);
++	if (vol >= 0.0f) {
++		spa_pod_builder_prop(&b, SPA_PROP_channelVolumes, 0);
++		spa_pod_builder_array(&b, sizeof(float), SPA_TYPE_Float, 1, &vol);
++	}
++	if (soft >= 0.0f) {
++		spa_pod_builder_prop(&b, SPA_PROP_softVolumes, 0);
++		spa_pod_builder_array(&b, sizeof(float), SPA_TYPE_Float, 1, &soft);
++	}
++	if (mute >= 0) {
++		spa_pod_builder_prop(&b, SPA_PROP_mute, 0);
++		spa_pod_builder_bool(&b, mute != 0);
++	}
++	props = spa_pod_builder_pop(&b, &f);
++	pwtest_neg_errno_ok(spa_filter_graph_set_props(graph, SPA_DIRECTION_INPUT, props));
++}
++
++static struct spa_handle *load_graph(struct pw_context *context, const char *graph_json,
++		struct spa_filter_graph **graph)
++{
++	struct pw_properties *props;
++	struct spa_handle *handle;
++
++	props = pw_properties_new(
++			SPA_KEY_LIBRARY_NAME, "filter-graph/libspa-filter-graph",
++			"clock.quantum-limit", "256",
++			"filter-graph.n_inputs", "1",
++			"filter-graph.n_outputs", "1",
++			NULL);
++	pw_properties_set(props, "filter.graph", graph_json);
++	handle = pw_context_load_spa_handle(context, "filter.graph", &props->dict);
++	pw_properties_free(props);
++	pwtest_ptr_notnull(handle);
++	pwtest_neg_errno_ok(spa_handle_get_interface(handle,
++				SPA_TYPE_INTERFACE_FilterGraph, (void **)graph));
++	pwtest_ptr_notnull(*graph);
++
++	props = pw_properties_new(SPA_KEY_AUDIO_RATE, "48000", NULL);
++	pwtest_neg_errno_ok(spa_filter_graph_activate(*graph, &props->dict));
++	pw_properties_free(props);
++	return handle;
++}
++
++PWTEST(filter_graph_volume_applied_once)
++{
++	struct pw_main_loop *ml;
++	struct pw_context *context;
++	struct spa_handle *handle;
++	struct spa_filter_graph *graph = NULL;
++	struct spa_hook listener;
++	struct data d = { 0 };
++
++	pw_init(0, NULL);
++	ml = pw_main_loop_new(NULL);
++	pwtest_ptr_notnull(ml);
++	context = pw_context_new(pw_main_loop_get_loop(ml),
++			pw_properties_new(PW_KEY_CONFIG_NAME, "null", NULL), 0);
++	pwtest_ptr_notnull(context);
++
++	/* the graph carries the volume on vol:Mult */
++	handle = load_graph(context,
++			"{ nodes = [ { type = builtin name = vol label = linear } ] "
++			"capture.volumes = [ { control = \"vol:Mult\" min = 0.0 max = 1.0 scale = cubic } ] }",
++			&graph);
++	spa_filter_graph_add_listener(graph, &listener, &graph_events, &d);
++
++	/* a volume change: software stays at unity */
++	set_props(graph, 0.027f, 0.027f, -1);
++	pwtest_int_eq(d.n_soft, 1u);
++	pwtest_double_eq(d.soft[0], 1.0);
++	pwtest_bool_true(d.have_soft_mute);
++	pwtest_bool_false(d.soft_mute);
++
++	/* the same volume again, as a desktop or a restore script sends it */
++	set_props(graph, 0.027f, 0.027f, -1);
++	pwtest_int_eq(d.n_soft, 1u);
++	pwtest_double_eq(d.soft[0], 1.0);
++
++	/* the same volume with no softVolumes: the converter would fall back to
++	 * the channel volumes, so unity has to be added */
++	set_props(graph, 0.027f, -1.0f, -1);
++	pwtest_int_eq(d.n_soft, 1u);
++	pwtest_double_eq(d.soft[0], 1.0);
++
++	/* an unmute of a sink that is not muted (mute only) */
++	set_props(graph, -1.0f, -1.0f, 0);
++	pwtest_int_eq(d.n_soft, 1u);
++	pwtest_double_eq(d.soft[0], 1.0);
++	pwtest_bool_true(d.have_soft_mute);
++	pwtest_bool_false(d.soft_mute);
++
++	/* mute and unmute still work */
++	set_props(graph, -1.0f, -1.0f, 1);
++	pwtest_int_eq(d.n_soft, 1u);
++	pwtest_double_eq(d.soft[0], 0.0);
++	pwtest_bool_true(d.soft_mute);
++	set_props(graph, -1.0f, -1.0f, 0);
++	pwtest_double_eq(d.soft[0], 1.0);
++	pwtest_bool_false(d.soft_mute);
++
++	spa_hook_remove(&listener);
++	pw_unload_spa_handle(handle);
++
++	/* a graph without volume controls passes softVolumes on unmodified */
++	handle = load_graph(context,
++			"{ nodes = [ { type = builtin name = vol label = linear } ] }",
++			&graph);
++	spa_zero(d);
++	spa_filter_graph_add_listener(graph, &listener, &graph_events, &d);
++	set_props(graph, 0.5f, 0.125f, -1);
++	pwtest_int_eq(d.n_soft, 1u);
++	pwtest_double_eq(d.soft[0], 0.125);
++	set_props(graph, -1.0f, -1.0f, 0);
++	pwtest_int_eq(d.n_soft, 0u);
++
++	spa_hook_remove(&listener);
++	pw_unload_spa_handle(handle);
++	pw_context_destroy(context);
++	pw_main_loop_destroy(ml);
++	pw_deinit();
++
++	return PWTEST_PASS;
++}
++
++PWTEST_SUITE(filter_graph_volume)
++{
++	pwtest_add(filter_graph_volume_applied_once, PWTEST_NOARG);
++	return PWTEST_PASS;
++}
+-- 
+2.54.0
+

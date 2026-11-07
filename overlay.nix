@@ -7,7 +7,7 @@ let
   # True with a kernel pin whose configuration resolves CONFIG_ARM64_CTXR_EXECMEM=y
   # (aurora-silicon/linux#985), which keeps every kernel code page inside that
   # window. The kernel build checks this against its configuration.
-  kernelCtxrExecmem = false;
+  kernelCtxrExecmem = true;
   stableFile = path: final.writeText (builtins.baseNameOf path) (builtins.readFile path);
   # nixpkgs constructs the CLI and engine with the same builder argument.
   # Patch only the engine, so the resulting Docker symlinks and wrappers all
@@ -226,6 +226,30 @@ in {
   # so GNOME's About page and desktop tools show the internal disk's capacity.
   udisks = prev.udisks.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [ (stableFile ./patches/udisks-nvme-namespace-size.patch) ];
+  });
+  # PipeWire with the patches fedora-aurora and alarm-aurora carry, for the
+  # daemon (modules/audio.nix sets it as services.pipewire.package). It is a
+  # separate attribute, not a replacement for pipewire: clients that link
+  # libpipewire (SDL, Qt, the portals, the compositors) keep nixpkgs' cached
+  # builds, and the fixed code runs where the speaker graph runs, in the
+  # daemon's filter-chain. 1006: filter-graph keeps the software volume at
+  # unity on every volume or mute update, so a repeated write no longer
+  # applies the speaker volume twice (-31 dB at a 30 % slider). 1005: it
+  # follows its plugins' latency after activation. 1007: spa-alsa waits a
+  # period after a refused start and reports refusals at most once per 5 s. 1000-1004: AirPlay (RAOP)
+  # sender fixes. nixpkgs runs the meson suite, with both new tests.
+  aurora-pipewire = prev.pipewire.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ map stableFile [
+      ./patches/pipewire/1000-module-raop-match-an-RTSP-reply-without-CSeq-to-the-.patch
+      ./patches/pipewire/1001-module-raop-sink-say-why-a-receiver-session-was-drop.patch
+      ./patches/pipewire/1002-module-raop-sink-default-sess.latency.msec-to-whole-.patch
+      ./patches/pipewire/1003-module-raop-discover-reload-a-sink-that-unloaded-its.patch
+      ./patches/pipewire/1004-module-raop-sink-give-up-on-a-session-that-never-rea.patch
+      ./patches/pipewire/1005-filter-graph-follow-plugin-latency-after-activation.patch
+      ./patches/pipewire/1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch
+      ./patches/pipewire/1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch
+    ];
+    doCheck = true;
   });
   upower = prev.upower.overrideAttrs (old: {
     src = source "upower-aurora";
@@ -568,7 +592,7 @@ in {
     # The crates this package ships; the rig and benchmark crates stay out.
     crates = [ "-p" "sgv2-core" "-p" "sgv2-lv2" "-p" "sgv2-supervisor" "-p" "aurora-speaker-tuning" ];
     units = [ "speakerguardd.service" "speakerguardd-provision.service" "speakerguardd-selfcheck.service"
-              "speakerguardd-seat.service" "speakerguardd-seat.path" ];
+              "speakerguardd-seat.service" "speakerguardd-seat.path" "speakerguardd-sleep.service" ];
     userUnits = [ "speakerguardd-session.service" "speakerguardd-graph.service" ];
   in rustPackage "speakerguardd-v2" ./locks/speakerguardd-v2.Cargo.lock {
     cargoBuildFlags = crates;
@@ -624,7 +648,9 @@ in {
       grep -qx 'Requires=speakerguardd-v2-provision.service' $sd/speakerguardd-v2-selfcheck.service
       grep -qx "ExecStart=$lx/speakerguardd-provision seat --unit speakerguardd-v2.service" $sd/speakerguardd-v2-seat.service
       grep -qx "ExecStartPost=$lx/speakerguardd-provision activate --graph-unit speakerguardd-v2-graph.service" $sd/speakerguardd-v2-selfcheck.service
-      for u in speakerguardd-v2 speakerguardd-v2-provision speakerguardd-v2-selfcheck speakerguardd-v2-seat; do
+      grep -qx "ExecStart=$lx/speakerguardd-provision sleep --unit speakerguardd-v2.service" $sd/speakerguardd-v2-sleep.service
+      grep -qx "ExecStop=$lx/speakerguardd-provision wake --unit speakerguardd-v2.service" $sd/speakerguardd-v2-sleep.service
+      for u in speakerguardd-v2 speakerguardd-v2-provision speakerguardd-v2-selfcheck speakerguardd-v2-seat speakerguardd-v2-sleep; do
         grep -qx "ExecCondition=$lx/speakerguardd-gate v2" $sd/$u.service
       done
       if grep -Eq '^(OnFailure|OnSuccess)=|speakersafetyd|=speakerguardd\.service|/usr/' \

@@ -48,8 +48,8 @@ including the MacBook Neo.
 - Such an aura moves the kernel into the CTXR window, which only a kernel built with
   `CONFIG_ARM64_CTXR_EXECMEM` keeps its code inside. Evaluation refuses `auraMonitorFree` without
   `kernelCtxrExecmem`, and the kernel build checks that flag against its resolved configuration, so it can
-  be set only with a kernel pin that has aurora-silicon/linux#985. `kernel/config` already carries
-  `CONFIG_ARM64_CTXR_EXECMEM=y`; until the pin has the option, Kconfig drops it.
+  be set only with a kernel pin that has aurora-silicon/linux#985. The 4731456 pin has it and `kernel/config`
+  turns it on, so `kernelCtxrExecmem` is true.
 - With the marker, a Mac that boots a Mach-O Stage 1 (`/proc/device-tree/compatible` names one of the chips
   in the installer's `AuraStage1Format.usesMachO`: T8130 and later, T6040 and later) gets
   `m1n1/boot-ctxr.bin`, from the build's `ctxr/boot-ctxr-<board>.bin`, with only this board's device trees.

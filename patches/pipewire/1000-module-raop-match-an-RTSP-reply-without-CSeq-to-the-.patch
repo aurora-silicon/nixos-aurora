@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Thu, 15 Oct 2026 16:31:57 +1100
+Subject: [PATCH 1000/1005] module-raop: match an RTSP reply without CSeq to
+ the oldest request
+
+A HomePod whose AirPlay access setting does not admit the sender answers
+the first OPTIONS with "RTSP/1.0 403 Forbidden" and no CSeq header.
+dispatch_handler() returned early on the missing header, so the reply
+was dropped, the OPTIONS callback never ran and the RAOP sink stayed
+"connecting" for good: nothing played and nothing was logged.
+
+Replies arrive in request order on the connection, so hand a reply
+without CSeq to the oldest pending request.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ src/modules/module-raop/rtsp-client.c | 18 +++++++++++++++---
+ 1 file changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/src/modules/module-raop/rtsp-client.c b/src/modules/module-raop/rtsp-client.c
+index 0977871..8419446 100644
+--- a/src/modules/module-raop/rtsp-client.c
++++ b/src/modules/module-raop/rtsp-client.c
+@@ -273,8 +273,20 @@ static void dispatch_handler(struct pw_rtsp_client *client)
+ 	int res;
+ 	struct message *msg;
+ 
+-	if (pw_properties_fetch_uint32(client->headers, "CSeq", &cseq) < 0)
+-		return;
++	if (pw_properties_fetch_uint32(client->headers, "CSeq", &cseq) < 0) {
++		/* Some receivers (HomePod: "403 Forbidden" to OPTIONS) leave out
++		 * CSeq in error replies. Replies come back in order on the one
++		 * connection, so give it to the oldest pending request instead of
++		 * dropping it, which left the caller waiting forever. */
++		if (spa_list_is_empty(&client->pending)) {
++			pw_log_warn("client %p: dropping reply %d without CSeq",
++					client, client->status);
++			goto done;
++		}
++		cseq = spa_list_first(&client->pending, struct message, link)->cseq;
++		pw_log_info("reply %d without CSeq, assuming cseq:%" PRIu32,
++				client->status, cseq);
++	}
+ 
+ 	pw_log_info("received reply to request with cseq:%" PRIu32, cseq);
+ 
+@@ -291,7 +303,7 @@ static void dispatch_handler(struct pw_rtsp_client *client)
+ 	else {
+ 		pw_rtsp_client_emit_message(client, client->status, &client->headers->dict);
+ 	}
+-
++done:
+ 	pw_array_reset(&client->content);
+ }
+ 

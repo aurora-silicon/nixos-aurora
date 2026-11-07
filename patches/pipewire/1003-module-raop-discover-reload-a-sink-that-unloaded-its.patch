@@ -1,0 +1,219 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Thu, 15 Oct 2026 16:31:57 +1100
+Subject: [PATCH 1003/1005] module-raop-discover: reload a sink that unloaded
+ itself
+
+module-raop-sink unloads itself whenever a session fails: the receiver
+refuses a request, a firewall eats its timing packets so SETUP never
+completes, or the connection drops.  raop-discover only noticed by
+clearing the tunnel's module pointer, so the AirPlay device stayed gone
+until the receiver announced itself again over mDNS (often hours) or
+PipeWire was restarted.  Restarting avahi-daemon did not bring it back
+either.
+
+Keep the arguments of the last load and, when the sink unloads itself
+while the receiver is still announced, load it again after a delay that
+starts at 2 s and doubles on each consecutive failure up to 60 s.  A sink
+that stayed loaded for two minutes, or a fresh announcement, starts the
+back-off over.  Removing the receiver (mDNS remove, module unload)
+destroys the sink without scheduling a reload.
+
+The reload only recreates the idle sink; nothing connects to the
+receiver until a client plays to it again.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ src/modules/module-raop-discover.c | 112 +++++++++++++++++++++++++----
+ 1 file changed, 97 insertions(+), 15 deletions(-)
+
+diff --git a/src/modules/module-raop-discover.c b/src/modules/module-raop-discover.c
+index 436972a..added03 100644
+--- a/src/modules/module-raop-discover.c
++++ b/src/modules/module-raop-discover.c
+@@ -5,6 +5,7 @@
+ #include "config.h"
+ 
+ #include <string.h>
++#include <time.h>
+ #include <stdio.h>
+ #include <errno.h>
+ #include <sys/types.h>
+@@ -119,6 +120,14 @@ static const struct spa_dict_item module_props[] = {
+ 
+ #define SERVICE_TYPE_SINK "_raop._tcp"
+ 
++/* A raop-sink unloads itself when a session fails (receiver refused it,
++ * timing never answered, connection lost). Load it again after a delay
++ * that doubles on each consecutive failure, up to this many seconds. */
++#define RETRY_MIN_SEC	2
++#define RETRY_MAX_SEC	60
++/* a sink that stayed loaded this long counts as working again */
++#define RETRY_RESET_SEC	120
++
+ struct impl {
+ 	struct pw_context *context;
+ 
+@@ -144,9 +153,14 @@ struct tunnel_info {
+ 
+ struct tunnel {
+ 	struct spa_list link;
++	struct impl *impl;
+ 	struct tunnel_info info;
+ 	struct pw_impl_module *module;
+ 	struct spa_hook module_listener;
++	char *args;			/* raop-sink arguments of the last load */
++	struct spa_source *retry;	/* reloads the sink after it unloaded itself */
++	uint32_t retries;
++	uint64_t loaded_at;
+ };
+ 
+ static int start_client(struct impl *impl);
+@@ -159,6 +173,7 @@ static struct tunnel *make_tunnel(struct impl *impl, const struct tunnel_info *i
+ 	if (t == NULL)
+ 		return NULL;
+ 
++	t->impl = impl;
+ 	t->info.name = strdup(info->name);
+ 	spa_list_append(&impl->tunnel_list, &t->link);
+ 
+@@ -178,8 +193,14 @@ static struct tunnel *find_tunnel(struct impl *impl, const struct tunnel_info *i
+ static void free_tunnel(struct tunnel *t)
+ {
+ 	spa_list_remove(&t->link);
+-	if (t->module)
++	if (t->retry)
++		pw_loop_destroy_source(pw_context_get_main_loop(t->impl->context), t->retry);
++	if (t->module) {
++		/* the receiver is gone: do not schedule a reload */
++		spa_hook_remove(&t->module_listener);
+ 		pw_impl_module_destroy(t->module);
++	}
++	free(t->args);
+ 	free((char *) t->info.name);
+ 	free(t);
+ }
+@@ -293,11 +314,27 @@ static void pw_properties_from_avahi_string(const char *key, const char *value,
+         }
+ }
+ 
++static uint64_t now_sec(void)
++{
++	struct timespec ts;
++	clock_gettime(CLOCK_MONOTONIC, &ts);
++	return ts.tv_sec;
++}
++
++static void schedule_retry(struct tunnel *t);
++
+ static void submodule_destroy(void *data)
+ {
+ 	struct tunnel *t = data;
+ 	spa_hook_remove(&t->module_listener);
+ 	t->module = NULL;
++
++	/* The sink unloaded itself while the receiver is still announced.
++	 * Without a reload it would stay gone until the receiver announced
++	 * itself again, which can take hours, or PipeWire restarted. */
++	if (now_sec() - t->loaded_at >= RETRY_RESET_SEC)
++		t->retries = 0;
++	schedule_retry(t);
+ }
+ 
+ static const struct pw_impl_module_events submodule_events = {
+@@ -305,6 +342,56 @@ static const struct pw_impl_module_events submodule_events = {
+ 	.destroy = submodule_destroy,
+ };
+ 
++static int load_tunnel(struct tunnel *t)
++{
++	struct pw_impl_module *mod;
++
++	pw_log_info("loading module args:'%s'", t->args);
++	mod = pw_context_load_module(t->impl->context,
++			"libpipewire-module-raop-sink",
++			t->args, NULL);
++	if (mod == NULL) {
++		int res = -errno;
++		pw_log_error("Can't load module: %m");
++		return res;
++	}
++	pw_impl_module_add_listener(mod, &t->module_listener, &submodule_events, t);
++	t->module = mod;
++	t->loaded_at = now_sec();
++	return 0;
++}
++
++static void on_retry(void *data, uint64_t expirations)
++{
++	struct tunnel *t = data;
++
++	if (t->module != NULL || t->args == NULL)
++		return;
++	pw_log_info("reloading sink for '%s'", t->info.name);
++	if (load_tunnel(t) < 0)
++		schedule_retry(t);
++}
++
++static void schedule_retry(struct tunnel *t)
++{
++	struct pw_loop *loop = pw_context_get_main_loop(t->impl->context);
++	struct timespec value = { 0, 0 };
++
++	if (t->args == NULL)
++		return;
++	if (t->retry == NULL &&
++	    (t->retry = pw_loop_add_timer(loop, on_retry, t)) == NULL) {
++		pw_log_error("can't create retry timer: %m");
++		return;
++	}
++	value.tv_sec = SPA_MIN((uint64_t)RETRY_MIN_SEC << SPA_MIN(t->retries, 5u),
++			(uint64_t)RETRY_MAX_SEC);
++	t->retries++;
++	pw_log_info("sink for '%s' unloaded, reloading in %ds",
++			t->info.name, (int)value.tv_sec);
++	pw_loop_update_timer(loop, t->retry, &value, NULL, false);
++}
++
+ struct match_info {
+ 	struct impl *impl;
+ 	struct pw_properties *props;
+@@ -319,7 +406,6 @@ static int create_stream(struct impl *impl, struct pw_properties *props,
+ 	char *args;
+ 	size_t size;
+ 	int res = 0;
+-	struct pw_impl_module *mod;
+ 
+ 	if ((f = open_memstream(&args, &size)) == NULL) {
+ 		res = -errno;
+@@ -332,20 +418,16 @@ static int create_stream(struct impl *impl, struct pw_properties *props,
+ 	fprintf(f, "}");
+         fclose(f);
+ 
+-	pw_log_info("loading module args:'%s'", args);
+-	mod = pw_context_load_module(impl->context,
+-			"libpipewire-module-raop-sink",
+-			args, NULL);
+-	free(args);
+-
+-	if (mod == NULL) {
+-		res = -errno;
+-		pw_log_error("Can't load module: %m");
+-                goto done;
++	free(t->args);
++	t->args = args;
++	/* a fresh announcement: start the reload back-off over */
++	t->retries = 0;
++	if (t->retry) {
++		struct timespec off = { 0, 0 };
++		pw_loop_update_timer(pw_context_get_main_loop(impl->context),
++				t->retry, &off, NULL, false);
+ 	}
+-
+-	pw_impl_module_add_listener(mod, &t->module_listener, &submodule_events, t);
+-	t->module = mod;
++	res = load_tunnel(t);
+ done:
+ 	return res;
+ }

@@ -1,12 +1,12 @@
 {
   "kernel-aurora": {
     "repository": "https://github.com/aurora-silicon/linux",
-    "commit": "f9ce365c10492e31d36c9f6c9acae8c09735524d",
+    "commit": "4731456d979107bfed16316fea45378d9de7d1da",
     "version": "7.3.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/linux/tar.gz/f9ce365c10492e31d36c9f6c9acae8c09735524d",
-    "archive_root": "linux-f9ce365c10492e31d36c9f6c9acae8c09735524d",
-    "sha256": "a22e747bd69a1ef7abb0dfc9cfb41263a38a0fa65f07a1a41ecafadbd4d9ba94",
-    "nix_hash": "sha256-oi50e9aaHversN/Jz7QSY6OKD6ZfB6GkHsr629TZupQ="
+    "source_url": "https://codeload.github.com/aurora-silicon/linux/tar.gz/4731456d979107bfed16316fea45378d9de7d1da",
+    "archive_root": "linux-4731456d979107bfed16316fea45378d9de7d1da",
+    "sha256": "72fedf127148737a5d0c3f82c52022226cf7344974f854f99d3da05d3ba24f16",
+    "nix_hash": "sha256-cv7fEnFIc3pdDD+CxSAiImz3NEl0+FT5nT2gXTuiTxY="
   },
   "aura": {
     "repository": "https://github.com/aurora-silicon/aura",
@@ -46,12 +46,12 @@
   },
   "speakerguardd-v2": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "403b362efd09f4481aca5e73cc827c3b2ddc6b09",
+    "commit": "f5b6933fd6775b06940658117a60a0e336d9f337",
     "version": "1.0.0-alpha.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/403b362efd09f4481aca5e73cc827c3b2ddc6b09",
-    "archive_root": "speakerguardd-403b362efd09f4481aca5e73cc827c3b2ddc6b09",
-    "sha256": "e12d032d17f017bccb28bd2bb92a1bcdf67078a1d6f5e6ae8869d2c222cd1181",
-    "nix_hash": "sha256-4S0DLRfwF7zLKL0ruSobzfZweKHW9eauiGnSwiLNEYE="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/f5b6933fd6775b06940658117a60a0e336d9f337",
+    "archive_root": "speakerguardd-f5b6933fd6775b06940658117a60a0e336d9f337",
+    "sha256": "7397bce94333d25371dff2d87ed8de5f7ce7cc2c75c034b50ce02a3d251a9831",
+    "nix_hash": "sha256-c5e86UMz0lNx3/LYftjeX3znzCx1wDS1DOAqPSUamDE="
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",

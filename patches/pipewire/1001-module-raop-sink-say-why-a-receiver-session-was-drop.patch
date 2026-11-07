@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Thu, 15 Oct 2026 16:31:57 +1100
+Subject: [PATCH 1001/1005] module-raop-sink: say why a receiver session was
+ dropped
+
+When a receiver answers OPTIONS, auth-setup, ANNOUNCE, SETUP or RECORD
+with an error, the sink unloads itself and only an info-level "status"
+line is left, so the user sees an AirPlay device vanish (or play nothing)
+with no explanation at the default log level.  HomePods answer the very
+first OPTIONS with 403 Forbidden when their access setting does not
+admit the sender.
+
+Log a warning naming the receiver, the request and the status, with a
+hint for 403.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ src/modules/module-raop-sink.c | 25 ++++++++++++++++++++-----
+ 1 file changed, 20 insertions(+), 5 deletions(-)
+
+diff --git a/src/modules/module-raop-sink.c b/src/modules/module-raop-sink.c
+index 36fdfa0..cdede96 100644
+--- a/src/modules/module-raop-sink.c
++++ b/src/modules/module-raop-sink.c
+@@ -859,6 +859,21 @@ static uint32_t msec_to_samples(struct impl *impl, uint32_t msec)
+ 	return (uint64_t) msec * impl->rate / 1000;
+ }
+ 
++static void rtsp_refused(struct impl *impl, const char *request, int status)
++{
++	const char *ip = pw_properties_get(impl->props, "raop.ip");
++
++	/* Without this the sink just disappears and the client sees nothing. */
++	if (status == 403)
++		pw_log_warn("%s refused %s (403 Forbidden): the receiver does not "
++				"accept this sender, check its AirPlay access setting",
++				ip ? ip : "receiver", request);
++	else
++		pw_log_warn("%s answered %s with status %d, closing the sink",
++				ip ? ip : "receiver", request, status);
++	pw_impl_module_schedule_destroy(impl->module);
++}
++
+ static int rtsp_record_reply(void *data, int status, const struct spa_dict *headers, const struct pw_array *content)
+ {
+ 	struct impl *impl = data;
+@@ -871,7 +886,7 @@ static int rtsp_record_reply(void *data, int status, const struct spa_dict *head
+ 	case 200:
+ 		break;
+ 	default:
+-		pw_impl_module_schedule_destroy(impl->module);
++		rtsp_refused(impl, "RECORD", status);
+ 		return 0;
+ 	}
+ 
+@@ -973,7 +988,7 @@ static int rtsp_setup_reply(void *data, int status, const struct spa_dict *heade
+ 	case 200:
+ 		break;
+ 	default:
+-		pw_impl_module_schedule_destroy(impl->module);
++		rtsp_refused(impl, "SETUP", status);
+ 		return 0;
+ 	}
+ 
+@@ -1108,7 +1123,7 @@ static int rtsp_announce_reply(void *data, int status, const struct spa_dict *he
+ 	case 200:
+ 		break;
+ 	default:
+-		pw_impl_module_schedule_destroy(impl->module);
++		rtsp_refused(impl, "ANNOUNCE", status);
+ 		return 0;
+ 	}
+ 
+@@ -1309,7 +1324,7 @@ static int rtsp_post_auth_setup_reply(void *data, int status, const struct spa_d
+ 	case 200:
+ 		break;
+ 	default:
+-		pw_impl_module_schedule_destroy(impl->module);
++		rtsp_refused(impl, "POST /auth-setup", status);
+ 		return 0;
+ 	}
+ 
+@@ -1421,7 +1436,7 @@ static int rtsp_options_reply(void *data, int status, const struct spa_dict *hea
+ 			res = rtsp_do_announce(impl);
+ 		break;
+ 	default:
+-		pw_impl_module_schedule_destroy(impl->module);
++		rtsp_refused(impl, "OPTIONS", status);
+ 		return 0;
+ 	}
+ 	return res;
