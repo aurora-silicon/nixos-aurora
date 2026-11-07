@@ -46,12 +46,12 @@
   },
   "speakerguardd-v2": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "f5b6933fd6775b06940658117a60a0e336d9f337",
+    "commit": "4d6273225e0d718250cfc9ad7090124478b0a9af",
     "version": "1.0.0-alpha.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/f5b6933fd6775b06940658117a60a0e336d9f337",
-    "archive_root": "speakerguardd-f5b6933fd6775b06940658117a60a0e336d9f337",
-    "sha256": "7397bce94333d25371dff2d87ed8de5f7ce7cc2c75c034b50ce02a3d251a9831",
-    "nix_hash": "sha256-c5e86UMz0lNx3/LYftjeX3znzCx1wDS1DOAqPSUamDE="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/4d6273225e0d718250cfc9ad7090124478b0a9af",
+    "archive_root": "speakerguardd-4d6273225e0d718250cfc9ad7090124478b0a9af",
+    "sha256": "b6c77a1df51aa64ee7aa394d7e84d9ab73598f2798bc610140108b2495dbc6a9",
+    "nix_hash": "sha256-tsd6HfUapk7nqjlNfoTZq3NZjyeYvGEBQBCLJJXbxqk="
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",
@@ -64,12 +64,12 @@
   },
   "aurora-audio": {
     "repository": "https://github.com/aurora-silicon/asahi-audio",
-    "commit": "f1d596b9efeede884b28e3ad81fff24b22ba97a3",
+    "commit": "a321ae95d04d08136934c643472f7d59aa0bbf94",
     "version": "4.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/asahi-audio/tar.gz/f1d596b9efeede884b28e3ad81fff24b22ba97a3",
-    "archive_root": "asahi-audio-f1d596b9efeede884b28e3ad81fff24b22ba97a3",
-    "sha256": "474ef9dde74f7d7763e76d6da72eb4a318fda78dace4fda6c761043ced152676",
-    "nix_hash": "sha256-R0753edPfXdj521tpy60oxj9p42s5P2mx2EEPO0VJnY="
+    "source_url": "https://codeload.github.com/aurora-silicon/asahi-audio/tar.gz/a321ae95d04d08136934c643472f7d59aa0bbf94",
+    "archive_root": "asahi-audio-a321ae95d04d08136934c643472f7d59aa0bbf94",
+    "sha256": "05ca18989fb88331284c747bea05498919ebcf6c64dea1738a875d4af42abe94",
+    "nix_hash": "sha256-BcoYmJ+4gzEoTHR76gVJiRnrz2xk3qFzioddSvQqvpQ="
   },
   "aurora-bless": {
     "repository": "https://github.com/aurora-silicon/aurora-bless",
