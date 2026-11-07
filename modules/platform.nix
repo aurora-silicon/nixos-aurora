@@ -30,7 +30,9 @@
   ];
   # The sense-PCM udev rule starts the feed-forward guardian only on J700.
   systemd.services.speakersafetyd.serviceConfig = {
-    ExecCondition = "${pkgs.speakerguardd}/libexec/speakerguardd/use-feedback-guard";
+    # A list, so speakerguardd-v2's fleet gate (modules/speakerguardd-v2.nix)
+    # adds its own condition beside this one.
+    ExecCondition = [ "${pkgs.speakerguardd}/libexec/speakerguardd/use-feedback-guard" ];
     # speakersafetyd writes /run/speakersafetyd/speakersafetyd.flag on its
     # first start after boot, and a start that finds it assumes the speakers
     # are at their temperature limit. systemd removes the RuntimeDirectory
