@@ -85,6 +85,9 @@
         speakerguardd = pkgs.speakerguardd;
         speakerguardd-v2 = pkgs.speakerguardd-v2;
         mutter = pkgs.mutter;
+        iio-sensor-proxy = pkgs.iio-sensor-proxy;
+        gnome-settings-daemon = pkgs.gnome-settings-daemon;
+        kwin = pkgs.kdePackages.kwin;
         speakersafetyd = pkgs.speakersafetyd;
         bankstown = pkgs.bankstown-lv2;
         neo-platform = pkgs.aurora-neo-platform-config;

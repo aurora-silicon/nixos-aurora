@@ -137,6 +137,14 @@ in {
   aurora-logos = final.callPackage ./logos/package.nix { };
   plymouth-theme-aurora = final.callPackage ./plymouth-theme-aurora/package.nix { };
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
+    # Opt-in ambient white point in Night Light (AmbientWhitePoint in kwinrc,
+    # off by default), fed by iio-sensor-proxy's ColorTemperature. The same
+    # patch is in fedora-aurora's and alarm-aurora's kwin packages.
+    kwin = kdePrev.kwin.overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ map stableFile [
+        ./patches/kwin-nightlight-ambient-white-point.patch
+      ];
+    });
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [
         ./patches/kinfocenter-unknown-memory.patch
@@ -151,6 +159,51 @@ in {
         ./patches/plasma-setup-unique-pages.patch
       ];
     });
+  });
+  # The ambient light's colour temperature as SensorProxy's ColorTemperature,
+  # from the IIO in_colortemp_input channel. The same patch is in
+  # fedora-aurora's and alarm-aurora's iio-sensor-proxy packages.
+  iio-sensor-proxy = prev.iio-sensor-proxy.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./patches/iio-sensor-proxy-ambient-colour-temperature.patch)
+    ];
+    # Run the integration tests, which include one for the colour channel.
+    postPatch = (old.postPatch or "") + ''
+      patchShebangs tests
+    '';
+    mesonFlags = (old.mesonFlags or [ ]) ++ [ (final.lib.mesonBool "tests" true) ];
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
+      final.gobject-introspection
+      final.umockdev
+      (final.python3.withPackages (p: [ p.dbus-python p.python-dbusmock p.pygobject3 p.psutil ]))
+    ];
+    checkInputs = (old.checkInputs or [ ]) ++ [ final.umockdev ];
+    nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.dbus ];
+    doCheck = true;
+    # The Qualcomm SSC tests need SSC services that the sandbox lacks; they
+    # fail the same way on the unpatched 3.9.
+    checkPhase = ''
+      runHook preCheck
+      meson test --no-rebuild --print-errorlogs $(meson test --no-rebuild --list 2>/dev/null | grep -v ssc)
+      runHook postCheck
+    '';
+  });
+  # Opt-in ambient white point in the colour plugin
+  # (org.gnome.settings-daemon.plugins.color ambient-white-point-enabled, off
+  # by default). The same patch is in fedora-aurora's and alarm-aurora's
+  # gnome-settings-daemon packages.
+  gnome-settings-daemon = prev.gnome-settings-daemon.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./patches/gnome-settings-daemon-ambient-white-point.patch)
+    ];
+    nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.dbus ];
+    doCheck = true;
+    checkPhase = ''
+      runHook preCheck
+      export XDG_DATA_DIRS="${final.gsettings-desktop-schemas}/share/gsettings-schemas/${final.gsettings-desktop-schemas.name}''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+      meson test --no-rebuild --print-errorlogs gcm-self-test ambient-policy ambient-service
+      runHook postCheck
+    '';
   });
   gnome-initial-setup = prev.gnome-initial-setup.overrideAttrs (old: {
     mesonFlags = map (flag: if final.lib.hasPrefix "-Dvendor-conf-file=" flag
