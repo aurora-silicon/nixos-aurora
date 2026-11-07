@@ -3,7 +3,7 @@ let
   # True once the pinned aura has no monitor (aura#77); its build checks this
   # against the source. Such an aura moves the kernel into the CTXR window, so it
   # needs kernelCtxrExecmem.
-  auraMonitorFree = false;
+  auraMonitorFree = true;
   # True with a kernel pin whose configuration resolves CONFIG_ARM64_CTXR_EXECMEM=y
   # (aurora-silicon/linux#985), which keeps every kernel code page inside that
   # window. The kernel build checks this against its configuration.
@@ -417,8 +417,8 @@ in {
       kernelLLVM.clang-unwrapped kernelLLVM.lld kernelLLVM.llvm final.buildPackages.python3
     ];
     makeFlags = [ "RELEASE=1" "CHAINLOADING=1" "BUILTIN_LOGO=aurora" "USE_CLANG=1" ];
-    # This pin carries the v1.0.0b5 release label in archive builds.
-    env = (old.env or { }) // { AURA_VERSION_TAG = "1.0.0b5"; };
+    # This pin carries the v1.0.0b7 release label in archive builds.
+    env = (old.env or { }) // { AURA_VERSION_TAG = "1.0.0b7"; };
     postBuild = ''
       mkdir -p stage1
       cp build/aura.bin stage1/aura-raw.bin

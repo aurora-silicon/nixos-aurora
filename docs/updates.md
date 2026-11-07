@@ -44,12 +44,13 @@ including the MacBook Neo.
   fails the bootloader install loudly.
 - The aura build carries `share/aura/monitor-free` once its pinned source has no monitor. `overlay.nix`
   declares that in `auraMonitorFree`, and the aura build refuses a source that disagrees (`src/ctxr_exec.c`,
-  or no `src/monitor.c`), so the aura#77 pin has to set it. Until then every Mac updates `boot.bin`.
+  or no `src/monitor.c`). aura 1.0.0b7 is the first pin without the monitor (aura#77), so `auraMonitorFree`
+  is true.
 - Such an aura moves the kernel into the CTXR window, which only a kernel built with
   `CONFIG_ARM64_CTXR_EXECMEM` keeps its code inside. Evaluation refuses `auraMonitorFree` without
   `kernelCtxrExecmem`, and the kernel build checks that flag against its resolved configuration, so it can
-  be set only with a kernel pin that has aurora-silicon/linux#985. The 4731456 pin has it and `kernel/config`
-  turns it on, so `kernelCtxrExecmem` is true.
+  be set only with a kernel pin that has aurora-silicon/linux#985. Every kernel pin since 4731456 has it, and
+  `kernel/config` turns it on, so `kernelCtxrExecmem` is true.
 - With the marker, a Mac that boots a Mach-O Stage 1 (`/proc/device-tree/compatible` names one of the chips
   in the installer's `AuraStage1Format.usesMachO`: T8130 and later, T6040 and later) gets
   `m1n1/boot-ctxr.bin`, from the build's `ctxr/boot-ctxr-<board>.bin`, with only this board's device trees.
