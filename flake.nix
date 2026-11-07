@@ -76,6 +76,7 @@
           '';
         };
         alsa-utils = pkgs.aurora-alsa-utils;
+        pipewire = pkgs.aurora-pipewire;
         audio = pkgs.asahi-audio;
         ucm = pkgs.alsa-ucm-conf-asahi;
         fex-mesa = pkgs.aurora-fex-mesa;
@@ -244,6 +245,12 @@
               "the display chain and its PMP come up before the root is unlocked" =
                 lib.all (m: lib.elem m config.boot.initrd.availableKernelModules)
                   [ "apple-pmp" "mux-apple-display-crossbar" "appledrm" ];
+              "the PipeWire daemon carries the filter-graph volume and latency fixes" = let
+                package = config.services.pipewire.package;
+                patched = suffix: lib.any (patch: lib.hasSuffix suffix (toString patch)) (package.patches or [ ]);
+              in package.doCheck
+                && patched "-1005-filter-graph-follow-plugin-latency-after-activation.patch"
+                && patched "-1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch";
               "PipeWire and WirePlumber use the pinned audio and UCM profiles" =
                 lib.elem value.pkgs.asahi-audio config.services.pipewire.configPackages
                 && lib.elem value.pkgs.asahi-audio config.services.pipewire.wireplumber.configPackages

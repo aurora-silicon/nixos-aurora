@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Thu, 15 Oct 2026 16:31:57 +1100
+Subject: [PATCH 1002/1005] module-raop-sink: default sess.latency.msec to
+ whole packets
+
+The default sess.latency.msec is the RAOP latency in milliseconds, which
+is not a multiple of the 352-frame (7.98 ms) UDP or 4096-frame TCP
+packet, so every RAOP sink logs
+
+  sess.latency.msec ... should be an integer multiple of rtp.ptime 7.981859
+
+and module-rtp rounds the buffer down.  Derive the default from a whole
+number of packets instead (rounding up), so the warning only appears for
+a user-supplied value.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ src/modules/module-raop-sink.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/src/modules/module-raop-sink.c b/src/modules/module-raop-sink.c
+index cdede96..399210f 100644
+--- a/src/modules/module-raop-sink.c
++++ b/src/modules/module-raop-sink.c
+@@ -1913,8 +1913,18 @@ int pipewire__module_init(struct pw_impl_module *module, const char *args)
+ 		pw_properties_setf(props, "sess.ts-direct", "%d", 0);
+ 	if (pw_properties_get(props, "sess.media") == NULL)
+ 		pw_properties_set(props, "sess.media", "raop");
+-	if (pw_properties_get(props, "sess.latency.msec") == NULL)
+-		pw_properties_setf(props, "sess.latency.msec", "%d", RAOP_LATENCY_MS);
++	if (pw_properties_get(props, "sess.latency.msec") == NULL) {
++		/* module-rtp wants a whole number of packets; otherwise it warns
++		 * and rounds down. Round up instead, plus half a sample so that
++		 * converting back to samples does not truncate below it. */
++		uint32_t samples = SPA_ROUND_UP(msec_to_samples(impl, RAOP_LATENCY_MS),
++				impl->psamples);
++		char latency[64];
++
++		pw_properties_set(props, "sess.latency.msec",
++				spa_dtoa(latency, sizeof(latency),
++					(samples + 0.5) * 1000.0 / impl->rate));
++	}
+ 
+ 	if ((str = pw_properties_get(props, "stream.props")) != NULL)
+ 		pw_properties_update_string(impl->stream_props, str, strlen(str));

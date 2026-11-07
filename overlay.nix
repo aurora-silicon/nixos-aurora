@@ -215,6 +215,28 @@ in {
   udisks = prev.udisks.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [ (stableFile ./patches/udisks-nvme-namespace-size.patch) ];
   });
+  # PipeWire with the patches fedora-aurora and alarm-aurora carry, for the
+  # daemon (modules/audio.nix sets it as services.pipewire.package). It is a
+  # separate attribute, not a replacement for pipewire: clients that link
+  # libpipewire (SDL, Qt, the portals, the compositors) keep nixpkgs' cached
+  # builds, and the fixed code runs where the speaker graph runs, in the
+  # daemon's filter-chain. 1006: filter-graph keeps the software volume at
+  # unity on every volume or mute update, so a repeated write no longer
+  # applies the speaker volume twice (-31 dB at a 30 % slider). 1005: it
+  # follows its plugins' latency after activation. 1000-1004: AirPlay (RAOP)
+  # sender fixes. nixpkgs runs the meson suite, with both new tests.
+  aurora-pipewire = prev.pipewire.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ map stableFile [
+      ./patches/pipewire/1000-module-raop-match-an-RTSP-reply-without-CSeq-to-the-.patch
+      ./patches/pipewire/1001-module-raop-sink-say-why-a-receiver-session-was-drop.patch
+      ./patches/pipewire/1002-module-raop-sink-default-sess.latency.msec-to-whole-.patch
+      ./patches/pipewire/1003-module-raop-discover-reload-a-sink-that-unloaded-its.patch
+      ./patches/pipewire/1004-module-raop-sink-give-up-on-a-session-that-never-rea.patch
+      ./patches/pipewire/1005-filter-graph-follow-plugin-latency-after-activation.patch
+      ./patches/pipewire/1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch
+    ];
+    doCheck = true;
+  });
   upower = prev.upower.overrideAttrs (old: {
     src = source "upower-aurora";
     version = pins.upower-aurora.version;
