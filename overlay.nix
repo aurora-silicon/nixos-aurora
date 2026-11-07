@@ -662,6 +662,8 @@ in {
     buildInputs = [ final.pipewire ];
     mesonFlags = [
       "-Ddaemon=enabled"
+      # The optional Vulkan temporal backend stays out, as on Fedora and Arch.
+      "-Dgpu=disabled"
       "-Dsysconfdir=/etc"
       "-Dsystemduserunitdir=${placeholder "out"}/lib/systemd/user"
     ];
