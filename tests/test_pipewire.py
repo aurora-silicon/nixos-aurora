@@ -12,6 +12,7 @@ PATCHES = [
     '1004-module-raop-sink-give-up-on-a-session-that-never-rea.patch',
     '1005-filter-graph-follow-plugin-latency-after-activation.patch',
     '1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch',
+    '1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch',
 ]
 
 
