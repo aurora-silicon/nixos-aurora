@@ -80,6 +80,24 @@ The Aurora libfprint build keeps the full upstream driver set and adds the SEP
 biometric interface. Module reload cannot repeat the secure enclave handoff;
 driver updates take effect after a full reboot.
 
+## Starting Touch ID over: aurora-xart
+
+`aurora-xart status` shows what the SEP driver reports and explains a stuck
+keybag in plain words; `aurora-xart list` shows Linux's xART records and state
+files. When the keybag is stuck or no longer loads, for example on an M1 Mac
+whose Touch ID setup began on a kernel that guarded it and never finished
+("identity keybag state is ambiguous: EEXIST" at every boot), start Touch ID
+over:
+
+    sudo aurora-xart reset-touchid
+
+It refuses on a read-only install, when the driver is not running and when the
+keybag works, asks you to type RESET, and moves the Touch ID state and every
+user's prints for the Apple sensor into
+`/var/lib/aurora-sep-touchid-reset-<time>/`. It keeps the xART guard's files
+and the calibration. Reboot, then enrol every finger again; kernel trusted keys
+sealed before the reset can no longer be unsealed.
+
 ## Where Touch ID is used
 
 Enrol a finger in GNOME Settings > Users or in KDE System Settings > Users
