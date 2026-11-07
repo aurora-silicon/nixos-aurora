@@ -91,6 +91,7 @@
         aurora-bless = pkgs.aurora-bless;
         camera-denoise = pkgs.aurora-camera-denoise;
         kbd-light = pkgs.aurora-kbd-light;
+        sep-luks = pkgs.aurora-sep-luks;
       };
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;

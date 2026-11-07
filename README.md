@@ -33,6 +33,8 @@ Native builds pass for Aura, U-Boot, the shared 7.3.0 kernel, Mesa, speakerguard
 
 `modules/camera-denoise.nix` runs aurora-camera-denoise, a PipeWire filter that denoises the built-in camera in low light, as a user service started with PipeWire. It only filters on boards listed in its board data. `aurora.cameraDenoise.enable = false;` turns it off, and `aurora.cameraDenoise.settings` writes `/etc/aurora-camera-denoise/denoise.conf`.
 
+`modules/sep-luks.nix` adds aurora-sep-cryptenroll and its cryptsetup token plugin with `aurora.sepLuks.enable = true;`. It unlocks LUKS2 data volumes with the Secure Enclave, like `systemd-cryptenroll --tpm2-device=auto`, and keeps the passphrase. Nothing is enrolled until you run it on a volume; see `docs/luks-sep.md` in aurora-sep-userspace.
+
 `modules/kbd-light.nix` runs aurora-kbd-light, which sets the keyboard backlight from the ambient light sensor as macOS does, as a system service. `aurora.kbdLight.enable = false;` turns it off, and `aurora.kbdLight.settings` overrides its lux thresholds and levels.
 
 The cache tools are `scripts/export-cache` (an unsigned export of a build's closure), `scripts/sign-cache-metadata.py` (signs narinfo metadata in the publisher's protected job) and `scripts/prepare-cache-publication.py`. No build job holds the signing key. Cache clients verify signed NAR identities independently of their transport URLs. The public key is `keys/cache.pub`; publication and image qualification remain separate operations.

@@ -735,6 +735,37 @@ in {
       platforms = [ "aarch64-linux" ];
     };
   };
+  # Secure Enclave LUKS2 unlock: aurora-sep-cryptenroll and the cryptsetup
+  # token plugin. modules/sep-luks.nix installs it when asked.
+  aurora-sep-luks = final.stdenv.mkDerivation {
+    pname = "aurora-sep-luks";
+    version = pins.aurora-sep-userspace.version;
+    src = source "aurora-sep-userspace";
+    sourceRoot = "${pins.aurora-sep-userspace.archive_root}/luks";
+    nativeBuildInputs = [ final.pkg-config ];
+    buildInputs = [ final.cryptsetup final.json_c ];
+    makeFlags = [ "PREFIX=${placeholder "out"}" "TOKENDIR=${placeholder "out"}/lib/cryptsetup" ];
+    # The unit test needs the kernel keyring, which the Nix sandbox blocks
+    # (it exits 77 then); the file-image tests run in CI.
+    doCheck = true;
+    checkPhase = ''
+      runHook preCheck
+      make test/test-seal
+      ./test/test-seal || [ $? = 77 ]
+      runHook postCheck
+    '';
+    postInstall = ''
+      install -Dm644 ../docs/luks-sep.md $out/share/doc/aurora-sep-luks/luks-sep.md
+    '';
+    passthru.commit = pins.aurora-sep-userspace.commit;
+    meta = {
+      description = "Unlock LUKS2 volumes with the Apple Secure Enclave";
+      homepage = "https://github.com/aurora-silicon/aurora-sep-userspace";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-sep-cryptenroll";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
   aurora-bless = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
     cargoBuildFlags = [ "-p" "asahi-bless" ];
     cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "asahi-nvram" ];
