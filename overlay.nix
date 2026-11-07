@@ -706,6 +706,36 @@ in {
       platforms = [ "aarch64-linux" ];
     };
   };
+  # Inspects the Linux side of the SEP and xART state and starts Touch ID over
+  # (aurora-xart reset-touchid). modules/sep.nix installs it.
+  aurora-xart = final.stdenvNoCC.mkDerivation {
+    pname = "aurora-xart";
+    version = pins.aurora-xart.version;
+    src = source "aurora-xart";
+    nativeBuildInputs = [ final.python3 ];
+    dontBuild = true;
+    doCheck = true;
+    checkPhase = ''
+      runHook preCheck
+      make check PYTHON=${final.python3.interpreter}
+      runHook postCheck
+    '';
+    installPhase = ''
+      runHook preInstall
+      make install DESTDIR=$out PREFIX=
+      substituteInPlace $out/bin/aurora-xart \
+        --replace-fail "#!/usr/bin/python3 -I" "#!${final.python3.interpreter} -I"
+      runHook postInstall
+    '';
+    passthru.commit = pins.aurora-xart.commit;
+    meta = {
+      description = "Inspect and manage the Linux side of the Secure Enclave and xART state";
+      homepage = "https://github.com/aurora-silicon/aurora-xart";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-xart";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
   aurora-bless = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
     cargoBuildFlags = [ "-p" "asahi-bless" ];
     cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "asahi-nvram" ];

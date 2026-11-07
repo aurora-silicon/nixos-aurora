@@ -76,8 +76,8 @@ established, so:
 ### Setting up Touch ID: creating the keybag
 
 Creating Linux's identity keybag (CREATE_KEYBAG, `sks.rs`) happens on a
-first setup and after `install-aurora-sep.sh --reset-touchid`. Enrolling
-another finger into an existing keybag does not create one.
+first setup and after `aurora-xart reset-touchid`. Enrolling another
+finger into an existing keybag does not create one.
 
 | Platform | Bootstrap | Keybag creation under level 1 |
 | --- | --- | --- |
@@ -157,7 +157,7 @@ it:
 - A reinstall, or deleting the file, empties the list. Every Linux record
   then looks like another OS's. Copy the file back from the old install if
   you have it. Without it, those records stay protected; resetting Touch ID
-  (`install-aurora-sep.sh --reset-touchid`) creates a new keybag.
+  (`aurora-xart reset-touchid`) creates a new keybag.
 - A torn last entry, from a crash while appending, is ignored at the next
   probe and overwritten by the next new record.
 

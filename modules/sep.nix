@@ -24,7 +24,8 @@ in {
       # Explicit service loading waits for /var and per-machine firmware. This only
       # suppresses early alias loading; the boot timer enables SEP on the real root.
       boot.blacklistedKernelModules = [ "apple_sep" ];
-      environment.systemPackages = [ pkgs.aurora-sep pkgs.libfprint ];
+      # aurora-xart reset-touchid starts Touch ID over when its keybag is stuck.
+      environment.systemPackages = [ pkgs.aurora-sep pkgs.aurora-xart pkgs.libfprint ];
       services.fprintd.enable = true;
       # Touch ID: a fingerprint or the password at sudo, polkit and the lock
       # screens (gdm-fingerprint, and kde-fingerprint from the Plasma module);
