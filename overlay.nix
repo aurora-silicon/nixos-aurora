@@ -652,8 +652,14 @@ in {
       grep -qx "ExecStartPost=$lx/speakerguardd-provision activate --graph-unit speakerguardd-v2-graph.service" $sd/speakerguardd-v2-selfcheck.service
       grep -qx "ExecStart=$lx/speakerguardd-provision sleep --unit speakerguardd-v2.service" $sd/speakerguardd-v2-sleep.service
       grep -qx "ExecStop=$lx/speakerguardd-provision wake --unit speakerguardd-v2.service" $sd/speakerguardd-v2-sleep.service
-      for u in speakerguardd-v2 speakerguardd-v2-provision speakerguardd-v2-selfcheck speakerguardd-v2-seat speakerguardd-v2-sleep; do
+      # The supervisor and the sleep hooks need a qualified board (gate v2);
+      # provisioning, the seat follower and the silent self-check run first,
+      # in the gate's prepare mode, and produce the records that qualify it.
+      for u in speakerguardd-v2 speakerguardd-v2-sleep; do
         grep -qx "ExecCondition=$lx/speakerguardd-gate v2" $sd/$u.service
+      done
+      for u in speakerguardd-v2-provision speakerguardd-v2-selfcheck speakerguardd-v2-seat; do
+        grep -qx "ExecCondition=$lx/speakerguardd-gate prepare" $sd/$u.service
       done
       if grep -Eq '^(OnFailure|OnSuccess)=|speakersafetyd|=speakerguardd\.service|/usr/' \
           $sd/speakerguardd-v2* $out/lib/systemd/user/speakerguardd-v2*; then
