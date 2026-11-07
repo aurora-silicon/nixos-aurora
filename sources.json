@@ -171,6 +171,15 @@
     "sha256": "9419eea57c51fd4ccf83fe764bb85c18f9054d684d21415d189fa46fe568e88c",
     "nix_hash": "sha256-lBnupXxR/UzPg/52S7hcGPkFTWhNIUFdGJ+kb+Vo6Iw="
   },
+  "aurora-xart": {
+    "repository": "https://github.com/aurora-silicon/aurora-xart",
+    "commit": "83ae1899d0a70e84cb464b8443a3458408b2d28e",
+    "version": "0.1.0",
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-xart/tar.gz/83ae1899d0a70e84cb464b8443a3458408b2d28e",
+    "archive_root": "aurora-xart-83ae1899d0a70e84cb464b8443a3458408b2d28e",
+    "sha256": "1d91de60345f0c0633d00402aaec60de3ab52c8c560ae5d7a1ffc82909d7bdda",
+    "nix_hash": "sha256-HZHeYDRfDAYz0AQCquxg3jq1LIxWCuXXof/IKQnXvdo="
+  },
   "omarchy-ane-tools": {
     "repository": "https://github.com/joshuaswarren/omarchy-ane",
     "commit": "68e92712bbffa08f5002dcc542434fe1393f0578",
