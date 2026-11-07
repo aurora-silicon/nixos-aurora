@@ -27,6 +27,13 @@
       destination = "/lib/udev/hwdb.d/60-aurora-dmi-vendor.hwdb";
       text = builtins.readFile ./60-aurora-dmi-vendor.hwdb;
     })
+    # The GPU card only renders (the display is the apple-drm card): tag it
+    # mutter-device-ignore so mutter stops failing to open it at every login.
+    (pkgs.writeTextFile {
+      name = "aurora-gpu-render-only-rules";
+      destination = "/lib/udev/rules.d/62-aurora-gpu-render-only.rules";
+      text = builtins.readFile ./62-aurora-gpu-render-only.rules;
+    })
   ];
   # The sense-PCM udev rule starts the feed-forward guardian only on J700.
   systemd.services.speakersafetyd.serviceConfig = {
