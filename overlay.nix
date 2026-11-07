@@ -172,6 +172,7 @@ in {
       ./sep/0003-hide-lid-covered-readers-while-the-lid-is-closed.patch
       ./sep/0004-aurora-refuse-unbound-enrollment.patch
       ./sep/0005-aurora-support-v4-and-v5.patch
+      ./sep/0006-aurora-report-finger-lift-and-lockout.patch
     ];
     postPatch = (old.postPatch or "") + ''
       install -Dm644 ${stableFile ./sep/apple-sep.h} aurora-uapi/linux/apple-sep.h

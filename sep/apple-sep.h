@@ -84,6 +84,11 @@ struct sep_bio_enclave_list {
 #define SEP_BIO_GUIDANCE_PLACE         1
 #define SEP_BIO_GUIDANCE_LIFT_AND_MOVE 2
 #define SEP_BIO_GUIDANCE_HOLD_STILL    3
+/*
+ * The finger of the last touch is still on the sensor; the next capture is
+ * armed when it is lifted. Older readers treat it as SEP_BIO_GUIDANCE_NONE.
+ */
+#define SEP_BIO_GUIDANCE_LIFT          4
 
 struct sep_bio_enrol_poll {
 	__u32 state;
@@ -147,5 +152,36 @@ struct sep_bio_attest {
  * identities. ENROL_START itself never repairs a missing persistence binding.
  */
 #define SEP_BIO_PREPARE_ENROL _IOW(SEP_BIO_IOC_MAGIC, 0x0d, struct sep_bio_enrol_start)
+
+/*
+ * A verify poll's 'status' when the enclave has stopped matching after too
+ * many failed attempts. Every verify then fails at once, without a capture,
+ * until a password authentication re-arms Touch ID through SEP_BIO_REARM.
+ * The lockout outlasts a restart.
+ */
+#define SEP_BIO_STATUS_LOCKOUT 8
+
+/* /dev/sep-bio-rearm, which any number of root callers may open. */
+struct sep_bio_lockout {
+	__u32 locked;    /* 1 while every verify is refused */
+	__u32 failures;  /* failed matches since the last match or re-arm */
+	__u32 reserved[2];
+};
+
+#define SEP_BIO_LOCKOUT_STATE _IOR(SEP_BIO_IOC_MAGIC, 0x0e, struct sep_bio_lockout)
+/*
+ * Ends a lockout. Call it only once the user's password has been verified:
+ * the password is used once to unwrap the Linux-owned FV re-arm record and is
+ * wiped after the request. Needs CAP_SYS_ADMIN. Without a lockout it does
+ * nothing.
+ */
+#define SEP_BIO_REARM_SECRET_MAX 1024
+struct sep_bio_rearm {
+	__u32 secret_len;
+	__u32 reserved;
+	__u8  secret[SEP_BIO_REARM_SECRET_MAX];
+};
+
+#define SEP_BIO_REARM _IOW(SEP_BIO_IOC_MAGIC, 0x0f, struct sep_bio_rearm)
 
 #endif /* _UAPI_LINUX_APPLE_SEP_H */
