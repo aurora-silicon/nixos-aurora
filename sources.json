@@ -127,12 +127,12 @@
   },
   "upower-aurora": {
     "repository": "https://github.com/aurora-silicon/upower",
-    "commit": "ec0b67ff412d97b16629614edc4decbb34d05983",
+    "commit": "d8a24ffc5b9a49f71a28517f7c8b92b16701597a",
     "version": "1.91.5",
-    "source_url": "https://codeload.github.com/aurora-silicon/upower/tar.gz/ec0b67ff412d97b16629614edc4decbb34d05983",
-    "archive_root": "upower-ec0b67ff412d97b16629614edc4decbb34d05983",
-    "sha256": "6758f97ce858a51919755a206387b7ca8795793fa62ebd8b8e5ae5fe3fbe9784",
-    "nix_hash": "sha256-Z1j5fOhYpRkZdVogY4e3yoeVeT+mLr2Ljlrl/j++l4Q="
+    "source_url": "https://codeload.github.com/aurora-silicon/upower/tar.gz/d8a24ffc5b9a49f71a28517f7c8b92b16701597a",
+    "archive_root": "upower-d8a24ffc5b9a49f71a28517f7c8b92b16701597a",
+    "sha256": "ad2fa2023b551f851b50957800679d2b5399cc4707fdcb3c4870d3a9c2f9e292",
+    "nix_hash": "sha256-rS+iAjtVH4UbUJV4AGedK1OZzEcH/cs8SHDTqcL54pI="
   },
   "libfprint": {
     "repository": "https://gitlab.freedesktop.org/libfprint/libfprint",
@@ -155,12 +155,12 @@
   },
   "camera-denoise": {
     "repository": "https://github.com/aurora-silicon/camera-denoise",
-    "commit": "a929985764bc03d1d3517c2a7e9b8dde918381b8",
+    "commit": "456c567527d6bbba27d0aaeec1199032e0ec88c3",
     "version": "0.1.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/camera-denoise/tar.gz/a929985764bc03d1d3517c2a7e9b8dde918381b8",
-    "archive_root": "camera-denoise-a929985764bc03d1d3517c2a7e9b8dde918381b8",
-    "sha256": "a64325767aff4555b6c6ca1caaded55ac814c0da474c1a47bbaf99dc81175fa0",
-    "nix_hash": "sha256-pkMldnr/RVW2xsocqt7VWsgUwNpHTBpHu6+Z3IEXX6A="
+    "source_url": "https://codeload.github.com/aurora-silicon/camera-denoise/tar.gz/456c567527d6bbba27d0aaeec1199032e0ec88c3",
+    "archive_root": "camera-denoise-456c567527d6bbba27d0aaeec1199032e0ec88c3",
+    "sha256": "14e5dd45487b260ac6abffcfbe0a787df76bfe21c72bad68f20fb8400f548f3a",
+    "nix_hash": "sha256-FOXdRUh7JgrGq//Pvgp4ffdr/iHHK61o8g+4QA9Ujzo="
   },
   "kbd-light": {
     "repository": "https://github.com/aurora-silicon/kbd-light",
