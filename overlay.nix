@@ -94,14 +94,22 @@ in {
     portabilityPatch = stableFile ./patches/libva-v4l2-request-offline-test-portability.patch;
   };
   plymouth = prev.plymouth.overrideAttrs (old: {
+    version = "${old.version}-aurora2";
+    # Keep the upstream archive tag when only changing the carry release.
+    src = prev.plymouth.src;
+    passthru = (old.passthru or { }) // { scriptKeyboardLifetime = 1; };
+    nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.xvfb final.fontconfig final.dejavu_fonts ];
     patches = (old.patches or [ ]) ++ [
       (stableFile ./plymouth/0001-ply-terminal-Keep-terminal-input-nonblocking.patch)
       (stableFile ./plymouth/0001-systemd-units-Start-plymouthd-without-waiting-for-coldplug.patch)
+      (stableFile ./plymouth/0001-Fix-splash-keyboard-lifetime.patch)
       # Clear the previous DRM master's HDR state before the SDR splash scans out.
       (stableFile ./plymouth/0002-drm-Reset-inherited-HDR-connector-state-before-SDR.patch)
     ];
     doCheck = true;
     postCheck = (old.postCheck or "") + ''
+      export FONTCONFIG_FILE=${final.makeFontsConf { fontDirectories = [ final.dejavu_fonts ]; }}
+      bash ${stableFile ./plymouth/check-keyboard-lifetime.sh} "$PWD/.." "$PWD" ${./plymouth}
       # Meson runs checks from the build directory; headers live in the source.
       $CC -D_GNU_SOURCE -Wall -Wextra -Werror \
         -I. -I.. -I../src/libply -I../src/libply-splash-core \
@@ -127,6 +135,7 @@ in {
   docker_29 = prev.docker_29.override { buildGoModule = dockerPolicyBuilder; };
   docker = final.docker_29;
   aurora-logos = final.callPackage ./logos/package.nix { };
+  plymouth-theme-aurora = final.callPackage ./plymouth-theme-aurora/package.nix { };
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [

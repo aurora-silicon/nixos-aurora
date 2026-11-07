@@ -45,6 +45,7 @@
       packages.${system} = {
         logos = pkgs.aurora-logos;
         plymouth = pkgs.plymouth;
+        plymouth-theme-aurora = pkgs.plymouth-theme-aurora;
         firstboot = pkgs.aurora-firstboot;
         docker = pkgs.docker;
         sep = pkgs.aurora-sep;
@@ -364,11 +365,15 @@
         kdeSshAtBoot = kdeWith { aurora.openssh.startAtBoot = true; };
         # Graphical first boot: each failed expectation is reported by name.
         desktopExpectations = {
-          "desktop images boot with the spinner splash" = kde.boot.plymouth.enable && gnome.boot.plymouth.enable
-            && kde.boot.plymouth.theme == "spinner" && gnome.boot.plymouth.theme == "spinner";
+          "desktop images boot with the Aurora splash" = kde.boot.plymouth.enable && gnome.boot.plymouth.enable
+            && kde.boot.plymouth.theme == "aurora" && gnome.boot.plymouth.theme == "aurora"
+            && lib.all (c: lib.any (p: (p.pname or "") == "plymouth-theme-aurora") c.boot.plymouth.themePackages) [ kde gnome ]
+            && lib.all (c: lib.hasInfix "DeviceScale=1" c.boot.plymouth.extraConfig) [ kde gnome ];
           "every profile selects the patched Plymouth" = lib.all (c:
             c.boot.plymouth.package.drvPath == pkgs.plymouth.drvPath
             && patchedWith "0001-ply-terminal-Keep-terminal-input-nonblocking.patch" c.boot.plymouth.package
+            && patchedWith "0001-Fix-splash-keyboard-lifetime.patch" c.boot.plymouth.package
+            && c.boot.plymouth.package.scriptKeyboardLifetime >= 1
             && patchedWith "0002-drm-Reset-inherited-HDR-connector-state-before-SDR.patch" c.boot.plymouth.package
             && c.boot.plymouth.package.doCheck) [ kde gnome minimal ];
           "minimal images boot without a splash" = !minimal.boot.plymouth.enable;

@@ -1,0 +1,13 @@
+[Plymouth Theme]
+Name=Aurora
+Description=The Aurora logo the bootloader shows, kept in place, with the distribution's branding below
+ModuleName=script
+
+[script]
+# Images come from the distribution's spinner theme (its spinner, password
+# entry and watermark); initramfs generators copy ImageDir with the theme.
+ImageDir=/usr/share/plymouth/themes/spinner
+# Prepared before plymouthd starts, using this machine's live platform data.
+ScriptFile=/run/plymouth/aurora.script
+# The font initramfs generators copy for the script's text.
+Font=Cantarell 12

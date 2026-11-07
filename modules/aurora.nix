@@ -68,11 +68,31 @@
     boot.consoleLogLevel = lib.mkDefault 3;
     boot.kernelParams = [ "quiet" "rd.udev.log_level=3" "udev.log_level=3" "systemd.show_status=auto" ];
     # Desktop images boot to a splash; first boot asks for the disk password
-    # on it, as every later boot does. The spinner theme needs no ACPI BGRT
-    # firmware logo. Plymouth runs in the systemd initrd.
+    # on it, as every later boot does. The Aurora theme draws the logo aura
+    # shows, at the same size and place, with the spinner below it and
+    # boot.plymouth.logo (the NixOS logo) at the bottom, so the logo stays
+    # still from power-on to the greeter. Plymouth runs in the systemd initrd.
     boot.plymouth.enable = lib.mkDefault (config.aurora.desktop != "minimal");
     boot.plymouth.package = lib.mkDefault pkgs.plymouth;
-    boot.plymouth.theme = lib.mkDefault "spinner";
+    boot.plymouth.themePackages = [ pkgs.plymouth-theme-aurora ];
+    boot.plymouth.theme = lib.mkDefault "aurora";
+    # The theme draws in device pixels, so the logo matches aura's to the
+    # pixel; Plymouth's own 2x scale on Retina panels would double it.
+    boot.plymouth.extraConfig = lib.mkIf (config.boot.plymouth.theme == "aurora") "DeviceScale=1";
+    # Each boot supplies the live DT geometry, including image builds and
+    # rebuilds done on another machine. Keep the store and /etc immutable.
+    boot.initrd.systemd.services.plymouth-start.preStart = lib.mkIf
+      (config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora") (lib.mkAfter ''
+        PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
+          ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
+          ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
+      '');
+    systemd.services.plymouth-start.preStart = lib.mkIf
+      (config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora") ''
+        PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
+          ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
+          ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
+      '';
     hardware.graphics.enable = true;
     hardware.graphics.extraPackages = [
       pkgs.aurora-rusticl
