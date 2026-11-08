@@ -187,6 +187,7 @@ in {
       "LIBEXECDIR=${placeholder "out"}/libexec" "PAMDIR=${placeholder "out"}/lib/security"
       "PAMCONFDIR=${placeholder "out"}/lib/pam.d" "UNITDIR=${placeholder "out"}/lib/systemd/system"
       "DOCDIR=${placeholder "out"}/share/doc/aurora-touchid-rearm"
+      "SYSCONFDIR=${placeholder "out"}/etc"
     ];
     doCheck = true;
     checkTarget = "check";

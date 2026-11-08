@@ -19,6 +19,18 @@ in {
     '';
   };
 
+  options.aurora.sep.requirePasswordAfterBoot = lib.mkOption {
+    type = lib.types.bool;
+    default = false;
+    description = ''
+      Touch ID after a restart. Off (the default): Touch ID works from the
+      first login after boot. On: as on macOS, the first login or unlock after
+      boot needs the password, and Touch ID works after that password. Written
+      to /etc/aurora/touchid.conf (require_password_after_boot) and applied
+      by aurora-touchid-boot.service at every boot.
+    '';
+  };
+
   config = lib.mkMerge [
     {
       # Explicit service loading waits for /var and per-machine firmware. This only
@@ -77,6 +89,38 @@ in {
           SocketMode = "0666";
           Accept = true;
           MaxConnections = 8;
+        };
+      };
+      environment.etc."aurora/touchid.conf".text = ''
+        # Generated from aurora.sep.requirePasswordAfterBoot.
+        require_password_after_boot = ${if cfg.requirePasswordAfterBoot then "yes" else "no"}
+      '';
+      # Before the first login can offer Touch ID: with the setting on, the
+      # driver refuses Touch ID until the first password since boot.
+      systemd.services.aurora-touchid-boot = {
+        description = "Touch ID after a restart (require_password_after_boot)";
+        wantedBy = [ "multi-user.target" ];
+        before = [ "display-manager.service" "systemd-user-sessions.service" "fprintd.service" ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          ExecStart = "${pkgs.aurora-touchid-rearm}/libexec/aurora-touchid-rearm --boot";
+          StandardOutput = "null";
+          TimeoutStartSec = 45;
+          CapabilityBoundingSet = [ "CAP_SYS_ADMIN" ];
+          NoNewPrivileges = true;
+          PrivateNetwork = true;
+          RestrictAddressFamilies = [ "AF_UNIX" ];
+          ProtectSystem = "strict";
+          ProtectHome = true;
+          PrivateTmp = true;
+          ProtectKernelTunables = true;
+          ProtectKernelModules = true;
+          ProtectControlGroups = true;
+          LockPersonality = true;
+          RestrictRealtime = true;
+          RestrictNamespaces = true;
+          SystemCallArchitectures = "native";
         };
       };
       systemd.services."aurora-touchid-rearm@" = {

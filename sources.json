@@ -269,11 +269,11 @@
   },
   "aurora-touchid-rearm": {
     "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
-    "commit": "f73bf267eed958d47a63a7a49c46e669d70f5c75",
+    "commit": "5c894c8535ad7d18d9a4775283a6758abaaaeb53",
     "version": "1",
-    "source_url": "https://codeload.github.com/aurora-silicon/aurora-sep-userspace/tar.gz/f73bf267eed958d47a63a7a49c46e669d70f5c75",
-    "archive_root": "aurora-sep-userspace-f73bf267eed958d47a63a7a49c46e669d70f5c75",
-    "sha256": "c2b6e6f477322ac8fec1476ef37e659318d0c76e122b1c33a2d099bc66f43350",
-    "nix_hash": "sha256-wrbm9HcyKsj+wUdu835lkxjQx24SKxwzotCZvGb0M1A="
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-sep-userspace/tar.gz/5c894c8535ad7d18d9a4775283a6758abaaaeb53",
+    "archive_root": "aurora-sep-userspace-5c894c8535ad7d18d9a4775283a6758abaaaeb53",
+    "sha256": "8aa25ad961a2d96147b252829b1940598d472036fa8b53cbd58e2c7f130411f2",
+    "nix_hash": "sha256-iqJa2WGi2WFHslKCmxlAWY1HIDb6i1PL1Y4sfxMEEfI="
   }
 }
