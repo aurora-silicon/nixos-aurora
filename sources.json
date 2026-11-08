@@ -311,5 +311,23 @@
     "archive_root": "aurora-sep-userspace-b214617b17ad0e421a2661c42c6e3b77932ac155",
     "sha256": "63c42a2c9b0bac5c85cae17a391462cdc58e0b005cb7d827f14217194cc122e7",
     "nix_hash": "sha256-Y8QqLJsLrFyFyuF6ORRizcWOCwBct9gn8UIXGUzBIuc="
+  },
+  "omdrop-awdl": {
+    "repository": "https://github.com/netmojo-systems/omdrop-awdl",
+    "commit": "ffc201f33773541063f2f3d57c8a279cad5ede11",
+    "version": "0.10.5",
+    "source_url": "https://codeload.github.com/netmojo-systems/omdrop-awdl/tar.gz/ffc201f33773541063f2f3d57c8a279cad5ede11",
+    "archive_root": "omdrop-awdl-ffc201f33773541063f2f3d57c8a279cad5ede11",
+    "sha256": "bc52318293615f773ef0f9a9523772a83bf73edaaf87b528e2a32856ff02d385",
+    "extra_sources": {
+      "omdrop-plugin": {
+        "repository": "https://github.com/netmojo-systems/omdrop-plugin",
+        "commit": "e5aa51a41f963e73b5a67914cae3c916a83739f1",
+        "source_url": "https://codeload.github.com/netmojo-systems/omdrop-plugin/tar.gz/e5aa51a41f963e73b5a67914cae3c916a83739f1",
+        "archive_root": "omdrop-plugin-e5aa51a41f963e73b5a67914cae3c916a83739f1",
+        "sha256": "db362d1fc13be701643cb5e4c390f292ea4e3ce006c0ebda5440b07763b90c41"
+      }
+    },
+    "nix_hash": "sha256-vFIxgpNhX3c+8PmpUjdyqDv3Ptqvh7Uo4qMoVv8C04U="
   }
 }

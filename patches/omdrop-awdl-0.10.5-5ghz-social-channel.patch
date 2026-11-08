@@ -1,0 +1,18 @@
+--- a/userspace/omdrop-broadcom.sh
++++ b/userspace/omdrop-broadcom.sh
+@@ -541,6 +541,15 @@
+   else
+     iovar_set awdl_aftxmode "$(le32 1)" && log "identity: aftxmode=1"
+   fi
++  # Aurora: name the 5 GHz social channel (awdl_osoc_chan). Left at its
++  # default 0, the firmware sends no action frames a Mac hears on 5 GHz, and
++  # macOS logs 'Not Routable. Peer discovered(on 2.4GHz only) and is outside
++  # bubble' and queues every packet for us until it ages out. With 149 set, a
++  # macOS 26 host recorded our 5 GHz RSSI, routed to us, and carried 144-191
++  # Mbit/s of TCP (BCM4387, 2026-11-09); 44 did not. macOS keeps 149 in its
++  # own sequence whatever its infra channel. $CONF/osoc-chan overrides it.
++  local osoc; osoc=$(head -1 "$CONF/osoc-chan" 2>/dev/null | tr -dc '0-9')
++  iovar_set awdl_osoc_chan "$(le32 "${osoc:-149}")" && log "identity: osoc_chan=${osoc:-149}"
+ }
+ 
+ # nudge_peers: send one unicast packet to every pinned AWDL neighbour, every
