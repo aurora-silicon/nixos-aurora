@@ -172,12 +172,37 @@ struct sep_bio_attest {
  */
 #define SEP_BIO_STATUS_LOCKOUT 8
 
-/* /dev/sep-bio-rearm, which any number of root callers may open. */
+/*
+ * SEP_BIO_LOCKOUT_STATE works on /dev/sep-bio-rearm, which any number of root
+ * callers may open, and on /dev/sep-bio, so that the verifying daemon can say
+ * why a verify ended with SEP_BIO_STATUS_LOCKOUT. Older kernels answer it on
+ * /dev/sep-bio with -ENOTTY.
+ */
 struct sep_bio_lockout {
 	__u32 locked;    /* 1 while every verify is refused */
 	__u32 failures;  /* failed matches since the last match or re-arm */
-	__u32 reserved[2];
+	__u32 reserved;
+	__u32 flags;     /* SEP_BIO_LOCKOUT_FLAG_*; zero from older kernels */
 };
+
+/*
+ * SEP_BIO_REARM never waits for a capture while Touch ID is not locked, and
+ * then clears pending failed attempts: call it after every verified password.
+ * Without this flag, call it only while 'locked'.
+ */
+#define SEP_BIO_LOCKOUT_FLAG_EVERY_PASSWORD 1
+/*
+ * Set while Touch ID waits for the first password since this boot
+ * (SEP_BIO_REQUIRE_PASSWORD); 'locked' is 1 then too.
+ */
+#define SEP_BIO_LOCKOUT_FLAG_AFTER_BOOT 2
+/*
+ * Set while 'locked' follows too many failed matches: five since the last
+ * match or password, or the enclave's own lockout after failed matches. A
+ * lockout without it (and without SEP_BIO_LOCKOUT_FLAG_AFTER_BOOT) needs the
+ * password for another reason, such as a lapsed match credential.
+ */
+#define SEP_BIO_LOCKOUT_FLAG_FAILED_ATTEMPTS 4
 
 #define SEP_BIO_LOCKOUT_STATE _IOR(SEP_BIO_IOC_MAGIC, 0x0e, struct sep_bio_lockout)
 /*
