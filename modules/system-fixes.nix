@@ -1,4 +1,4 @@
-{ config, lib, ... }:
+{ config, lib, pkgs, ... }:
 let
   daemons = [ "malcontent-timerd" "malcontent-timer-extension-agent" "malcontent-webd" ];
   signalFix = name: {
@@ -25,10 +25,25 @@ in {
     default = true;
     description = "Keep NetworkManager's dispatcher running until NetworkManager has stopped.";
   };
+  options.aurora.systemFixes.nmKeepWakeOnLan = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = "Keep a Wake-on-LAN/WLAN device that is still activated after wake instead of reconnecting it.";
+  };
   config = lib.mkMerge [
     (lib.mkIf config.aurora.systemFixes.malcontentSignal {
       systemd.units = lib.genAttrs (map (name: "${name}.service")
         (daemons ++ [ "malcontent-webd-update" ])) signalFix;
+    })
+    (lib.mkIf (config.aurora.systemFixes.nmKeepWakeOnLan && config.networking.networkmanager.enable) {
+      # NetworkManager leaves Wake-on-LAN devices up at sleep so they stay
+      # armed, but at wake it takes every one of them down and reconnects it,
+      # even when its Wi-Fi association or Ethernet carrier survived. The
+      # patch keeps such a device and only refreshes its IP configuration.
+      # Same patch as fedora-aurora's networkmanager-aurora (1.58.1).
+      networking.networkmanager.package = lib.mkDefault (pkgs.networkmanager.overrideAttrs (old: {
+        patches = (old.patches or [ ]) ++ [ ../patches/networkmanager-keep-activated-wake-on-lan.patch ];
+      }));
     })
     (lib.mkIf (config.aurora.systemFixes.nmDispatcherPersist && config.networking.networkmanager.enable) {
       # NetworkManager dispatches dns-change and connectivity-change events
