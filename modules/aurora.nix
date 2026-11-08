@@ -33,6 +33,13 @@
     boot.loader.grub.efiSupport = true;
     boot.loader.grub.efiInstallAsRemovable = true;
     boot.loader.grub.device = "nodev";
+    # Every generation, the image's included, records its kernel's DT ABI
+    # generation (kernel/dtb-abi), so Stage 2 updates know which device trees
+    # each configuration GRUB lists can boot (modules/installed.nix). A kernel
+    # that declares none is generation 0.
+    system.systemBuilderCommands = ''
+      echo ${toString (config.boot.kernelPackages.kernel.auroraDtbAbi or 0)} > $out/aurora-dtb-abi
+    '';
     boot.loader.efi.canTouchEfiVariables = false;
     # Keep the Apple/USB/NVMe initrd set explicit. Native module additions
     # (including audio, sensors and systemd) still merge into this list.

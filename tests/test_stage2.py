@@ -3,7 +3,9 @@
 install-stage2.sh runs for real against a temporary directory standing in for
 the ESP; only the mount and partition queries are replaced by stubs, so every
 file operation (staging, verification, backup, rename) is the production
-code path.
+code path, including the aurora-stage2 helper it hands the write to
+(stage2/nixos_stage2.py; its trial transactions are tested in
+stage2/test_nixos_stage2.py).
 """
 import gzip
 import hashlib
@@ -22,6 +24,7 @@ import unittest
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 INSTALL = ROOT / 'scripts/install-stage2.sh'
+HELPER = ROOT / 'stage2/nixos_stage2.py'
 
 
 def load(name, path):
@@ -129,25 +132,41 @@ class InstallStage2Tests(unittest.TestCase):
         self.compatible = root / 'compatible'
         self.compatible.write_bytes(compatible_file('j274', 't8103'))
         self.ctxr = self.esp / 'm1n1/boot-ctxr.bin'
+        (self.source / 'aura.bin').write_bytes(b'AURA-STAGE2-BINARY')
+        (self.source / 'dtb-abi').write_text('1\n')
+        self.profiles = root / 'profiles'
+        self.profiles.mkdir()
+        self.lock = root / 'lock'
+        self.stub('aurora-stage2', f'exec {sys.executable} -I {HELPER} "$@"\n')
 
     def write_source(self, data):
         (self.source / 'boot.bin').write_bytes(data)
         (self.source / 'boot.bin.sha256').write_text(hashlib.sha256(data).hexdigest() + '\n')
+
+    def generation(self, number, kernel, abi):
+        toplevel = self.profiles / f'toplevel-{number}'
+        toplevel.mkdir()
+        (toplevel / 'nixos-version').write_text('26.05\n')
+        (toplevel / 'kernel').symlink_to(self.profiles / kernel)
+        if abi is not None:
+            (toplevel / 'aurora-dtb-abi').write_text(f'{abi}\n')
+        (self.profiles / f'system-{number}-link').symlink_to(toplevel)
 
     def stub(self, name, script):
         path = self.stubs / name
         path.write_text('#!/usr/bin/env bash\n' + script)
         path.chmod(0o755)
 
-    def run_install(self):
+    def run_install(self, *extra):
         state = self.state
         self.stub('mountpoint', f'exit {0 if state["mounted"] == "1" else 1}\n')
         self.stub('findmnt', 'case " $* " in *FSTYPE*) echo ' + state['fstype'] + ';; *SOURCE*) echo /dev/fake1;; esac\n')
         self.stub('lsblk', f'echo {state["partuuid"]}\n')
         env = dict(os.environ, PATH=f'{self.stubs}:{os.environ["PATH"]}',
                    AURORA_DEVICE_TREE_ESP=str(self.device_tree),
-                   AURORA_DEVICE_TREE_COMPATIBLE=str(self.compatible))
-        return subprocess.run(['bash', str(INSTALL), str(self.source), str(self.esp)], env=env,
+                   AURORA_DEVICE_TREE_COMPATIBLE=str(self.compatible),
+                   AURORA_SYSTEM_PROFILES=str(self.profiles), AURORA_STAGE2_LOCK=str(self.lock))
+        return subprocess.run(['bash', str(INSTALL), str(self.source), str(self.esp), *extra], env=env,
                               capture_output=True, text=True)
 
     def assert_untouched(self, result):
@@ -216,6 +235,48 @@ class InstallStage2Tests(unittest.TestCase):
         result = self.run_install()
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.esp / 'm1n1').exists())
+
+    def test_the_write_goes_to_the_helper_with_the_checked_esp_and_input(self):
+        record = self.stubs / 'record'
+        self.stub('aurora-stage2', f'env > {record}\necho "$@" >> {record}\n')
+        result = self.run_install('/nix/store/example-toplevel')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = record.read_text().splitlines()
+        expected = {
+            'TARGET': str(self.target), 'ESP_ROOT': str(self.esp), 'ESP_DEVICE': '/dev/fake1',
+            'ESP_FSTYPE': 'vfat', 'AURORA_STAGE2_DIR': str(self.source),
+            'AURORA_STAGE2_SOURCE': str(self.source / 'boot.bin'),
+            'AURORA_STAGE2_SHA256': hashlib.sha256(stage2()).hexdigest(),
+            'AURORA_TOPLEVEL': '/nix/store/example-toplevel',
+            'AURORA_DEVICE_TREE_COMPATIBLE': str(self.compatible),
+        }
+        for key, value in expected.items():
+            self.assertIn(f'{key}={value}', lines)
+        self.assertEqual(lines[-1], 'install')
+        self.assert_frozen()
+
+    def test_a_listed_generation_with_an_older_dt_abi_is_refused(self):
+        self.generation(1, 'kernel-7.1', abi=0)
+        self.generation(2, 'kernel-7.3', abi=1)
+        result = self.run_install()
+        self.assert_untouched(result)
+        self.assertIn('system-1 (generation 0)', result.stderr)
+        self.assertIn(f'sudo nix-env --profile {self.profiles}/system --delete-generations 1', result.stderr)
+
+    def test_listed_generations_of_the_same_dt_abi_allow_the_update(self):
+        self.generation(1, 'kernel-7.1', abi=1)
+        self.generation(2, 'kernel-7.3', abi=None)
+        self.generation(3, 'kernel-7.3', abi=1)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.target.read_bytes(), stage2())
+
+    def test_an_unchanged_stage2_is_not_held_back_by_older_generations(self):
+        self.target.write_bytes(stage2())
+        self.generation(1, 'kernel-7.1', abi=0)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '')
 
     def test_without_the_device_tree_record_the_mounted_esp_is_used(self):
         self.device_tree.unlink()

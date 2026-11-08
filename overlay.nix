@@ -8,6 +8,14 @@ let
   # (aurora-silicon/linux#985), which keeps every kernel code page inside that
   # window. The kernel build checks this against its configuration.
   kernelCtxrExecmem = true;
+  # The DT ABI generation of the kernel's device trees, the integer fedora-aurora
+  # ships as packages/kernel-aurora/dtb-abi. Raise it only for a device tree
+  # change older kernels cannot boot with: Stage 2 updates then wait until no
+  # configuration GRUB lists has an older generation (docs/updates.md).
+  kernelDtbAbi = let value = final.lib.fileContents ./kernel/dtb-abi; in
+    assert final.lib.assertMsg (builtins.match "0|[1-9][0-9]*" value != null)
+      "kernel/dtb-abi must hold one non-negative integer";
+    final.lib.toInt value;
   stableFile = path: final.writeText (builtins.baseNameOf path) (builtins.readFile path);
   # nixpkgs constructs the CLI and engine with the same builder argument.
   # Patch only the engine, so the resulting Docker symlinks and wrappers all
@@ -349,6 +357,8 @@ in {
           configfile = "${finalAttrs.finalPackage.dev}/lib/modules/${old.passthru.modDirVersion}/build/.config";
           # modules/installed.nix checks the kernel a system boots against its aura.
           auroraCtxrExecmem = kernelCtxrExecmem;
+          # modules/installed.nix records this in each generation (aurora-dtb-abi).
+          auroraDtbAbi = kernelDtbAbi;
         };
         env = old.env // { RUSTC_BOOTSTRAP = "1"; };
         nativeBuildInputs = old.nativeBuildInputs ++ [ final.binutils kernelLLVM.lld ];
@@ -765,6 +775,9 @@ in {
       platforms = [ "aarch64-linux" ];
     };
   };
+  # Trial-then-commit Stage 2 updates (modules/installed.nix): fedora-aurora's
+  # updater logic with its NixOS adapter.
+  aurora-stage2 = final.callPackage ./stage2/package.nix { };
   aurora-bless = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
     cargoBuildFlags = [ "-p" "asahi-bless" ];
     cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "asahi-nvram" ];
