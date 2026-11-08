@@ -386,6 +386,11 @@ in {
         kernelPatches = [ {
           name = "restore-legacy-speaker-protection";
           patch = stableFile ./patches/0001-restore-legacy-speaker-protection.patch;
+        } {
+          # speakersafetyd could not open the speaker sense PCM (-ENOMEM) since
+          # linux 79af0bae4d0d dropped the capture preallocation that bounded it.
+          name = "mca-bound-pcm-buffer";
+          patch = stableFile ./patches/0002-mca-bound-pcm-buffer.patch;
         } ] ++ _kernelPatches;
       }).overrideAttrs (finalAttrs: old: {
         # NixOS consumers (including ASLR limits) need the resolved config,
