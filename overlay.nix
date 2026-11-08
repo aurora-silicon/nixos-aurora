@@ -214,6 +214,32 @@ in {
       ${final.python3.interpreter} ${stableFile ./sep/test_account_gate.py} src/device.c
     '';
   });
+  # Re-arms Touch ID with the password after a lockout: the PAM module that
+  # modules/sep.nix puts after pam_unix, and the root service it asks.
+  aurora-touchid-rearm = final.stdenv.mkDerivation {
+    pname = "aurora-touchid-rearm";
+    version = pins.aurora-touchid-rearm.version;
+    src = source "aurora-touchid-rearm";
+    buildInputs = [ final.pam ];
+    nativeCheckInputs = [ final.python3 ];
+    makeFlags = [
+      "-C" "touchid-rearm" "WARN=-Wall"
+      "LIBEXECDIR=${placeholder "out"}/libexec" "PAMDIR=${placeholder "out"}/lib/security"
+      "PAMCONFDIR=${placeholder "out"}/lib/pam.d" "UNITDIR=${placeholder "out"}/lib/systemd/system"
+      "DOCDIR=${placeholder "out"}/share/doc/aurora-touchid-rearm"
+      "SYSCONFDIR=${placeholder "out"}/etc"
+    ];
+    doCheck = true;
+    checkTarget = "check";
+    AURORA_TEST_PAM_DIR = "${final.pam}/lib/security";
+    passthru.commit = pins.aurora-touchid-rearm.commit;
+    meta = {
+      description = "Re-arm Touch ID with the password after a lockout";
+      homepage = "https://github.com/aurora-silicon/aurora-sep-userspace";
+      license = final.lib.licenses.gpl2Only;
+      platforms = final.lib.platforms.linux;
+    };
+  };
   aurora-firstboot = final.callPackage ./firstboot.nix { };
   aurora-avd-firmware = final.callPackage ./avd-fw.nix {
     src = source "avd-fw";
