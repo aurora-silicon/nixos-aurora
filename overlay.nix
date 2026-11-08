@@ -830,6 +830,98 @@ in {
       platforms = [ "aarch64-linux" ];
     };
   };
+  # AirDrop over the Wi-Fi firmware's own AWDL (awdl0): the omdrop-awdl
+  # helpers and the omdrop-plugin receiver. The kernel's brcmfmac already has
+  # the AWDL interface (aurora-silicon/linux#24, #183, #213). Same contents and
+  # patches as fedora-aurora's and alarm-aurora's omdrop-awdl; modules/awdl.nix
+  # installs it with aurora.awdl.enable, off by default.
+  omdrop-awdl = let
+    py = final.python3.withPackages (ps: [ ps.libarchive-c ps.pillow ps.dbus-python ps.pygobject3 ]);
+    plugin = let pin = pins.omdrop-awdl.extra_sources.omdrop-plugin; in final.fetchurl {
+      name = "omdrop-plugin-${pin.commit}.tar.gz";
+      url = pin.source_url;
+      sha256 = pin.sha256;
+    };
+    runtimePath = final.lib.makeBinPath [ py final.bash final.coreutils final.iproute2 final.iputils
+      final.iw final.openssl final.procps final.util-linux final.gawk final.gnugrep final.gnused
+      final.networkmanager final.systemd final.kmod final.findutils ];
+  in final.stdenvNoCC.mkDerivation {
+    pname = "omdrop-awdl";
+    version = pins.omdrop-awdl.version;
+    src = source "omdrop-awdl";
+    sourceRoot = pins.omdrop-awdl.archive_root;
+    patches = [
+      # awdl-up: accept NetworkManager's per-network cloned MAC once connected.
+      (stableFile ./patches/omdrop-awdl-0.10.5-stable-cloned-mac.patch)
+      # AWDL windows follow the Wi-Fi link's 5 GHz channel, as macOS schedules them.
+      (stableFile ./patches/omdrop-awdl-0.10.5-follow-infra-channel.patch)
+    ];
+    nativeBuildInputs = [ final.makeWrapper py ];
+    postUnpack = ''
+      tar -xzf ${plugin} -C "$NIX_BUILD_TOP"
+    '';
+    dontBuild = true;
+    installPhase = ''
+      runHook preInstall
+      lib=$out/libexec/omdrop
+      install -d $lib/radio
+      for f in userspace/*; do
+        [ -f "$f" ] || continue
+        install -m 755 "$f" $lib/
+      done
+      chmod 644 $lib/*_*.py $lib/*.sh
+      install -m 755 userspace/radio/* $lib/radio/
+      install -Dm644 packaging/awdl0.service $out/lib/systemd/system/awdl0.service
+      install -Dm644 packaging/awdl-warmup.service $out/lib/systemd/system/awdl-warmup.service
+      install -Dm755 packaging/omdrop-awdl-sleep $out/lib/systemd/system-sleep/omdrop-awdl
+      install -Dm644 packaging/org.omarchy.omdrop.policy $out/share/polkit-1/actions/org.omarchy.omdrop.policy
+      install -Dm644 README.md $out/share/doc/omdrop-awdl/README.md
+      r=$NIX_BUILD_TOP/${pins.omdrop-awdl.extra_sources.omdrop-plugin.archive_root}
+      v=$out/share/omdrop/receiver
+      for f in airdrop-serve.py contacts.py debugdump.py identity.py lifecycle.py safeplist.py; do
+        install -Dm644 $r/bin/$f $v/bin/$f
+      done
+      chmod 755 $v/bin/airdrop-serve.py
+      install -Dm644 -t $v/bin/apple-ca $r/bin/apple-ca/*.pem
+      # Apple's public root, which airdrop-serve.py loads at start (Contacts Only checks).
+      install -Dm644 $r/share/certs/apple_root_ca.pem $v/share/certs/apple_root_ca.pem
+      install -Dm644 $r/README.md $v/README.md
+      install -Dm644 $r/share/airdrop-receiver.service $out/lib/systemd/user/airdrop-receiver.service
+      # The receiver writes its identity into ~/.omdrop, which ProtectHome=read-only
+      # keeps it from creating, so create both writable paths before the sandbox.
+      sed -i -e "s#@PLUGIN_DIR@#$v#g" -e "s#/usr/bin/python3#${py.interpreter}#g" \
+        -e '0,/^ExecStartPre=/s##ExecStartPre=+${final.coreutils}/bin/mkdir -p -m 0700 %h/.omdrop\nExecStartPre=+${final.coreutils}/bin/mkdir -p %h/Downloads\n&#' \
+        $out/lib/systemd/user/airdrop-receiver.service
+      # Store paths in place of the FHS ones; /usr/lib/omdrop-core is another package.
+      find $lib $out/lib/systemd $out/share/polkit-1 -type f -exec \
+        sed -i -E "s#/usr/lib/omdrop([/\"<' ]|\$)#$lib\1#g" {} +
+      sed -i -e "s#/usr/bin/timeout #${final.coreutils}/bin/timeout #" $out/lib/systemd/system/awdl0.service
+      runHook postInstall
+    '';
+    postFixup = ''
+      patchShebangs $out/libexec/omdrop $out/share/omdrop $out/lib/systemd/system-sleep
+      for f in $out/libexec/omdrop/awdl-up $out/libexec/omdrop/awdl-warmup $out/libexec/omdrop/omdrop-discoverable \
+               $out/libexec/omdrop/send-to-peer $out/lib/systemd/system-sleep/omdrop-awdl; do
+        wrapProgram $f --prefix PATH : ${runtimePath}
+      done
+    '';
+    doInstallCheck = true;
+    installCheckPhase = ''
+      grep -q stable-ssid $out/libexec/omdrop/.awdl-up-wrapped
+      grep -q '^follow_infra()' $out/libexec/omdrop/.awdl-up-wrapped
+      test -s $out/share/omdrop/receiver/share/certs/apple_root_ca.pem
+      if grep -rIl '/usr/lib/omdrop[/" ]' $out/libexec $out/lib $out/share/polkit-1; then exit 1; fi
+      if grep -q '@PLUGIN_DIR@' $out/lib/systemd/user/airdrop-receiver.service; then exit 1; fi
+      ${py.interpreter} -c 'import sys; sys.path.insert(0, "'$out'/libexec/omdrop"); import awdl_plist, awdl_identity'
+    '';
+    passthru.commit = pins.omdrop-awdl.commit;
+    meta = {
+      description = "AirDrop over firmware-native AWDL on Apple Silicon Macs (opt in)";
+      homepage = "https://github.com/netmojo-systems/omdrop-awdl";
+      license = with final.lib.licenses; [ gpl2Only mit ];
+      platforms = [ "aarch64-linux" ];
+    };
+  };
   # Inspects the Linux side of the SEP and xART state and starts Touch ID over
   # (aurora-xart reset-touchid). modules/sep.nix installs it.
   aurora-xart = final.stdenvNoCC.mkDerivation {
