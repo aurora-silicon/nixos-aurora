@@ -204,6 +204,73 @@ class BootchainTests(unittest.TestCase):
         self.apply()
         self.assertEqual(os.readlink(self.link), 'dtb-7.3')
 
+    def selected_blob(self):
+        payload = self.target.read_bytes()
+        self.assertTrue(payload.startswith(b'AURA'))
+        return payload
+
+    def test_refresh_uses_saved_entry_default_not_newer_test_kernel(self):
+        default = self.kernel('7.3.0-aurora-fleet37', 5).read_bytes()
+        self.kernel('7.3.0-aurora-tb3c', 1)
+        self.put('/boot/loader/entries/abc-7.3.0-aurora-fleet37.conf', b'title x\nversion 7.3.0-aurora-fleet37\n')
+        self.put('/boot/grub2/grubenv', b'# GRUB Environment Block\nsaved_entry=abc-7.3.0-aurora-fleet37\n####\n')
+        self.apply()
+        self.assertTrue(self.selected_blob().startswith(b'AURA' + default))
+        self.assertEqual(os.readlink(self.link), 'dtb-7.3.0-aurora-fleet37')
+
+    def test_custom_cfg_default_wins_over_stale_saved_entry(self):
+        default = self.kernel('7.3.0-aurora-fleet42', 5).read_bytes()
+        self.kernel('7.3.0-aurora-sepkey3', 1)
+        self.kernel('7.3.0-aurora-fleet41', 1)
+        self.put('/boot/grub2/grubenv', b'saved_entry=aurora-ref-7.3.0-aurora-fleet41\n')
+        self.put('/boot/grub2/custom.cfg', b'if [ "${boot_once}" != "true" ]; then\n'
+                 b'  set default="aurora-ref-7.3.0-aurora-fleet42"\nfi\n')
+        self.apply()
+        self.assertTrue(self.selected_blob().startswith(b'AURA' + default))
+        self.assertEqual(os.readlink(self.link), 'dtb-7.3.0-aurora-fleet42')
+
+    def test_unknown_default_falls_back_to_newest(self):
+        self.kernel('7.1', 1)
+        newest = self.kernel('7.3', 5).read_bytes()
+        self.put('/boot/grub2/grubenv', b'saved_entry=abc-6.9-removed\n')
+        self.apply()
+        self.assertTrue(self.selected_blob().startswith(b'AURA' + newest))
+
+    def test_numeric_grub_default_counts_from_newest(self):
+        older = self.kernel('7.1', 1).read_bytes()
+        self.kernel('7.3', 5)
+        self.put('/etc/default/grub', b'GRUB_DEFAULT=1\n')
+        self.apply()
+        self.assertTrue(self.selected_blob().startswith(b'AURA' + older))
+
+    def test_add_follows_updatedefault(self):
+        self.kernel('7.1', 1)
+        added = self.kernel('7.3', 5).read_bytes()
+        self.put('/boot/loader/entries/abc-7.1.conf', b'version 7.1\n')
+        self.put('/boot/grub2/grubenv', b'saved_entry=abc-7.1\n')
+        self.action('add', '7.3')
+        self.apply()  # UPDATEDEFAULT=yes (Fedora's default): the new kernel becomes the default.
+        self.assertTrue(self.selected_blob().startswith(b'AURA' + added))
+
+    def test_add_without_updatedefault_keeps_default_kernel(self):
+        default = self.kernel('7.1', 1).read_bytes()
+        self.kernel('7.3', 5)
+        self.put('/boot/loader/entries/abc-7.1.conf', b'version 7.1\n')
+        self.put('/boot/grub2/grubenv', b'saved_entry=abc-7.1\n')
+        self.put('/etc/sysconfig/kernel', b'UPDATEDEFAULT=no\n')
+        self.action('add', '7.3')
+        self.apply()
+        self.assertTrue(self.selected_blob().startswith(b'AURA' + default))
+        self.assertEqual(os.readlink(self.link), 'dtb-7.1')
+
+    def test_add_under_custom_cfg_default_keeps_pinned_kernel(self):
+        default = self.kernel('7.3.0-aurora-fleet37', 5).read_bytes()
+        self.kernel('7.3.0-aurora-tb3c', 1)
+        self.put('/boot/grub2/custom.cfg', b'set default="aurora-ref-7.3.0-aurora-fleet37"\n')
+        self.action('add', '7.3.0-aurora-tb3c')
+        self.apply()
+        self.assertTrue(self.selected_blob().startswith(b'AURA' + default))
+
     def test_missing_current_board_refuses(self):
         self.kernel('7.3')
         self.put('/proc/device-tree/compatible', b'apple,j700\0')
