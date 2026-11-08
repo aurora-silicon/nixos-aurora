@@ -195,10 +195,12 @@ in {
       ./sep/0006-aurora-report-finger-lift-and-lockout.patch
       ./sep/0007-aurora-name-retry-causes-and-keep-waiting.patch
       ./sep/0008-aurora-report-the-touch-id-lockout-as-locked-out.patch
+      ./sep/0009-aurora-say-why-touch-id-needs-the-password.patch
     ];
     postPatch = (old.postPatch or "") + ''
       install -Dm644 ${stableFile ./sep/apple-sep.h} aurora-uapi/linux/apple-sep.h
       ${final.python3.interpreter} ${stableFile ./sep/test_interface.py} libfprint/drivers/aurora/aurora.c aurora-uapi/linux/apple-sep.h
+      ${final.python3.interpreter} ${stableFile ./sep/test_lockout_reason.py} libfprint/drivers/aurora/aurora.c
     '';
     preConfigure = (old.preConfigure or "") + ''
       export CFLAGS="''${CFLAGS:-} -I$PWD/aurora-uapi"
@@ -209,6 +211,8 @@ in {
       ./sep/0001-preserve-print-on-device-delete-failure.patch
       # Needs FP_DEVICE_ERROR_LOCKED_OUT from libfprint 0008 above.
       ./sep/0002-report-lockout-and-fall-back-to-the-password.patch
+      # Needs FP_DEVICE_ERROR_PASSWORD_REQUIRED{,_AFTER_BOOT} from libfprint 0009.
+      ./sep/0003-say-why-the-reader-needs-the-password.patch
     ];
     postPatch = (old.postPatch or "") + ''
       ${final.python3.interpreter} ${stableFile ./sep/test_account_gate.py} src/device.c
