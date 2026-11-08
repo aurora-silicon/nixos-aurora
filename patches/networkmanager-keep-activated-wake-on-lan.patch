@@ -1,0 +1,45 @@
+From: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Subject: [PATCH] manager: keep Wake-on-LAN devices that are still activated after wake
+
+NetworkManager skips Wake-on-LAN/WLAN devices when the system goes to sleep
+so they stay armed, but then takes every such device down when the system
+wakes up and activates it again. A Wi-Fi device whose driver keeps the
+association across suspend (or an Ethernet device that keeps its carrier)
+therefore loses the link right after resume and needs a full reconnect.
+
+When such a device is still activated at wake, keep it and only refresh its
+dynamic IP configuration, as already done for software devices. Devices that
+lost their link are handled as before.
+
+Signed-off-by: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Assisted-by: LLM
+---
+--- a/src/core/nm-manager.c
++++ b/src/core/nm-manager.c
+@@ -7370,8 +7370,24 @@
+                 if (nm_device_is_software(device))
+                     continue;
+ 
+-                /* Belatedly take down Wake-on-LAN devices; ideally we wouldn't have to do this
+-                 * but for now it's the only way to make sure we re-check their connectivity.
++                if (device_is_wake_on_lan(priv->platform, device)
++                    && nm_device_get_state(device) == NM_DEVICE_STATE_ACTIVATED) {
++                    /* The device was armed for wake and is still activated: its
++                     * link (Wi-Fi association or carrier) survived the sleep.
++                     * Keep it and only refresh the dynamic IP configuration and
++                     * connectivity, like for software devices. A link lost while
++                     * asleep is reported by the device and handled as usual.
++                     */
++                    _LOGD(LOGD_SUSPEND,
++                          "sleep: device %s has wake-on-lan and is still activated, keeping it",
++                          nm_device_get_ip_iface(device));
++                    nm_device_update_dynamic_ip_setup(device, "wake up");
++                    continue;
++                }
++
++                /* Belatedly take down other Wake-on-LAN devices; ideally we wouldn't have
++                 * to do this but for now it's the only way to make sure we re-check their
++                 * connectivity.
+                  */
+                 if (device_is_wake_on_lan(priv->platform, device))
+                     nm_device_set_unmanaged_by_flags(device,
