@@ -91,6 +91,7 @@
         aurora-bless = pkgs.aurora-bless;
         camera-denoise = pkgs.aurora-camera-denoise;
         kbd-light = pkgs.aurora-kbd-light;
+        fido = pkgs.aurora-fido;
         xart = pkgs.aurora-xart;
       };
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
@@ -277,6 +278,8 @@
               "the keyboard backlight follows the light sensor from boot" = config.aurora.kbdLight.enable
                 && lib.elem value.pkgs.aurora-kbd-light config.systemd.packages
                 && lib.elem "multi-user.target" config.systemd.services.aurora-kbd-light.wantedBy;
+              "the Touch ID security key stays off unless asked for" = !config.aurora.fido.enable
+                && !(config.systemd.services ? aurora-fido);
               "Flatpak uses the Aurora repository" = config.services.flatpak.enable
                 && config.aurora.flatpak.enable
                 && config.aurora.flatpak.package.commit == pkgs.aurora-flatpak-gl.commit

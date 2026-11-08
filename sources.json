@@ -293,5 +293,14 @@
     "archive_root": "aurora-steam-native-c06f610e3604c3f2b1b8466dff60d6878d0cd0da",
     "sha256": "c81a8425164322d77155e8c24eb9a73a379637873948cd85cfc5531ba58f25c0",
     "nix_hash": "sha256-yBqEJRZDItdxVejCTrmnOjeWN4c5SM2Fz8VTG6WPJcA="
+  },
+  "aurora-fido": {
+    "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
+    "commit": "2788d62ff0cf3cce2971498989a30c8f3b0be9a1",
+    "version": "0.1.0",
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-sep-userspace/tar.gz/2788d62ff0cf3cce2971498989a30c8f3b0be9a1",
+    "archive_root": "aurora-sep-userspace-2788d62ff0cf3cce2971498989a30c8f3b0be9a1",
+    "sha256": "da9d0fa83c1d3ff36a699cbd947b2a8d7a72442f6c17ea4a5345c90c63f55ea3",
+    "nix_hash": "sha256-2p0PqDwdP/NqaZy9lHsqjXpyRC9sF+pKU0XJDGP1XqM="
   }
 }

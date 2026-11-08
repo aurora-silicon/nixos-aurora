@@ -748,6 +748,43 @@ in {
       platforms = [ "aarch64-linux" ];
     };
   };
+  # Touch ID as a FIDO2/U2F security key (aurora-sep-userspace fido/).
+  # modules/fido.nix runs it with aurora.fido.enable; off by default.
+  aurora-fido = let
+    py = final.python3.withPackages (ps: [ ps.cryptography ps.pygobject3 ]);
+    typelibs = final.lib.makeSearchPath "lib/girepository-1.0"
+      [ final.glib.out final.gobject-introspection ];
+  in final.stdenv.mkDerivation {
+    pname = "aurora-fido";
+    version = pins.aurora-fido.version;
+    src = source "aurora-fido";
+    sourceRoot = "${pins.aurora-fido.archive_root}/fido";
+    nativeBuildInputs = [ final.pkg-config final.makeWrapper py ];
+    buildInputs = [ final.json_c ];
+    makeFlags = [
+      "PREFIX=${placeholder "out"}"
+      "LIBEXECDIR=${placeholder "out"}/libexec/aurora-fido"
+      "SYSCONFDIR=${placeholder "out"}/etc"
+      "PYTHON=${py.interpreter}"
+    ];
+    # Unit tests: software stand-ins, no root, no hardware.
+    doCheck = true;
+    checkTarget = "check";
+    postInstall = ''
+      for f in $out/bin/aurora-fido $out/libexec/aurora-fido/aurora-fidod; do
+        substituteInPlace $f --replace-fail "#!/usr/bin/python3 -I" "#!${py.interpreter} -I"
+        wrapProgram $f --prefix GI_TYPELIB_PATH : ${typelibs}
+      done
+    '';
+    passthru.commit = pins.aurora-fido.commit;
+    meta = {
+      description = "Touch ID as a FIDO2/U2F security key (opt in)";
+      homepage = "https://github.com/aurora-silicon/aurora-sep-userspace";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-fido";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
   # Inspects the Linux side of the SEP and xART state and starts Touch ID over
   # (aurora-xart reset-touchid). modules/sep.nix installs it.
   aurora-xart = final.stdenvNoCC.mkDerivation {
