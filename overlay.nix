@@ -545,7 +545,11 @@ in {
     version = "${pins.aurora-audio.version}-aurora10";
     postInstall = (old.postInstall or "") + ''
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
+      test -e "$out/share/wireplumber/scripts/device/asahi-keep-profile.lua"
     '';
+    # asahi-audio#24: the built-in card stays on HiFi with nothing in the jack.
+    # speakerguardd 1.0's provisioning marker (speakerguardd#106) needs it.
+    passthru = (old.passthru or { }) // { keepsBuiltinProfile = true; };
   });
   # A VRR-capable output defaults to variable refresh rate: the variable
   # variant of the preferred mode becomes the preferred one, which new monitor
