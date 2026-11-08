@@ -185,13 +185,91 @@ class Update:
             result.boards[path.name] = boards
         return result
 
+    @staticmethod
+    def shell_assignments(path):
+        values = {}
+        if path.is_file():
+            for line in path.read_text(errors='replace').splitlines():
+                match = re.fullmatch(r'\s*([A-Za-z_][A-Za-z0-9_]*)=(["\']?)(.*?)\2\s*', line)
+                if match:
+                    values[match[1]] = match[3]
+        return values
+
+    def grub_default(self):
+        """Return the GRUB default entry id and where it came from, or None.
+
+        custom.cfg is sourced last by grub.cfg, so its `set default=` wins over
+        /etc/default/grub and the saved_entry in grubenv.
+        """
+        for directory in ('/boot/grub2', '/boot/grub'):
+            custom = self.path(directory + '/custom.cfg')
+            if custom.is_file():
+                found = re.findall(r'^\s*set\s+default=(["\']?)([^"\'\s]+)\1\s*$',
+                                   custom.read_text(errors='replace'), re.M)
+                found = [value for _, value in found if '$' not in value]
+                if found:
+                    return found[-1], str(custom.relative_to(self.root))
+        configured = self.shell_assignments(self.path('/etc/default/grub')).get('GRUB_DEFAULT', 'saved')
+        if configured != 'saved':
+            return (configured, 'GRUB_DEFAULT') if configured else None
+        for name in ('/boot/grub2/grubenv', '/boot/grub/grubenv', '/boot/efi/EFI/fedora/grubenv'):
+            entry = self.shell_assignments(self.path(name)).get('saved_entry')
+            if entry:
+                return entry, 'saved_entry'
+        return None
+
+    def default_kernel(self, images, versions):
+        """The installed kernel GRUB boots by default, or None if unknown."""
+        default = self.grub_default()
+        if not default:
+            return None
+        entry, origin = default
+        if re.fullmatch(r'\d+', entry):
+            # BLS entries are listed newest first.
+            index = int(entry)
+            return versions[-1 - index] if index < len(versions) else None
+        bls = self.path(f'/boot/loader/entries/{entry}.conf')
+        if '/' not in entry and bls.is_file():
+            for line in bls.read_text().splitlines():
+                key, _, value = line.partition(' ')
+                if key == 'version' and value.strip() in images:
+                    return value.strip()
+        # BLS ids are <machine-id>-<version>; hand-written menu entries in
+        # custom.cfg commonly end in the version too.
+        matches = [v for v in images if entry == v or entry.endswith('-' + v)]
+        if matches:
+            return max(matches, key=len)
+        print(f'update-m1n1: GRUB default {entry!r} ({origin}) is not an installed kernel; '
+              'using the newest kernel, as GRUB does', file=sys.stderr)
+        return None
+
+    def select_kernel(self, images, versions):
+        newest = versions[-1]
+        default = self.default_kernel(images, versions)
+        if self.action == 'add':
+            pinned = self.grub_default()
+            kernel = self.shell_assignments(self.path('/etc/sysconfig/kernel'))
+            # Fedora's kernel-install makes a new kernel the saved default
+            # unless UPDATEDEFAULT says otherwise; a custom.cfg default stays.
+            becomes_default = (kernel.get('UPDATEDEFAULT', 'yes') == 'yes'
+                               and not (pinned and pinned[1].endswith('custom.cfg')))
+            if becomes_default or default is None:
+                return self.version
+            selected = default
+        else:
+            selected = default or newest
+        if selected != newest:
+            print(f'update-m1n1: composing Stage 2 from the default kernel {selected}, '
+                  f'not the newer non-default {newest}', file=sys.stderr)
+        return selected
+
     def plan(self):
         images = self.kernel_images()
         if not images:
             raise Refused('no remaining installed kernels; preserving Stage 2 and /boot/dtb')
         # Match Fedora's version ordering, including its release suffixes.
         versions = subprocess.check_output(['sort', '-V'], input='\n'.join(images), text=True).splitlines()
-        selected = self.version if self.action == 'add' else versions[-1]
+        selected = self.select_kernel(images, versions)
         source = self.dtb_dir(selected)
         configured = self.env.get('DTBS', '/boot/dtb')
         if not configured.strip():
