@@ -1,0 +1,3104 @@
+diff --git a/sound/soc/apple/aop_t8140.rs b/sound/soc/apple/aop_t8140.rs
+index ff3bd53591..263f60248a 100644
+--- a/sound/soc/apple/aop_t8140.rs
++++ b/sound/soc/apple/aop_t8140.rs
+@@ -27,8 +27,8 @@
+ //!
+ //! The speaker front-end is copy-only: the LEAP consumes float32 and the
+ //! driver converts each S32 sample through the amplifier's full scale and
+-//! the "Speaker Playback Volume" control, which macaudio holds at full scale
+-//! while a protection engine owns the speakers and 20 dB down otherwise.
++//! the "Speaker Playback Volume" control, which the card's volume lock holds
++//! 20 dB down whenever no speaker-protection daemon owns it.
+ //!
+ //! Closing the lid disconnects both internal microphones in hardware.  The
+ //! array then reads back as digital silence, but the low-power microphone's
+@@ -1615,49 +1615,41 @@ fn copy_str(target: &mut [u8], source: &[u8]) -> Result {
+ const FE_SPKR: usize = 1;
+ 
+ /// Digital ceiling of the speaker path, as a Q31 gain applied to every
+-/// sample userspace writes: unity, so a full-scale S32 sample is a float of
+-/// 1.0, the amplifier's full scale.
+-///
+-/// The LEAP consumes float32 with 1.0 as the I2S full scale.  Measured
+-/// from outside the machine, the same program through the same speaker
+-/// chain played 5.7-6.0 dB louder on macOS than through a ceiling of 0.5
+-/// here, flat across the band and the same on four external microphones
+-/// (2026-11-08), a factor of two.  macOS keeps its speaker output within
+-/// digital full scale and does not wrap, so a float of 1.0 is the wire's
+-/// full scale and a ceiling of 0.5 left the amplifiers 6 dB short of it.
+-///
+-/// The factor of two that once set the ceiling to 0.5 was read back on the
+-/// SpeakerTap, which is not the transmitter's format: the ADT describes
+-/// the speaker stream as 32-bit words and the tap as 24-bit samples in
+-/// 32-bit slots with its own framing, so the tap's words are not the wire's
+-/// scale and are not used to set it.  Protection is the job of the engine
+-/// in the speaker signal path: while it owns the speakers macaudio holds
+-/// "Speaker Playback Volume" at this full scale, and without an owner 20 dB
+-/// down with speaker playback refused.
+-const SPKR_CEILING_Q31: i64 = 1 << 31;
+-
+-/// "Speaker Playback Volume": the software gain below the ceiling that
+-/// macaudio sets (full scale or its safe level), 0.5 dB per
++/// sample userspace writes: 0.5, the amplifier's full scale.
++///
++/// The words on the speaker wire are `2 × float × 2^31`, as read back on
++/// the SpeakerTap: a float of 6 791 000/2^31 came back as a clean 1 kHz
++/// sine with peak 13 582 000 and nothing else in the path.  A float of 0.5
++/// is therefore the I2S full scale (0 dBFS on the wire, 7.3 V peak at the
++/// MAX98360A's output on the J700) and anything above it would wrap.
++/// Protection is the userspace daemon's job, exactly as on the other Apple
++/// laptops: it owns "Speaker Playback Volume" and governs it with the
++/// speaker's thermal model, fed by the tap; when no daemon holds the lock,
++/// macaudio keeps the control 20 dB down.
++const SPKR_CEILING_Q31: i64 = 1 << 30;
++
++/// "Speaker Playback Volume": the software gain below the ceiling that the
++/// speaker-protection daemon and the card's volume lock drive, 0.5 dB per
+ /// step from -63.0 dB (1) to 0 dB (127) relative to SPKR_CEILING_Q31, 0 =
+ /// mute; entry i = round(SPKR_CEILING_Q31 * 10^(-(127 - i) / 40)).
+ const SPKR_VOLUME_MAX: u32 = 127;
+ const _: () = assert!(SPKR_VOLUME_Q31[SPKR_VOLUME_MAX as usize] as i64 == SPKR_CEILING_Q31);
+ const SPKR_VOLUME_Q31: [u32; 128] = [
+-    0, 1520302, 1610386, 1705807, 1806882, 1913947, 2027355, 2147484, 2274730, 2409516, 2552289,
+-    2703522, 2863715, 3033401, 3213142, 3403532, 3605204, 3818826, 4045106, 4284793, 4538683,
+-    4807617, 5092486, 5394235, 5713864, 6052431, 6411060, 6790940, 7193328, 7619560, 8071047,
+-    8549286, 9055863, 9592457, 10160846, 10762914, 11400657, 12076188, 12791747, 13549706,
+-    14352576, 15203020, 16103856, 17058069, 18068823, 19139468, 20273553, 21474836, 22747301,
+-    24095163, 25522891, 27035217, 28637155, 30334013, 32131416, 34035322, 36052042, 38188260,
+-    40451056, 42847932, 45386832, 48076170, 50924863, 53942350, 57138636, 60524313, 64110604,
+-    67909396, 71933280, 76195595, 80710468, 85492864, 90558635, 95924571, 101608459, 107629139,
+-    114006566, 120761880, 127917471, 135497058, 143525763, 152030200, 161038555, 170580690,
+-    180688231, 191394682, 202735529, 214748365, 227473005, 240951628, 255228910, 270352174,
+-    286371547, 303340128, 321314161, 340353221, 360520418, 381882595, 404510562, 428479319,
+-    453868315, 480761704, 509248626, 539423504, 571386356, 605243126, 641106036, 679093957,
+-    719332803, 761955951, 807104680, 854928639, 905586346, 959245710, 1016084592, 1076291389,
+-    1140065663, 1207618800, 1279174713, 1354970580, 1435257634, 1520301996, 1610385552, 1705806895,
+-    1806882308, 1913946816, 2027355295, 2147483648,
++    0, 760151, 805193, 852903, 903441, 956973, 1013678, 1073742, 1137365, 1204758, 1276145,
++    1351761, 1431858, 1516701, 1606571, 1701766, 1802602, 1909413, 2022553, 2142397, 2269342,
++    2403809, 2546243, 2697118, 2856932, 3026216, 3205530, 3395470, 3596664, 3809780, 4035523,
++    4274643, 4527932, 4796229, 5080423, 5381457, 5700328, 6038094, 6395874, 6774853, 7176288,
++    7601510, 8051928, 8529034, 9034412, 9569734, 10136776, 10737418, 11373650, 12047581, 12761445,
++    13517609, 14318577, 15167006, 16065708, 17017661, 18026021, 19094130, 20225528, 21423966,
++    22693416, 24038085, 25462431, 26971175, 28569318, 30262156, 32055302, 33954698, 35966640,
++    38097798, 40355234, 42746432, 45279317, 47962285, 50804230, 53814569, 57003283, 60380940,
++    63958736, 67748529, 71762882, 76015100, 80519278, 85290345, 90344115, 95697341, 101367765,
++    107374182, 113736503, 120475814, 127614455, 135176087, 143185773, 151670064, 160657080,
++    170176611, 180260209, 190941298, 202255281, 214239660, 226934158, 240380852, 254624313,
++    269711752, 285693178, 302621563, 320553018, 339546978, 359666402, 380977976, 403552340,
++    427464319, 452793173, 479622855, 508042296, 538145694, 570032831, 603809400, 639587356,
++    677485290, 717628817, 760150998, 805192776, 852903448, 903441154, 956973408, 1013677647,
++    1073741824,
+ ];
+ /// The component's only "register": the speaker volume.
+ const REG_SPKR_VOLUME: u32 = 0;
+@@ -1973,7 +1965,7 @@ fn f32_bits_of_q31(v: i32) -> u32 {
+ /// One S32 sample -> the float32 word the LEAP consumes, through the volume
+ /// table (whose top entry is the ceiling).
+ fn spkr_f32_bits(sample: i32, gain_q31: u32) -> u32 {
+-    let scaled = (i64::from(sample) * i64::from(gain_q31)) >> 31; // |scaled| <= SPKR_CEILING_Q31
++    let scaled = (i64::from(sample) * i64::from(gain_q31)) >> 31; // |scaled| < SPKR_CEILING_Q31
+     f32_bits_of_q31(scaled as i32)
+ }
+ 
+@@ -2915,19 +2907,19 @@ pub(crate) fn unbind(&self) {
+ }
+ 
+ /// The speaker ceiling and the copy-path conversion are the whole digital
+-/// protection of the J700 speakers below the engine: check them where they
++/// protection of the J700 speakers below the daemon: check them where they
+ /// are built, without the hardware.
+ #[kunit_tests(snd_soc_t8140_aop_audio_speaker)]
+ mod tests {
+     use super::*;
+ 
+-    /// macaudio's safe level for the J700 while nothing owns the speakers:
++    /// macaudio's level for the J700 while no daemon holds the lock:
+     /// MAX98360A_DB(safe_vol = -20).
+     const LOCKED_VOLUME: usize = 87;
+     /// 10^(0.5 / 20) in parts per 10^9.
+     const HALF_DB_PPB: u128 = 1_059_253_725;
+-    /// 1.0 as a float32: the amplifier's full scale on the wire.
+-    const F32_ONE: u32 = 0x3f80_0000;
++    /// 0.5 as a float32: the amplifier's full scale on the wire.
++    const F32_HALF: u32 = 0x3f00_0000;
+ 
+     #[test]
+     fn the_top_of_the_volume_range_is_the_amplifier_full_scale() {
+@@ -2935,12 +2927,8 @@ fn the_top_of_the_volume_range_is_the_amplifier_full_scale() {
+             i64::from(SPKR_VOLUME_Q31[SPKR_VOLUME_MAX as usize]),
+             SPKR_CEILING_Q31
+         );
+-        assert_eq!(SPKR_CEILING_Q31, 1 << 31);
+-        // unity: a full-scale sample at full volume is the float full scale
+-        assert_eq!(
+-            spkr_f32_bits(i32::MIN, SPKR_VOLUME_Q31[SPKR_VOLUME_MAX as usize]),
+-            0x8000_0000 | F32_ONE
+-        );
++        assert_eq!(SPKR_CEILING_Q31, 1 << 30);
++        assert_eq!(f32_bits_of_q31(SPKR_CEILING_Q31 as i32), F32_HALF);
+     }
+ 
+     #[test]
+@@ -2980,22 +2968,22 @@ fn no_sample_at_any_volume_exceeds_the_full_scale() {
+                 0,
+             ] {
+                 let bits = spkr_f32_bits(sample, gain);
+-                assert!(bits & 0x7fff_ffff <= F32_ONE);
++                assert!(bits & 0x7fff_ffff <= F32_HALF);
+             }
+         }
+         // the extremes at full volume: just under and exactly at full scale
+         assert_eq!(
+             spkr_f32_bits(i32::MAX, SPKR_CEILING_Q31 as u32),
+-            0x3f7f_ffff
++            0x3eff_ffff
+         );
+         assert_eq!(
+             spkr_f32_bits(i32::MIN, SPKR_CEILING_Q31 as u32),
+-            0x8000_0000 | F32_ONE
++            0x8000_0000 | F32_HALF
+         );
+         // and 20 dB down at the locked level
+         let locked = spkr_f32_bits(i32::MIN, SPKR_VOLUME_Q31[LOCKED_VOLUME]);
+-        // 0.1 as a float32 is 0x3dcc_cccd; the conversion truncates
+-        assert!(locked & 0x7fff_ffff <= 0x3dcc_cccd && locked & 0x7fff_ffff > 0x3dcc_cccd - 64);
++        // 0.05 as a float32 is 0x3d4c_cccd; the conversion truncates
++        assert!(locked & 0x7fff_ffff <= 0x3d4c_cccd && locked & 0x7fff_ffff > 0x3d4c_cccd - 64);
+     }
+ 
+     #[test]
+diff --git a/sound/soc/apple/macaudio-admission-test.h b/sound/soc/apple/macaudio-admission-test.h
+index b526f46048..d0465e887d 100644
+--- a/sound/soc/apple/macaudio-admission-test.h
++++ b/sound/soc/apple/macaudio-admission-test.h
+@@ -1,33 +1,36 @@
+ /* SPDX-License-Identifier: GPL-2.0-only */
+-/* Exercise the admission predicate used for Speaker/Speakers DT links. */
++/* Exercise the same admission predicate used for Speaker/Speakers DT links. */
+ #include <kunit/test.h>
+ 
+-static void macaudio_admission_needs_a_safe_level(struct kunit *test)
++static void macaudio_admission_unsafe_parameter_cannot_admit_speakers(struct kunit *test)
+ {
+-	struct macaudio_platform_cfg cfg;
++	struct macaudio_platform_cfg cfg = macaudio_j413_cfg;
++	int saved = please_blow_up_my_speakers;
++	int values[] = { 0, 1, 2, 3, -1 };
++	unsigned int i;
+ 
+-	/* Generic apple,macaudio plus a DT Speaker backend. */
+-	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&macaudio_fallback_cfg));
+-	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&macaudio_j45x_cfg));
+-	KUNIT_EXPECT_TRUE(test, macaudio_speakers_allowed(&macaudio_j413_cfg));
+-	KUNIT_EXPECT_TRUE(test, macaudio_speakers_allowed(&macaudio_j700_cfg));
+-	cfg = macaudio_j413_cfg;
+-	cfg.safe_vol = 0;
+-	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&cfg));
+-	cfg = macaudio_j413_cfg;
+-	cfg.speakers = SPKR_NONE;
+-	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&cfg));
+-	cfg = macaudio_j413_cfg;
+-	cfg.amp = AMP_NONE;
+-	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&cfg));
+-	/* An amp the driver cannot hold at a safe level */
+-	cfg = macaudio_j413_cfg;
+-	cfg.amp = AMP_SSM3515;
+-	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&cfg));
++	for (i = 0; i < ARRAY_SIZE(values); i++) {
++		please_blow_up_my_speakers = values[i];
++		/* Generic apple,macaudio plus a DT Speaker backend. */
++		KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&macaudio_fallback_cfg));
++		KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&macaudio_j45x_cfg));
++		KUNIT_EXPECT_TRUE(test, macaudio_speakers_allowed(&macaudio_j413_cfg));
++		KUNIT_EXPECT_TRUE(test, macaudio_speakers_allowed(&macaudio_j700_cfg));
++		cfg = macaudio_j413_cfg;
++		cfg.safe_vol = 0;
++		KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&cfg));
++		cfg = macaudio_j413_cfg;
++		cfg.speakers = SPKR_NONE;
++		KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&cfg));
++		cfg = macaudio_j413_cfg;
++		cfg.amp = AMP_NONE;
++		KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&cfg));
++	}
++	please_blow_up_my_speakers = saved;
+ }
+ 
+ static struct kunit_case macaudio_admission_cases[] = {
+-	KUNIT_CASE(macaudio_admission_needs_a_safe_level),
++	KUNIT_CASE(macaudio_admission_unsafe_parameter_cannot_admit_speakers),
+ 	{}
+ };
+ 
+diff --git a/sound/soc/apple/macaudio-pm-volumes-test.h b/sound/soc/apple/macaudio-pm-volumes-test.h
+new file mode 100644
+index 0000000000..b6ba3eb1c4
+--- /dev/null
++++ b/sound/soc/apple/macaudio-pm-volumes-test.h
+@@ -0,0 +1,262 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * The speaker volumes the system-sleep lock clips are set again at the
++ * daemon's first ping after it, through the lock control and the PM notifier.
++ */
++#include <kunit/test.h>
++
++struct macaudio_test_vol {
++	struct soc_mixer_control mc;
++	long value;
++};
++
++static struct macaudio_test_vol *macaudio_test_vol(struct snd_kcontrol *kctl)
++{
++	return container_of((struct soc_mixer_control *)kctl->private_value,
++			    struct macaudio_test_vol, mc);
++}
++
++static int macaudio_test_vol_info(struct snd_kcontrol *kctl, struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
++	uinfo->count = 1;
++	uinfo->value.integer.max = SN012776_0DB;
++	return 0;
++}
++
++static int macaudio_test_vol_get(struct snd_kcontrol *kctl, struct snd_ctl_elem_value *uval)
++{
++	uval->value.integer.value[0] = macaudio_test_vol(kctl)->value;
++	return 0;
++}
++
++static int macaudio_test_vol_put(struct snd_kcontrol *kctl, struct snd_ctl_elem_value *uval)
++{
++	struct macaudio_test_vol *vol = macaudio_test_vol(kctl);
++	bool changed = vol->value != uval->value.integer.value[0];
++
++	vol->value = uval->value.integer.value[0];
++	return changed;
++}
++
++static void macaudio_test_free_kctl(void *kctl)
++{
++	snd_ctl_free_one(kctl);
++}
++
++/* Last in, so first out: before the controls go */
++static void macaudio_test_pm_cleanup(void *data)
++{
++	struct macaudio_snd_data *ma = data;
++
++	cancel_delayed_work_sync(&ma->lock_timeout_work);
++	macaudio_pm_volumes_drop(ma);
++}
++
++static const char *const macaudio_test_vol_names[] = {
++	"Left Woofer Speaker Volume",
++	"Right Woofer Speaker Volume",
++	"Left Tweeter Speaker Volume",
++	"Right Tweeter Speaker Volume",
++	/* Not a speaker volume: never locked, kept or set */
++	"Headphone Playback Volume",
++};
++
++/* As the daemon set them before the sleep */
++static const long macaudio_test_vols[] = { 201, 190, 201, 170, 120 };
++
++#define MACAUDIO_TEST_NR_VOLS ARRAY_SIZE(macaudio_test_vol_names)
++
++struct macaudio_test_pm {
++	struct macaudio_snd_data *ma;
++	struct snd_kcontrol *slk;
++	struct snd_kcontrol *vols[MACAUDIO_TEST_NR_VOLS];
++};
++
++static struct snd_kcontrol *macaudio_test_add_kctl(struct kunit *test, struct snd_card *card,
++						   const struct snd_kcontrol_new *tmpl,
++						   void *private_data)
++{
++	struct snd_kcontrol *kctl = snd_ctl_new1(tmpl, private_data);
++	int ret;
++
++	KUNIT_ASSERT_NOT_NULL(test, kctl);
++	ret = kunit_add_action_or_reset(test, macaudio_test_free_kctl, kctl);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++	list_add_tail(&kctl->list, &card->controls);
++	return kctl;
++}
++
++/* A card with speaker safety, its lock control and the volumes, none owned yet */
++static void macaudio_test_pm_card(struct kunit *test, struct macaudio_test_pm *t)
++{
++	struct snd_kcontrol_new slk = {
++		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++		.name = "Speaker Volume Unlock",
++		.info = snd_ctl_boolean_mono_info,
++		.get = macaudio_slk_get,
++		.put = macaudio_slk_put,
++	};
++	struct macaudio_snd_data *ma;
++	struct snd_card *card;
++	unsigned int i;
++	int ret;
++
++	ma = kunit_kzalloc(test, sizeof(*ma), GFP_KERNEL);
++	card = kunit_kzalloc(test, sizeof(*card), GFP_KERNEL);
++	KUNIT_ASSERT_NOT_NULL(test, ma);
++	KUNIT_ASSERT_NOT_NULL(test, card);
++
++	INIT_LIST_HEAD(&card->controls);
++	INIT_LIST_HEAD(&card->ctl_files);
++	init_rwsem(&card->controls_rwsem);
++	rwlock_init(&card->controls_rwlock);
++	ma->card.snd_card = card;
++	snd_soc_card_set_drvdata(&ma->card, ma);
++	ma->cfg = &macaudio_j493_cfg;
++	ma->has_safety = true;
++	mutex_init(&ma->volume_lock_mutex);
++	INIT_DELAYED_WORK(&ma->lock_timeout_work, macaudio_vlimit_timeout_work);
++
++	t->ma = ma;
++	t->slk = macaudio_test_add_kctl(test, card, &slk, &ma->card);
++	ma->speaker_lock_kctl = t->slk;
++
++	for (i = 0; i < MACAUDIO_TEST_NR_VOLS; i++) {
++		struct macaudio_test_vol *vol = kunit_kzalloc(test, sizeof(*vol), GFP_KERNEL);
++		struct snd_kcontrol_new tmpl = {
++			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++			.name = macaudio_test_vol_names[i],
++			.info = macaudio_test_vol_info,
++			.get = macaudio_test_vol_get,
++			.put = macaudio_test_vol_put,
++		};
++
++		KUNIT_ASSERT_NOT_NULL(test, vol);
++		vol->mc.max = SN012776_0DB;
++		vol->value = macaudio_test_vols[i];
++		tmpl.private_value = (unsigned long)&vol->mc;
++		t->vols[i] = macaudio_test_add_kctl(test, card, &tmpl, NULL);
++	}
++
++	ret = kunit_add_action_or_reset(test, macaudio_test_pm_cleanup, ma);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++}
++
++/* A daemon takes the lock and every speaker volume, as speakersafetyd does */
++static void macaudio_test_take(struct kunit *test, struct macaudio_test_pm *t)
++{
++	struct snd_ctl_file *owner = kunit_kzalloc(test, sizeof(*owner), GFP_KERNEL);
++	unsigned int i;
++
++	KUNIT_ASSERT_NOT_NULL(test, owner);
++	for (i = 0; i < MACAUDIO_TEST_NR_VOLS - 1; i++)
++		t->vols[i]->vd[0].owner = owner;
++	KUNIT_ASSERT_EQ(test, macaudio_slk_lock(t->slk, owner), 0);
++}
++
++static int macaudio_test_ping(struct kunit *test, struct macaudio_test_pm *t)
++{
++	struct snd_ctl_elem_value *uval = kunit_kzalloc(test, sizeof(*uval), GFP_KERNEL);
++
++	KUNIT_ASSERT_NOT_NULL(test, uval);
++	uval->value.integer.value[0] = SPEAKER_MAGIC_VALUE;
++	return macaudio_slk_put(t->slk, uval);
++}
++
++static void macaudio_test_notify(struct macaudio_test_pm *t, unsigned long action)
++{
++	macaudio_pm_notify(&t->ma->pm_nb, action, NULL);
++}
++
++/* The speaker volumes as the daemon set them, or clipped to the lock's ceiling */
++static void macaudio_test_expect_vols(struct kunit *test, struct macaudio_test_pm *t,
++				      bool clipped)
++{
++	unsigned int i;
++
++	for (i = 0; i < MACAUDIO_TEST_NR_VOLS; i++) {
++		bool speaker = i < MACAUDIO_TEST_NR_VOLS - 1;
++
++		KUNIT_EXPECT_EQ(test, macaudio_test_vol(t->vols[i])->value,
++				speaker && clipped ? 1L : macaudio_test_vols[i]);
++	}
++}
++
++static void macaudio_pm_volumes_restored_after_sleep(struct kunit *test)
++{
++	struct macaudio_test_pm t;
++
++	macaudio_test_pm_card(test, &t);
++	macaudio_test_take(test, &t);
++	KUNIT_EXPECT_EQ(test, macaudio_test_ping(test, &t), 0);
++	KUNIT_EXPECT_TRUE(test, t.ma->speaker_volume_unlocked);
++	macaudio_test_expect_vols(test, &t, false);
++
++	macaudio_test_notify(&t, PM_SUSPEND_PREPARE);
++	KUNIT_EXPECT_FALSE(test, t.ma->speaker_volume_unlocked);
++	macaudio_test_expect_vols(test, &t, true);
++	/* A ping before the freeze leaves them locked */
++	KUNIT_EXPECT_EQ(test, macaudio_test_ping(test, &t), 0);
++	KUNIT_EXPECT_FALSE(test, t.ma->speaker_volume_unlocked);
++
++	/* Locked after the resume until the daemon pings */
++	macaudio_test_notify(&t, PM_POST_SUSPEND);
++	KUNIT_EXPECT_FALSE(test, t.ma->speaker_volume_unlocked);
++	macaudio_test_expect_vols(test, &t, true);
++
++	KUNIT_EXPECT_EQ(test, macaudio_test_ping(test, &t), 0);
++	KUNIT_EXPECT_TRUE(test, t.ma->speaker_volume_unlocked);
++	macaudio_test_expect_vols(test, &t, false);
++	KUNIT_EXPECT_NULL(test, t.ma->pm_volumes);
++}
++
++/* The daemon pings only once a stream runs: a second sleep can come first. */
++static void macaudio_pm_volumes_second_sleep_before_ping(struct kunit *test)
++{
++	struct macaudio_test_pm t;
++
++	macaudio_test_pm_card(test, &t);
++	macaudio_test_take(test, &t);
++	KUNIT_EXPECT_EQ(test, macaudio_test_ping(test, &t), 0);
++
++	macaudio_test_notify(&t, PM_SUSPEND_PREPARE);
++	macaudio_test_notify(&t, PM_POST_SUSPEND);
++	macaudio_test_notify(&t, PM_SUSPEND_PREPARE);
++	macaudio_test_notify(&t, PM_POST_SUSPEND);
++	macaudio_test_expect_vols(test, &t, true);
++
++	KUNIT_EXPECT_EQ(test, macaudio_test_ping(test, &t), 0);
++	macaudio_test_expect_vols(test, &t, false);
++}
++
++/* A new owner, such as a restarted daemon, sets the volumes itself. */
++static void macaudio_pm_volumes_new_owner(struct kunit *test)
++{
++	struct macaudio_test_pm t;
++
++	macaudio_test_pm_card(test, &t);
++	macaudio_test_take(test, &t);
++	KUNIT_EXPECT_EQ(test, macaudio_test_ping(test, &t), 0);
++	macaudio_test_notify(&t, PM_SUSPEND_PREPARE);
++	macaudio_test_notify(&t, PM_POST_SUSPEND);
++
++	macaudio_test_take(test, &t);
++	KUNIT_EXPECT_NULL(test, t.ma->pm_volumes);
++	KUNIT_EXPECT_EQ(test, macaudio_test_ping(test, &t), 0);
++	KUNIT_EXPECT_TRUE(test, t.ma->speaker_volume_unlocked);
++	macaudio_test_expect_vols(test, &t, true);
++}
++
++static struct kunit_case macaudio_pm_volumes_cases[] = {
++	KUNIT_CASE(macaudio_pm_volumes_restored_after_sleep),
++	KUNIT_CASE(macaudio_pm_volumes_second_sleep_before_ping),
++	KUNIT_CASE(macaudio_pm_volumes_new_owner),
++	{}
++};
++
++static struct kunit_suite macaudio_pm_volumes_suite = {
++	.name = "apple-speaker-pm-volumes",
++	.test_cases = macaudio_pm_volumes_cases,
++};
++kunit_test_suite(macaudio_pm_volumes_suite);
+diff --git a/sound/soc/apple/macaudio.c b/sound/soc/apple/macaudio.c
+index 220b99b853..3acedbb6a3 100644
+--- a/sound/soc/apple/macaudio.c
++++ b/sound/soc/apple/macaudio.c
+@@ -24,15 +24,9 @@
+ 
+ #include <linux/module.h>
+ #include <linux/atomic.h>
+-#include <linux/capability.h>
+-#include <linux/debugfs.h>
+-#include <linux/delay.h>
+ #include <linux/gpio/consumer.h>
+-#include <linux/hrtimer.h>
+-#include <linux/kthread.h>
+ #include <linux/of_device.h>
+ #include <linux/platform_device.h>
+-#include <linux/sched.h>
+ #include <linux/slab.h>
+ #include <linux/suspend.h>
+ #include <sound/core.h>
+@@ -42,7 +36,6 @@
+ #include <sound/soc.h>
+ #include <sound/soc-jack.h>
+ #include <uapi/linux/input-event-codes.h>
+-#include <uapi/linux/sched/types.h>
+ 
+ #define DRIVER_NAME "snd-soc-macaudio"
+ 
+@@ -66,26 +59,11 @@
+  */
+ #define MACAUDIO_MAX_BCLK_FREQ	24576000
+ 
++#define SPEAKER_MAGIC_VALUE (s32)0xdec1be15
+ /* Primary, Secondary and Speaker Sense */
+ #define MACAUDIO_NUM_FE_LINKS	3
+-/* The speaker protection lease an owner may ask for, in milliseconds */
+-#define SPEAKER_LEASE_MIN_MS	10
+-#define SPEAKER_LEASE_MAX_MS	100
+-/*
+- * The withdrawal's workers run SCHED_FIFO above the audio server's data
+- * threads (PipeWire's default is 88) and the protection supervisor: a
+- * spinning real-time thread on one CPU cannot hold them off, as they wake
+- * on another.
+- */
+-#define SPEAKER_WORKER_PRIO	90
+-/*
+- * A withdrawal while the owner's lease still runs (release, owner gone, a
+- * new owner) ramps the amps down before the stream stops, so that the stop
+- * is not a click: at most this long, never past the lease's end, one step
+- * at least this far from the last.
+- */
+-#define SPEAKER_RAMP_MAX_US	10000
+-#define SPEAKER_RAMP_STEP_US	500
++/* milliseconds */
++#define SPEAKER_LOCK_TIMEOUT 250
+ #define MACAUDIO_MAX_SPEAKER_ID_GPIOS 8
+ 
+ enum macaudio_amp_type {
+@@ -121,6 +99,11 @@ struct macaudio_platform_cfg {
+ 	 * amplifiers) unless set.
+ 	 */
+ 	const char *spk_out_widget;
++	/*
++	 * Software-gain amplifier: the CPU DAI whose front-end converts the
++	 * speaker samples through the volume control at copy time.
++	 */
++	const char *sw_gain_dai;
+ 	/*
+ 	 * A CPU component other than the MCA: its front-end DAI names in
+ 	 * place of "mca-pcm-N", the DAI format its serial links run (the
+@@ -153,15 +136,6 @@ struct macaudio_platform_cfg {
+ 	 * keep the first slots in codec order; the others carry silence.
+ 	 */
+ 	unsigned int speaker_fe_channels;
+-	/*
+-	 * Restore the amp's DT playback corner on grant, where protection
+-	 * supplies the crossover ahead of the low-frequency thermal pilot.
+-	 * The 800 Hz policy floor would remove that pilot from the tweeters.
+-	 * Only an owner that declares the crossover gets it (see
+-	 * "Speaker Protection Crossover"). Every withdrawal restores the floor
+-	 * along with the safe level.
+-	 */
+-	bool tweeter_hpf_granted;
+ };
+ 
+ static const char *volume_control_names[] = {
+@@ -192,6 +166,12 @@ struct ma_codec_idle {
+ 	u32 idle_mask;
+ };
+ 
++/* A speaker volume control and its value, as the system-sleep lock found it */
++struct macaudio_pm_volume {
++	struct snd_kcontrol *kctl;
++	long value[2];
++};
++
+ struct macaudio_snd_data {
+ 	struct snd_soc_card card;
+ 	struct snd_soc_jack jack;
+@@ -202,6 +182,7 @@ struct macaudio_snd_data {
+ 	const struct macaudio_platform_cfg *cfg;
+ 	bool has_speakers;
+ 	bool has_sense;
++	bool has_safety;
+ 	unsigned int max_channels;
+ 	struct gpio_descs *speaker_id_gpios;
+ 
+@@ -209,6 +190,8 @@ struct macaudio_snd_data {
+ 		/* frontend props */
+ 		unsigned int bclk_ratio;
+ 		bool is_sense;
++		/* the front-end that applies the software speaker gain */
++		bool sw_gain;
+ 
+ 		/* backend props */
+ 		bool is_speakers;
+@@ -217,71 +200,57 @@ struct macaudio_snd_data {
+ 		struct ma_codec_idle *codecs;
+ 	} *link_props;
+ 
+-	/* Speaker protection ownership: see macaudio_spk_put() */
+-	struct mutex spk_mutex;
+-	struct snd_kcontrol *spk_kctl;
+-	struct snd_ctl_file *spk_owner;
+-	/*
+-	 * Speaker playback may start (macaudio_spk_admitted()). Set under
+-	 * spk_mutex; cleared under it or by the lease timer, in hard IRQ
+-	 * context, at the lease's end. Read without spk_mutex.
+-	 */
+-	bool spk_granted;
+-	/* The amps are at the operating gain (spk_mutex) */
+-	bool spk_active;
+-	/* A safe level that did not take: speaker playback refused until reload */
+-	bool spk_floor_failed;
+-	/* The lease ran out: the owner's next write is refused with -ETIMEDOUT */
+-	bool spk_lapsed;
+-	/*
+-	 * Between PM_SUSPEND_PREPARE and PM_POST_SUSPEND: no grant. Set
+-	 * without spk_mutex (macaudio_pm_notify()), cleared under it.
+-	 */
++	int speaker_sample_rate;
++	struct snd_kcontrol *speaker_sample_rate_kctl;
++
++	struct mutex volume_lock_mutex;
++	bool speaker_volume_unlocked;
++	bool speaker_volume_was_locked;
++	struct snd_kcontrol *speaker_lock_kctl;
++	struct snd_ctl_file *speaker_lock_owner;
++	u64 bes_active;
++	bool speaker_lock_timeout_enabled;
++	ktime_t speaker_lock_timeout;
++	ktime_t speaker_lock_remain;
++	struct delayed_work lock_timeout_work;
++	struct work_struct lock_update_work;
++	/* Between PM_SUSPEND_PREPARE and PM_POST_SUSPEND: the speaker volumes stay locked */
+ 	bool pm_quiesced;
+-	/* The card is being removed: no grant, no amp access */
+-	bool spk_dead;
+-	/*
+-	 * Speaker starts refused because protection was not granted: every
+-	 * one (debugfs speaker_starts_refused), and since the last grant.
+-	 */
+-	atomic_t spk_refused;
+-	atomic_t spk_refused_since_grant;
+-	/* Written under spk_mutex, read without it */
+-	ktime_t spk_lease_end;
++	struct notifier_block pm_nb;
+ 	/*
+-	 * When and why the start gate was last closed ahead of the floor (the
+-	 * lease timer, or system sleep), for the withdrawal's log line.
++	 * The speaker volumes as the system-sleep lock found them. Locking clips
++	 * them to its ceiling and unlocking only lifts the ceiling; the daemon
++	 * keeps its lease across the sleep and does not set them again.
+ 	 */
+-	ktime_t spk_gate_closed_at;
+-	const char *spk_gate_reason;
+-	struct hrtimer spk_lease_timer;
+-	/* The floor after a lease ran out; takes spk_mutex */
+-	struct kthread_worker *spk_worker;
+-	struct kthread_work spk_expire_work;
+-	/* Stops the speaker streams; never takes spk_mutex (see macaudio_spk_grant()) */
+-	struct kthread_worker *spk_stop_worker;
+-	struct kthread_work spk_stop_work;
+-	struct notifier_block pm_nb;
+-	/* The speaker volume controls, the driver's alone */
+-	struct snd_kcontrol **spk_vols;
+-	unsigned int spk_nr_vols;
+-	struct snd_ctl_elem_value *spk_uval;
++	struct macaudio_pm_volume *pm_volumes;
++	unsigned int pm_nr_volumes;
++	/* Allocated with them, so that setting them again cannot fail */
++	struct snd_ctl_elem_value *pm_uval;
++
+ 	/*
+-	 * The tweeter amps' playback high-pass corners, the driver's too, and
+-	 * their safe item and each amp's original DT item while granted
++	 * Software-gain amplifier: a lower gain cannot change samples that
++	 * were converted before it was set, so every lock event bumps the
++	 * epoch and stops the front-end stream; it is refused until it has
++	 * been prepared (and its buffer cleared) under the new epoch.
+ 	 */
+-	struct snd_kcontrol **spk_hpfs;
+-	unsigned int spk_nr_hpfs;
+-	unsigned int spk_hpf_safe;
+-	unsigned int *spk_hpf_granted;
++	atomic_t sw_gain_lock_epoch;
++	atomic_t sw_gain_prepared_epoch;
++	atomic_t sw_gain_limit_failed;
++	struct work_struct sw_gain_stop_work;
++
+ 	/*
+-	 * The owner's engine runs the crossover ahead of the amps, so a grant
+-	 * may open the tweeters' high-pass. Written under spk_mutex.
++	 * A lock that did not take on every speaker volume (a control write
++	 * failed) is a failed lock: the playback streams are stopped and
++	 * refused until the driver is reloaded, since a volume above the safe
++	 * value may be left behind.
+ 	 */
+-	struct snd_kcontrol *spk_xover_kctl;
+-	bool spk_xover;
++	bool speaker_lock_failed;
++	struct work_struct lock_fail_work;
+ };
+ 
++static int please_blow_up_my_speakers;
++module_param(please_blow_up_my_speakers, int, 0644);
++MODULE_PARM_DESC(please_blow_up_my_speakers, "Deprecated: cannot bypass speaker admission or protection");
+ 
+ SND_SOC_DAILINK_DEFS(primary,
+ 	DAILINK_COMP_ARRAY(COMP_CPU("mca-pcm-0")), // CPU
+@@ -373,239 +342,113 @@ static struct macaudio_link_props macaudio_fe_link_props[] = {
+ 	}
+ };
+ 
+-/*
+- * Speaker protection ownership.
+- *
+- * The speakers play only while a protection engine owns them. Without an
+- * owner, or once its lease has run out, every speaker amp sits at the safe
+- * level and no speaker playback can start: that is the hardware floor, and it
+- * holds from the card's registration on.
+- *
+- * The owner is the control file that holds SNDRV_CTL_IOCTL_ELEM_LOCK on
+- * "Speaker Protection", taken by a CAP_SYS_ADMIN process: the speakers are
+- * not a seat user's to own. Writing a lease length in milliseconds
+- * (SPEAKER_LEASE_MIN_MS to SPEAKER_LEASE_MAX_MS) to it grants protection
+- * for that long: the amps go to their fixed operating gain and speaker
+- * playback may start. The owner renews it by writing again before it runs
+- * out; every write needs CAP_SYS_ADMIN too. Writing 0, unlocking the control
+- * or closing the file ends it at once: no start from then on, and on amps
+- * with a digital gain the stream still playing is ramped down within the
+- * lease (at most SPEAKER_RAMP_MAX_US) before it stops, so that the stop
+- * does not click.
+- *
+- * The amps are only written on a powered card: a withdrawal while the card
+- * suspends or resumes (the owner dying at thaw) closes the gate and stops
+- * the streams at once and waits for the resume to finish before it puts
+- * the amps at the safe level. The ownership controls are INACTIVE, so that
+- * alsactl's restore never writes them.
+- *
+- * A lease that runs out closes the start gate at its end, from a hard
+- * hrtimer that no thread can delay, and every start checks the lease's end
+- * itself as well. Two SCHED_FIFO workers then stop speaker playback and put
+- * the amps at the safe level. The owner's next write fails with -ETIMEDOUT
+- * and grants nothing, so an owner that stalled learns of it before it plays
+- * again; so does an owner that was frozen across a system sleep. Reads
+- * return 1 while protection is granted, 0 otherwise, and every change is
+- * notified.
+- *
+- * On machines that open the tweeters' playback high-pass while granted, a
+- * grant opens it only for an owner that has declared, on the boolean
+- * "Speaker Protection Crossover", that its engine passes every speaker
+- * channel through the machine's own crossover and high-pass ahead of the
+- * amps. Without that declaration the tweeters stay at their safe corner
+- * while granted. The owner writes it with CAP_SYS_ADMIN, through its own
+- * ELEM_LOCK on that control (taken while it owns "Speaker Protection"),
+- * and only while protection is not granted: a grant latches it, and a
+- * write meanwhile fails with -EBUSY. Any other write fails with -EPERM.
+- * The declaration goes back to 0 when the owner unlocks "Speaker
+- * Protection" or closes its file, and when a new owner takes it.
+- *
+- * The speaker volume controls belong to the driver: userspace can read them
+- * but never write them. While protection is granted they hold the amps at a
+- * fixed, known gain; all attenuation is the engine's, in its signal path.
+- */
+-
+-static long macaudio_spk_gain(const struct macaudio_snd_data *ma, bool granted)
++static void macaudio_vlimit_unlock(struct macaudio_snd_data *ma, bool unlock)
+ {
++	int ret, max, hits = 0;
++	const char *name = volume_control_names[ma->cfg->amp];
++	struct snd_kcontrol *kctl;
++	bool failed = false;
++
++	if (!name) {
++		WARN_ON_ONCE(1);
++		return;
++	}
++
+ 	switch (ma->cfg->amp) {
++	case AMP_NONE:
++		WARN_ON_ONCE(1);
++		return;
+ 	case AMP_TAS5770:
+-		return granted ? TAS5770_0DB : 0;
++		if (unlock)
++			max = TAS5770_0DB;
++		else
++			max = 1; //TAS5770_DB(ma->cfg->safe_vol);
++		break;
+ 	case AMP_SN012776:
+-		return granted ? SN012776_0DB : 0;
++		if (unlock)
++			max = SN012776_0DB;
++		else
++			max = 1; //SN012776_DB(ma->cfg->safe_vol);
++		break;
++	case AMP_SSM3515:
++		if (unlock)
++			max = SSM3515_0DB;
++		else
++			max = SSM3515_DB(ma->cfg->safe_vol);
++		break;
+ 	case AMP_MAX98360A:
+-		return granted ? MAX98360A_0DB : MAX98360A_DB(ma->cfg->safe_vol);
+-	default:
+-		return -EINVAL;
++		if (unlock)
++			max = MAX98360A_0DB;
++		else
++			max = MAX98360A_DB(ma->cfg->safe_vol);
++		break;
+ 	}
+-}
+ 
+-#define MACAUDIO_TWEETER_HPF_SAFE	"800 Hz"
+-#define MACAUDIO_TWEETER_HPF_NAME	"* Tweeter HPF Corner Frequency"
+-
+-/*
+- * Set every tweeter's playback high-pass corner to its granted or its safe
+- * item. Returns 0, or a negative error if any write failed.
+- *
+- * Context: spk_mutex held.
+- */
+-static int macaudio_spk_set_hpf(struct macaudio_snd_data *ma, bool granted)
+-{
+-	struct snd_ctl_elem_value *uval = ma->spk_uval;
+-	unsigned int item;
+-	struct snd_kcontrol *kctl;
+-	int ret, err = 0;
+-	unsigned int i;
+-
+-	lockdep_assert_held(&ma->spk_mutex);
+-
+-	if (!ma->spk_nr_hpfs)
+-		return 0;
+-	if (!uval)
+-		return -EINVAL;
++	/*
++	 * One control at a time: snd_soc_limit_volume() stops at the first
++	 * control it cannot clip, which would leave the rest at their old
++	 * limit and value.
++	 */
++	list_for_each_entry(kctl, &ma->card.snd_card->controls, list) {
++		if (!snd_soc_control_matches(kctl, name))
++			continue;
+ 
+-	for (i = 0; i < ma->spk_nr_hpfs; i++) {
+-		kctl = ma->spk_hpfs[i];
+-		item = granted ? ma->spk_hpf_granted[i] : ma->spk_hpf_safe;
+-		memset(uval, 0, sizeof(*uval));
+-		uval->id = kctl->id;
+-		uval->value.enumerated.item[0] = item;
+-		ret = kctl->put(kctl, uval);
++		hits++;
++		ret = snd_soc_limit_volume(&ma->card, kctl->id.name, max);
+ 		if (ret < 0) {
+-			dev_err(ma->card.dev, "Failed to set %s to item %u: %d\n",
+-				kctl->id.name, item, ret);
+-			err = ret;
+-		} else if (ret > 0) {
+-			snd_ctl_notify(ma->card.snd_card, SNDRV_CTL_EVENT_MASK_VALUE,
+-				       &kctl->id);
++			dev_err(ma->card.dev, "Failed to %slock volume %s: %d\n",
++				unlock ? "un" : "", kctl->id.name, ret);
++			failed = true;
+ 		}
+ 	}
+-	return err;
+-}
+-
+-/*
+- * Set every speaker volume control to @gain, notifying userspace of the
+- * change if @notify. Returns the number of controls set, or a negative error
+- * if any write failed or none exists.
+- *
+- * Context: spk_mutex held.
+- */
+-static int macaudio_spk_set_level(struct macaudio_snd_data *ma, long gain, bool notify)
+-{
+-	struct snd_ctl_elem_value *uval = ma->spk_uval;
+-	struct snd_kcontrol *kctl;
+-	int ret, err = 0;
+-	unsigned int i;
++	if (!hits)
++		dev_err(ma->card.dev, "Failed to %slock volume %s: %d\n",
++			unlock ? "un" : "", name, -EINVAL);
+ 
+-	lockdep_assert_held(&ma->spk_mutex);
+-
+-	if (gain < 0 || !uval)
+-		return -EINVAL;
++	/*
++	 * With a software gain the limit is the whole protection: refuse to
++	 * play rather than run the amplifier at full scale unlimited.
++	 */
++	if (ma->cfg->amp == AMP_MAX98360A)
++		atomic_set(&ma->sw_gain_limit_failed, failed || !hits);
+ 
+-	for (i = 0; i < ma->spk_nr_vols; i++) {
+-		kctl = ma->spk_vols[i];
+-		memset(uval, 0, sizeof(*uval));
+-		uval->id = kctl->id;
+-		/* Both channels of a stereo volume; a mono one reads the first */
+-		uval->value.integer.value[0] = gain;
+-		uval->value.integer.value[1] = gain;
+-		ret = kctl->put(kctl, uval);
+-		if (ret < 0) {
+-			dev_err(ma->card.dev, "Failed to set %s to %ld: %d\n",
+-				kctl->id.name, gain, ret);
+-			err = ret;
+-		} else if (ret > 0 && notify) {
+-			snd_ctl_notify(ma->card.snd_card, SNDRV_CTL_EVENT_MASK_VALUE,
+-				       &kctl->id);
+-		}
++	if (failed && !unlock) {
++		WRITE_ONCE(ma->speaker_lock_failed, true);
++		schedule_work(&ma->lock_fail_work);
+ 	}
+-
+-	if (!ma->spk_nr_vols)
+-		return -ENOENT;
+-	return err ? err : ma->spk_nr_vols;
+-}
+-
+-/* Every speaker volume control at the operating gain or the safe level */
+-static int macaudio_spk_set_gain(struct macaudio_snd_data *ma, bool granted)
+-{
+-	return macaudio_spk_set_level(ma, macaudio_spk_gain(ma, granted), true);
+-}
+-
+-/*
+- * The ramp's steps below the operating gain, in dB, to the floor after the
+- * last: about even in loudness, so each step is a small one.
+- */
+-static const s8 macaudio_spk_ramp_db[] = {
+-	-2, -4, -6, -9, -12, -16, -20, -26, -32, -40, -50,
+-};
+-
+-/* Amps whose volume is a digital gain in 0.5 dB steps with mute at 0 */
+-static bool macaudio_spk_ramps(const struct macaudio_snd_data *ma)
+-{
+-	return ma->cfg->amp == AMP_SN012776 || ma->cfg->amp == AMP_TAS5770;
+ }
+ 
+ /*
+- * Ramp the amps from the operating gain towards the floor while the
+- * stream still plays, so that its stop afterwards does not click. The
+- * start gate is already closed. Stops at @deadline, whatever step it has
+- * reached: the floor follows at once.
+- *
+- * Context: spk_mutex held, the card powered (D0).
++ * Stop every running playback stream of the card, or with sw_gain_only those
++ * on software-gain links whose prepare predates the current lock epoch.
+  */
+-static void macaudio_spk_ramp_down(struct macaudio_snd_data *ma, ktime_t deadline)
+-{
+-	ktime_t next = ktime_get();
+-	unsigned int i;
+-	s64 wait;
+-
+-	lockdep_assert_held(&ma->spk_mutex);
+-
+-	for (i = 0; i < ARRAY_SIZE(macaudio_spk_ramp_db); i++) {
+-		if (!ktime_before(ktime_get(), deadline))
+-			return;
+-		/* A failure here is the floor's to catch; it notifies the end */
+-		macaudio_spk_set_level(ma, SN012776_DB(macaudio_spk_ramp_db[i]), false);
+-		next = ktime_add_us(next, SPEAKER_RAMP_STEP_US);
+-		wait = ktime_us_delta(min(next, deadline), ktime_get());
+-		if (wait > 0)
+-			usleep_range(wait, wait + 50);
+-	}
+-}
+-
+-/* A back-end of the speakers is connected to this front-end substream. */
+-static bool macaudio_fe_drives_speakers(struct macaudio_snd_data *ma,
+-					struct snd_soc_pcm_runtime *fe, int stream)
+-{
+-	struct snd_soc_dpcm *dpcm;
+-
+-	for_each_dpcm_be(fe, stream, dpcm)
+-		if (ma->link_props[dpcm->be->dai_link->id].is_speakers)
+-			return true;
+-	return false;
+-}
+-
+-/* Stop every running front-end that plays to the speakers. */
+-static void macaudio_stop_speaker_playback(struct macaudio_snd_data *ma)
++static void macaudio_stop_playback(struct macaudio_snd_data *ma, bool sw_gain_only)
+ {
+ 	struct snd_soc_pcm_runtime *rtd;
+ 	struct snd_pcm_substream *substream;
+ 	unsigned long flags;
+ 
+ 	/*
+-	 * No mutex may be held that a trigger takes; the stream lock orders
+-	 * this against a concurrent start. A back-end's substream shares its
+-	 * front-end's runtime: stop front-ends only.
++	 * No volume or control lock may be held while taking the stream lock.
++	 * Pick the links from the runtime being walked: not every playback
++	 * substream on the card carries a runtime as its private data.
+ 	 */
+ 	for_each_card_rtds(&ma->card, rtd) {
++		/* A back-end's substream shares its front-end's runtime: stop front-ends only. */
+ 		if (!rtd->pcm || rtd->dai_link->no_pcm)
+ 			continue;
++		if (sw_gain_only && !ma->link_props[rtd->dai_link->id].sw_gain)
++			continue;
+ 		substream = rtd->pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream;
+ 		if (!substream)
+ 			continue;
+ 		snd_pcm_stream_lock_irqsave(substream, flags);
+ 		if (substream->runtime &&
+-		    macaudio_fe_drives_speakers(ma, rtd, SNDRV_PCM_STREAM_PLAYBACK)) {
++		    (!sw_gain_only ||
++		     atomic_read(&ma->sw_gain_prepared_epoch) !=
++				atomic_read(&ma->sw_gain_lock_epoch))) {
+ 			switch (substream->runtime->state) {
++			case SNDRV_PCM_STATE_PREPARED:
+ 			case SNDRV_PCM_STATE_RUNNING:
+ 			case SNDRV_PCM_STATE_DRAINING:
+ 			case SNDRV_PCM_STATE_PAUSED:
+@@ -619,767 +462,355 @@ static void macaudio_stop_speaker_playback(struct macaudio_snd_data *ma)
+ 	}
+ }
+ 
+-static void macaudio_spk_stop_work(struct kthread_work *work)
++/* Stop every running playback stream of the card after a failed lock. */
++static void macaudio_lock_fail_work(struct work_struct *work)
+ {
+ 	struct macaudio_snd_data *ma = container_of(work, struct macaudio_snd_data,
+-						  spk_stop_work);
++						  lock_fail_work);
+ 
+-	macaudio_stop_speaker_playback(ma);
++	dev_crit(ma->card.dev, "speaker volume lock failed: stopping and refusing playback\n");
++	macaudio_stop_playback(ma, false);
+ }
+ 
+-/*
+- * Speaker playback may start: protection is granted and its lease has not
+- * run out. Every start checks this (the front-end's and the back-end's
+- * trigger), so a lease that ends refuses the next start at once, whether or
+- * not the lease timer has run.
+- *
+- * Context: any, the stream lock held.
+- */
+-static bool macaudio_spk_admitted(struct macaudio_snd_data *ma)
++static void macaudio_pm_volumes_drop(struct macaudio_snd_data *ma)
+ {
+-	/* Pairs with the release in macaudio_spk_grant(): the lease end is set */
+-	if (!smp_load_acquire(&ma->spk_granted) || READ_ONCE(ma->spk_floor_failed))
+-		return false;
+-	return ktime_before(ktime_get(), READ_ONCE(ma->spk_lease_end));
++	kfree(ma->pm_volumes);
++	kfree(ma->pm_uval);
++	ma->pm_volumes = NULL;
++	ma->pm_nr_volumes = 0;
++	ma->pm_uval = NULL;
+ }
+ 
+ /*
+- * Withdraw protection: no new speaker playback, the running one stopped and
+- * every amp at the safe level. A safe level that did not take on every amp
+- * is a failed floor: speaker playback stays refused until the driver is
+- * reloaded.
++ * Keep the speaker volumes before the system-sleep lock clips them.
+  *
+- * Context: spk_mutex held.
++ * Context: volume_lock_mutex and the card's controls_rwsem held, so the daemon
++ * cannot set a volume between this and the clip.
+  */
+-static void __macaudio_spk_floor(struct macaudio_snd_data *ma, const char *reason, bool ramp)
++static void macaudio_pm_volumes_save(struct macaudio_snd_data *ma)
+ {
+-	struct snd_card *card = ma->card.snd_card;
+-	bool was = ma->spk_active;
+-	/* The lease timer or a system sleep closed the gate before this */
+-	bool closed_ahead = was && !READ_ONCE(ma->spk_granted);
+-	ktime_t deadline;
+-	int powered;
+-
+-	lockdep_assert_held(&ma->spk_mutex);
+-
+-	WRITE_ONCE(ma->spk_granted, false);
+-	ma->spk_active = false;
+-	if (ma->spk_dead)
+-		return;
+-	/* The callback never takes spk_mutex */
+-	hrtimer_cancel(&ma->spk_lease_timer);
++	const char *name = volume_control_names[ma->cfg->amp];
++	struct snd_ctl_elem_value *uval = NULL;
++	struct macaudio_pm_volume *vols = NULL;
++	struct snd_kcontrol *kctl;
++	unsigned int nr = 0, i = 0;
++	int ret;
+ 
+-	/*
+-	 * A trigger refuses the start from here on. While the lease still
+-	 * runs, the amps ramp down under the playing stream first; never
+-	 * past the lease, and only on a powered card, whose stream can play.
+-	 */
+-	if (ramp && was && !closed_ahead && macaudio_spk_ramps(ma)) {
+-		deadline = min(READ_ONCE(ma->spk_lease_end),
+-			       ktime_add_us(ktime_get(), SPEAKER_RAMP_MAX_US));
+-		snd_power_ref(card);
+-		if (snd_power_get_state(card) == SNDRV_CTL_POWER_D0)
+-			macaudio_spk_ramp_down(ma, deadline);
+-		snd_power_unref(card);
+-	}
+-	/* Stop what already runs. */
+-	kthread_queue_work(ma->spk_stop_worker, &ma->spk_stop_work);
++	lockdep_assert_held(&ma->volume_lock_mutex);
++	lockdep_assert_held(&ma->card.snd_card->controls_rwsem);
+ 
++	if (!ma->has_safety || !name || ma->card.snd_card->shutdown)
++		return;
+ 	/*
+-	 * The amps are written only on a powered card. From the owner's file
+-	 * closing, or the lease's end, this may run while the card suspends
+-	 * or resumes: its codecs then sync their registers and ASoC brings
+-	 * the streams back, and an amp write in the middle races both. The
+-	 * floor waits for the resume to finish; a stream cannot start before
+-	 * it does, and the gate is closed. A card going away (-ENODEV) still
+-	 * gets the floor written.
++	 * Locked already, as after a sleep the daemon has not pinged since:
++	 * the volumes are at the ceiling, and those from before it are kept.
+ 	 */
+-	powered = snd_power_ref_and_wait(card);
+-
+-	if (macaudio_spk_set_gain(ma, false) < 0) {
+-		WRITE_ONCE(ma->spk_floor_failed, true);
+-		dev_crit(ma->card.dev,
+-			 "speaker safe level not set on every amp: speaker playback refused\n");
+-	}
+-	/* The amps are down first: the tweeters' safe filter goes back after */
+-	if (macaudio_spk_set_hpf(ma, false) < 0) {
+-		WRITE_ONCE(ma->spk_floor_failed, true);
+-		dev_crit(ma->card.dev,
+-			 "tweeter safe high-pass not set on every amp: speaker playback refused\n");
+-	}
+-	if (!powered)
+-		snd_power_unref(card);
+-
+-	if (was && ma->spk_kctl) {
+-		if (closed_ahead)
+-			dev_info(ma->card.dev,
+-				 "Speaker protection withdrawn: %s (start gate closed by %s %lld us before)\n",
+-				 reason, READ_ONCE(ma->spk_gate_reason) ?: "?",
+-				 ktime_us_delta(ktime_get(), READ_ONCE(ma->spk_gate_closed_at)));
+-		else
+-			dev_info(ma->card.dev, "Speaker protection withdrawn: %s\n", reason);
+-		snd_ctl_notify(ma->card.snd_card, SNDRV_CTL_EVENT_MASK_VALUE,
+-			       &ma->spk_kctl->id);
+-	}
+-}
++	if (!ma->speaker_volume_unlocked)
++		return;
++	macaudio_pm_volumes_drop(ma);
+ 
+-/* Withdraw protection at once: the lease ran out, a sleep, a failure */
+-static void macaudio_spk_floor(struct macaudio_snd_data *ma, const char *reason)
+-{
+-	__macaudio_spk_floor(ma, reason, false);
+-}
++	list_for_each_entry(kctl, &ma->card.snd_card->controls, list)
++		if (snd_soc_control_matches(kctl, name))
++			nr++;
++	if (!nr)
++		return;
+ 
+-/*
+- * Withdraw protection from a lease that still runs: released, the owner
+- * gone or replaced. The amps ramp down before the stream stops.
+- */
+-static void macaudio_spk_floor_ramped(struct macaudio_snd_data *ma, const char *reason)
+-{
+-	__macaudio_spk_floor(ma, reason, true);
+-}
++	vols = kzalloc_objs(*vols, nr);
++	uval = kzalloc_obj(*uval);
++	if (!vols || !uval)
++		goto out;
+ 
+-/*
+- * Close the start gate and stop the speaker streams, ahead of the floor
+- * that follows under spk_mutex: from the lease timer and from system sleep,
+- * which must not wait for anything first.
+- *
+- * Context: any, including hard IRQ.
+- */
+-static void macaudio_spk_close_gate(struct macaudio_snd_data *ma, const char *why)
+-{
+-	if (READ_ONCE(ma->spk_granted)) {
+-		WRITE_ONCE(ma->spk_gate_closed_at, ktime_get());
+-		WRITE_ONCE(ma->spk_gate_reason, why);
++	list_for_each_entry(kctl, &ma->card.snd_card->controls, list) {
++		if (!snd_soc_control_matches(kctl, name))
++			continue;
++		memset(uval, 0, sizeof(*uval));
++		uval->id = kctl->id;
++		ret = kctl->get(kctl, uval);
++		if (ret < 0) {
++			dev_warn(ma->card.dev, "Failed to keep volume %s for the system sleep: %d\n",
++				 kctl->id.name, ret);
++			goto out;
++		}
++		vols[i].kctl = kctl;
++		vols[i].value[0] = uval->value.integer.value[0];
++		vols[i].value[1] = uval->value.integer.value[1];
++		i++;
+ 	}
+-	WRITE_ONCE(ma->spk_granted, false);
+-	kthread_queue_work(ma->spk_stop_worker, &ma->spk_stop_work);
++
++	ma->pm_volumes = vols;
++	ma->pm_nr_volumes = i;
++	ma->pm_uval = uval;
++	return;
++out:
++	kfree(uval);
++	kfree(vols);
+ }
+ 
+ /*
+- * Grant protection for @ms from now.
++ * At the unlock after a system sleep: the volumes the daemon had set.
+  *
+- * Context: spk_mutex held, an owner present and protection not granted.
++ * Context: volume_lock_mutex and the card's controls_rwsem held, so no volume
++ * write races these.
+  */
+-static int macaudio_spk_grant(struct macaudio_snd_data *ma, long ms)
++static void macaudio_pm_volumes_restore(struct macaudio_snd_data *ma)
+ {
+-	int ret, refused;
+-
+-	lockdep_assert_held(&ma->spk_mutex);
+-
+-	if (READ_ONCE(ma->spk_floor_failed))
+-		return -EIO;
++	struct snd_ctl_elem_value *uval = ma->pm_uval;
++	unsigned int i;
++	int ret;
+ 
+-	/*
+-	 * A withdrawal queued the stop of every speaker stream: it must have
+-	 * run before the amps go back to the operating gain, or a stream it
+-	 * was meant to stop would play on. The stop worker runs nothing that
+-	 * takes spk_mutex or the card's controls_rwsem, so it cannot wait for
+-	 * this caller.
+-	 */
+-	kthread_flush_work(&ma->spk_stop_work);
++	if (!ma->pm_volumes)
++		return;
+ 
+-	/*
+-	 * Only a powered card is granted: the amps may be syncing their
+-	 * registers in a resume. (A write from userspace has waited for it
+-	 * already.)
+-	 */
+-	if (snd_power_get_state(ma->card.snd_card) != SNDRV_CTL_POWER_D0)
+-		return -EBUSY;
++	for (i = 0; i < ma->pm_nr_volumes; i++) {
++		struct snd_kcontrol *kctl = ma->pm_volumes[i].kctl;
+ 
+-	/*
+-	 * The tweeters' filter opens before the amps go up, never after, and
+-	 * only for an engine that runs the crossover ahead of them.
+-	 */
+-	ret = macaudio_spk_set_hpf(ma, ma->spk_xover);
+-	if (ret < 0) {
+-		macaudio_spk_floor(ma, "tweeter high-pass not set");
+-		return ret;
+-	}
+-	ret = macaudio_spk_set_gain(ma, true);
+-	if (ret < 0) {
+-		macaudio_spk_floor(ma, "operating gain not set");
+-		return ret;
++		memset(uval, 0, sizeof(*uval));
++		uval->id = kctl->id;
++		uval->value.integer.value[0] = ma->pm_volumes[i].value[0];
++		uval->value.integer.value[1] = ma->pm_volumes[i].value[1];
++		ret = kctl->put(kctl, uval);
++		if (ret < 0)
++			dev_err(ma->card.dev, "Failed to restore volume %s: %d\n",
++				kctl->id.name, ret);
++		else if (ret > 0)
++			snd_ctl_notify(ma->card.snd_card, SNDRV_CTL_EVENT_MASK_VALUE,
++				       &kctl->id);
+ 	}
+-	/* A system sleep began while the amps went up: it closed the gate already */
+-	if (READ_ONCE(ma->pm_quiesced)) {
+-		macaudio_spk_floor(ma, "system sleep");
+-		return -EBUSY;
+-	}
+-
+-	ma->spk_active = true;
+-	WRITE_ONCE(ma->spk_lease_end, ktime_add_ms(ktime_get(), ms));
+-	/* Pairs with the acquire in macaudio_spk_admitted() */
+-	smp_store_release(&ma->spk_granted, true);
+-	hrtimer_start(&ma->spk_lease_timer, ms_to_ktime(ms), HRTIMER_MODE_REL_HARD);
+-	refused = atomic_xchg(&ma->spk_refused_since_grant, 0);
+-	if (refused)
+-		dev_info(ma->card.dev, "Speaker protection granted (%d speaker starts refused before)\n",
+-			 refused);
+-	else
+-		dev_info(ma->card.dev, "Speaker protection granted\n");
+-	if (ma->spk_nr_hpfs && !ma->spk_xover)
+-		dev_info(ma->card.dev,
+-			 "No crossover declared: tweeter high-pass stays at the safe corner\n");
+-	if (ma->spk_kctl)
+-		snd_ctl_notify(ma->card.snd_card, SNDRV_CTL_EVENT_MASK_VALUE, &ma->spk_kctl->id);
+-	return 0;
++	macaudio_pm_volumes_drop(ma);
+ }
+ 
+-/*
+- * The lease's end, in hard IRQ context: no thread, however it is scheduled,
+- * can hold off the closing of the start gate. The stop and the safe level
+- * follow from the workers.
+- */
+-static enum hrtimer_restart macaudio_spk_lease_timer(struct hrtimer *timer)
++static void macaudio_vlimit_update(struct macaudio_snd_data *ma)
+ {
+-	struct macaudio_snd_data *ma = container_of(timer, struct macaudio_snd_data,
+-						    spk_lease_timer);
+-	ktime_t end = READ_ONCE(ma->spk_lease_end);
++	int i;
++	bool unlock = true;
++	struct snd_kcontrol *kctl;
++	const char *reason;
+ 
+-	/* Renewed while the timer was already firing */
+-	if (ktime_before(ktime_get(), end)) {
+-		hrtimer_set_expires(timer, end);
+-		return HRTIMER_RESTART;
+-	}
+-	if (!READ_ONCE(ma->spk_granted))
+-		return HRTIMER_NORESTART;
++	/* Do nothing if there is no safety configured */
++	if (!ma->has_safety)
++		return;
+ 
+-	macaudio_spk_close_gate(ma, "the lease's end");
+-	kthread_queue_work(ma->spk_worker, &ma->spk_expire_work);
+-	return HRTIMER_NORESTART;
+-}
++	/* Check that someone is holding the main lock */
++	if (!ma->speaker_lock_owner) {
++		reason = "Main control not locked";
++		unlock = false;
++	}
+ 
+-static void macaudio_spk_expire_work(struct kthread_work *work)
+-{
+-	struct macaudio_snd_data *ma = container_of(work, struct macaudio_snd_data,
+-						    spk_expire_work);
++	/* Check that the control has been pinged within the timeout */
++	if (ma->speaker_lock_remain <= 0) {
++		reason = "Lock timeout";
++		unlock = false;
++	}
+ 
+-	mutex_lock(&ma->spk_mutex);
+ 	/*
+-	 * Only the timer clears the gate with the amps still at the operating
+-	 * gain; a release, a new owner or the owner's own late write may
+-	 * have dealt with it since.
++	 * System sleep: userspace is frozen long before the card suspends (over
++	 * half a second on J616s), and a playback stream left running then plays
++	 * out its stale buffer and stops on an xrun into the still unmuted amps.
++	 * Lock the volumes before the freeze instead of when the frozen daemon's
++	 * lease runs out.
+ 	 */
+-	if (ma->spk_active && !READ_ONCE(ma->spk_granted)) {
+-		ma->spk_lapsed = true;
+-		macaudio_spk_floor(ma, "lease expired");
++	if (ma->pm_quiesced) {
++		reason = "System suspend";
++		unlock = false;
+ 	}
+-	mutex_unlock(&ma->spk_mutex);
+-}
+ 
+-static struct kthread_worker *macaudio_spk_worker(const char *what)
+-{
+-	struct sched_attr attr = {
+-		.size = sizeof(attr),
+-		.sched_policy = SCHED_FIFO,
+-		.sched_priority = SPEAKER_WORKER_PRIO,
+-	};
+-	struct kthread_worker *worker;
+-	int ret;
++	/* Check that *every* limited control is locked by the same owner */
++	list_for_each_entry(kctl, &ma->card.snd_card->controls, list) {
++		if(!snd_soc_control_matches(kctl, volume_control_names[ma->cfg->amp]))
++			continue;
+ 
+-	worker = kthread_run_worker(0, "macaudio-%s", what);
+-	if (IS_ERR(worker))
+-		return worker;
+-	ret = sched_setattr_nocheck(worker->task, &attr);
+-	if (ret) {
+-		kthread_destroy_worker(worker);
+-		return ERR_PTR(ret);
++		for (i = 0; i < kctl->count; i++) {
++			if (kctl->vd[i].owner != ma->speaker_lock_owner) {
++				reason = "Not all child controls locked by the same process";
++				unlock = false;
++			}
++		}
+ 	}
+-	return worker;
+-}
+ 
+-static void macaudio_spk_fini(void *data)
+-{
+-	struct macaudio_snd_data *ma = data;
+-
+-	hrtimer_cancel(&ma->spk_lease_timer);
+-	/* The expiry may queue a stop: its worker goes first */
+-	if (!IS_ERR_OR_NULL(ma->spk_worker))
+-		kthread_destroy_worker(ma->spk_worker);
+-	if (!IS_ERR_OR_NULL(ma->spk_stop_worker))
+-		kthread_destroy_worker(ma->spk_stop_worker);
+-	ma->spk_worker = NULL;
+-	ma->spk_stop_worker = NULL;
+-}
+ 
+-static int macaudio_pm_notify(struct notifier_block *nb, unsigned long action,
+-			      void *data);
++	if (unlock != ma->speaker_volume_unlocked) {
++		if (unlock) {
++			dev_info(ma->card.dev, "Speaker volumes unlocked\n");
++		} else  {
++			dev_info(ma->card.dev, "Speaker volumes locked: %s\n", reason);
++			/* The system-sleep lock is the kernel's own, not a lease the daemon lost */
++			if (!ma->pm_quiesced)
++				ma->speaker_volume_was_locked = true;
++		}
+ 
+-/* The lease timer, the workers and the sleep notifier, until macaudio_spk_fini() */
+-static int macaudio_spk_init(struct macaudio_snd_data *ma)
+-{
+-	hrtimer_setup(&ma->spk_lease_timer, macaudio_spk_lease_timer, CLOCK_MONOTONIC,
+-		      HRTIMER_MODE_REL_HARD);
+-	kthread_init_work(&ma->spk_expire_work, macaudio_spk_expire_work);
+-	kthread_init_work(&ma->spk_stop_work, macaudio_spk_stop_work);
+-	/* First in the chain: no other driver's sleep preparation goes before the floor */
+-	ma->pm_nb.notifier_call = macaudio_pm_notify;
+-	ma->pm_nb.priority = INT_MAX;
+-
+-	ma->spk_worker = macaudio_spk_worker("spk-floor");
+-	if (IS_ERR(ma->spk_worker))
+-		return PTR_ERR(ma->spk_worker);
+-	ma->spk_stop_worker = macaudio_spk_worker("spk-stop");
+-	if (IS_ERR(ma->spk_stop_worker)) {
+-		int ret = PTR_ERR(ma->spk_stop_worker);
+-
+-		ma->spk_stop_worker = NULL;
+-		macaudio_spk_fini(ma);
+-		return ret;
++		macaudio_vlimit_unlock(ma, unlock);
++		if (unlock)
++			macaudio_pm_volumes_restore(ma);
++		if (!unlock && ma->cfg->amp == AMP_MAX98360A) {
++			/* Samples already converted at the old gain must not play */
++			atomic_inc(&ma->sw_gain_lock_epoch);
++			schedule_work(&ma->sw_gain_stop_work);
++		}
++		ma->speaker_volume_unlocked = unlock;
++		snd_ctl_notify(ma->card.snd_card, SNDRV_CTL_EVENT_MASK_VALUE,
++			       &ma->speaker_lock_kctl->id);
+ 	}
+-	return 0;
+ }
+ 
+-/*
+- * System sleep: protection is withdrawn at PM_SUSPEND_PREPARE (and
+- * PM_HIBERNATION_PREPARE), first in the notifier chain and before any task
+- * freezes, not in a device suspend callback: a sleep that stops short of
+- * the devices (pm_test=freezer) withdraws it too. The gate closes and the
+- * streams stop before anything can wait; the safe level follows under
+- * spk_mutex. The lease timer is never stopped without that floor, so a
+- * lease still ends at its deadline while the floor waits.
+- *
+- * The owner was frozen with the rest of userspace, so the state of its
+- * engine is unknown: its first write after the resume fails with
+- * -ETIMEDOUT, as after any stall, and the one after it grants.
+- */
+ static int macaudio_pm_notify(struct notifier_block *nb, unsigned long action,
+ 			      void *data)
+ {
+ 	struct macaudio_snd_data *ma = container_of(nb, struct macaudio_snd_data, pm_nb);
+-	ktime_t t0;
+-	s64 waited;
+-
+-	/* A card without speakers (the J616s jack) has nothing to floor */
+-	if (!ma->has_speakers)
+-		return NOTIFY_DONE;
++	bool quiesce;
+ 
+ 	switch (action) {
+ 	case PM_SUSPEND_PREPARE:
+ 	case PM_HIBERNATION_PREPARE:
+-		/*
+-		 * Before anything that can wait, spk_mutex included: a writer
+-		 * that holds it may be stuck behind the sleep itself. No grant
+-		 * and no start from here on, and the running streams stop.
+-		 */
+-		WRITE_ONCE(ma->pm_quiesced, true);
+-		macaudio_spk_close_gate(ma, "system sleep");
+-		t0 = ktime_get();
+-		mutex_lock(&ma->spk_mutex);
+-		waited = ktime_ms_delta(ktime_get(), t0);
+-		if (waited > 50)
+-			dev_warn(ma->card.dev,
+-				 "speaker floor for system sleep waited %lld ms for the protection lock\n",
+-				 waited);
+-		macaudio_spk_floor(ma, "system sleep");
+-		mutex_unlock(&ma->spk_mutex);
+-		return NOTIFY_OK;
++		quiesce = true;
++		break;
+ 	case PM_POST_SUSPEND:
+ 	case PM_POST_HIBERNATION:
+ 	case PM_POST_RESTORE:
+-		mutex_lock(&ma->spk_mutex);
+-		WRITE_ONCE(ma->pm_quiesced, false);
+-		if (ma->spk_owner)
+-			ma->spk_lapsed = true;
+-		mutex_unlock(&ma->spk_mutex);
+-		return NOTIFY_OK;
++		quiesce = false;
++		break;
+ 	default:
+ 		return NOTIFY_DONE;
+ 	}
+-}
+-
+-static int macaudio_spk_info(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *uinfo)
+-{
+-	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+-	uinfo->count = 1;
+-	uinfo->value.integer.min = 0;
+-	uinfo->value.integer.max = SPEAKER_LEASE_MAX_MS;
+-	return 0;
+-}
+-
+-static int macaudio_spk_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *uvalue)
+-{
+-	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
+-	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
+-
+-	uvalue->value.integer.value[0] = macaudio_spk_admitted(ma) ? 1 : 0;
+-	return 0;
+-}
+-
+-static int macaudio_spk_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *uvalue)
+-{
+-	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
+-	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
+-	long ms = uvalue->value.integer.value[0];
+-	int ret = 0;
+-
+-	if (ms != 0 && (ms < SPEAKER_LEASE_MIN_MS || ms > SPEAKER_LEASE_MAX_MS))
+-		return -EINVAL;
+-	/* The owner's file may have been handed on: each write is checked */
+-	if (!capable(CAP_SYS_ADMIN))
+-		return -EPERM;
+-
+-	mutex_lock(&ma->spk_mutex);
+-
+-	/* Only the file that holds the control's lock owns the speakers */
+-	if (!ma->spk_owner || ma->spk_dead) {
+-		ret = -EPERM;
+-		goto out;
+-	}
+-
+-	if (!ms) {
+-		ma->spk_lapsed = false;
+-		macaudio_spk_floor_ramped(ma, "released by the owner");
+-		goto out;
+-	}
+-
+-	/* Before the stall report, which a resume sets: it must reach the owner */
+-	if (READ_ONCE(ma->pm_quiesced)) {
+-		ret = -EBUSY;
+-		goto out;
+-	}
+-
+-	/* The owner stalled past its lease: tell it once, grant nothing */
+-	if (ma->spk_lapsed) {
+-		ma->spk_lapsed = false;
+-		ret = -ETIMEDOUT;
+-		goto out;
+-	}
+-
+-	if (!ma->spk_active) {
+-		ret = macaudio_spk_grant(ma, ms);
+-		goto out;
+-	}
+ 
+ 	/*
+-	 * A renewal. A lease that has already run out is not renewed, whether
+-	 * the timer has closed the gate yet or not: the owner stalled.
++	 * Volume writes hold the controls for writing: none can land between
++	 * keeping the volumes and clipping them. Control writes take
++	 * volume_lock_mutex inside it as well.
+ 	 */
+-	if (!macaudio_spk_admitted(ma)) {
+-		macaudio_spk_floor(ma, "lease expired");
+-		ret = -ETIMEDOUT;
+-		goto out;
+-	}
+-	WRITE_ONCE(ma->spk_lease_end, ktime_add_ms(ktime_get(), ms));
+-	hrtimer_start(&ma->spk_lease_timer, ms_to_ktime(ms), HRTIMER_MODE_REL_HARD);
+-	/* The old lease ran out between the check and the new end */
+-	if (!READ_ONCE(ma->spk_granted)) {
+-		macaudio_spk_floor(ma, "lease expired");
+-		ret = -ETIMEDOUT;
++	down_read(&ma->card.snd_card->controls_rwsem);
++	mutex_lock(&ma->volume_lock_mutex);
++	ma->pm_quiesced = quiesce;
++	/*
++	 * The lease ends here, so after the resume the volumes stay locked until
++	 * the daemon's next ping. Its clock (CLOCK_MONOTONIC) stops across s2idle:
++	 * a lease left running would unlock them at resume and expire before the
++	 * thawed daemon pings, which reports a lost lock and restarts it cold.
++	 */
++	if (quiesce) {
++		cancel_delayed_work(&ma->lock_timeout_work);
++		ma->speaker_lock_remain = 0;
++		macaudio_pm_volumes_save(ma);
+ 	}
+-out:
+-	mutex_unlock(&ma->spk_mutex);
+-	return ret;
+-}
+-
+-/*
+- * The crossover declaration lapses with the ownership that made it.
+- *
+- * Context: spk_mutex held.
+- */
+-static void macaudio_spk_xover_clear(struct macaudio_snd_data *ma)
+-{
+-	lockdep_assert_held(&ma->spk_mutex);
++	macaudio_vlimit_update(ma);
++	mutex_unlock(&ma->volume_lock_mutex);
++	up_read(&ma->card.snd_card->controls_rwsem);
+ 
+-	if (!ma->spk_xover)
+-		return;
+-	WRITE_ONCE(ma->spk_xover, false);
+-	if (ma->spk_xover_kctl && !ma->spk_dead)
+-		snd_ctl_notify(ma->card.snd_card, SNDRV_CTL_EVENT_MASK_VALUE,
+-			       &ma->spk_xover_kctl->id);
++	return NOTIFY_OK;
+ }
+ 
+-static int macaudio_spk_lock(struct snd_kcontrol *kcontrol, struct snd_ctl_file *owner)
++static void macaudio_vlimit_enable_timeout(struct macaudio_snd_data *ma)
+ {
+-	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
+-	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
++	mutex_lock(&ma->volume_lock_mutex);
+ 
+-	/* The protection supervisor, not whoever has the seat's control device */
+-	if (!capable(CAP_SYS_ADMIN))
+-		return -EPERM;
+-
+-	mutex_lock(&ma->spk_mutex);
+-	/* A new owner starts without protection and grants it itself */
+-	ma->spk_owner = owner;
+-	ma->spk_lapsed = false;
+-	macaudio_spk_xover_clear(ma);
+-	macaudio_spk_floor_ramped(ma, "new owner");
+-	mutex_unlock(&ma->spk_mutex);
+-	return 0;
+-}
+-
+-static void macaudio_spk_unlock(struct snd_kcontrol *kcontrol)
+-{
+-	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
+-	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
++	if (ma->speaker_lock_timeout_enabled) {
++		mutex_unlock(&ma->volume_lock_mutex);
++		return;
++	}
+ 
+-	mutex_lock(&ma->spk_mutex);
+-	ma->spk_owner = NULL;
+-	ma->spk_lapsed = false;
+-	macaudio_spk_xover_clear(ma);
+-	macaudio_spk_floor_ramped(ma, "owner gone");
+-	mutex_unlock(&ma->spk_mutex);
+-}
++	if (ma->speaker_lock_remain > 0) {
++		ma->speaker_lock_timeout = ktime_add(ktime_get(), ma->speaker_lock_remain);
++		schedule_delayed_work(&ma->lock_timeout_work, usecs_to_jiffies(ktime_to_us(ma->speaker_lock_remain)));
++		dev_dbg(ma->card.dev, "Enabling volume limit timeout: %ld us left\n",
++			(long)ktime_to_us(ma->speaker_lock_remain));
++	}
+ 
+-static int macaudio_spk_xover_get(struct snd_kcontrol *kcontrol,
+-				  struct snd_ctl_elem_value *uvalue)
+-{
+-	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
+-	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
++	macaudio_vlimit_update(ma);
+ 
+-	uvalue->value.integer.value[0] = READ_ONCE(ma->spk_xover);
+-	return 0;
++	ma->speaker_lock_timeout_enabled = true;
++	mutex_unlock(&ma->volume_lock_mutex);
+ }
+ 
+-/*
+- * The owner declares, or withdraws, the crossover in its engine. ALSA
+- * serializes this with every lock and unlock, file close included, and has
+- * refused a write from any file but the one holding this control's lock.
+- */
+-static int macaudio_spk_xover_put(struct snd_kcontrol *kcontrol,
+-				  struct snd_ctl_elem_value *uvalue)
++static void macaudio_vlimit_disable_timeout(struct macaudio_snd_data *ma)
+ {
+-	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
+-	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
+-	long val = uvalue->value.integer.value[0];
+-	int ret;
++	ktime_t now;
+ 
+-	if (val != 0 && val != 1)
+-		return -EINVAL;
+-	if (!capable(CAP_SYS_ADMIN))
+-		return -EPERM;
++	mutex_lock(&ma->volume_lock_mutex);
+ 
+-	mutex_lock(&ma->spk_mutex);
+-	if (!ma->spk_owner || ma->spk_dead || kcontrol->vd[0].owner != ma->spk_owner) {
+-		ret = -EPERM;
+-	} else if (ma->spk_active || READ_ONCE(ma->spk_granted)) {
+-		/* The grant latched it: the next one after the floor takes a change */
+-		ret = -EBUSY;
+-	} else {
+-		ret = ma->spk_xover != !!val;
+-		WRITE_ONCE(ma->spk_xover, !!val);
++	if (!ma->speaker_lock_timeout_enabled) {
++		mutex_unlock(&ma->volume_lock_mutex);
++		return;
+ 	}
+-	mutex_unlock(&ma->spk_mutex);
+-	return ret;
+-}
+ 
+-/* Only the owner of "Speaker Protection" may hold the declaration's lock. */
+-static int macaudio_spk_xover_lock(struct snd_kcontrol *kcontrol, struct snd_ctl_file *owner)
+-{
+-	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
+-	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
+-	int ret = 0;
++	now = ktime_get();
+ 
+-	if (!capable(CAP_SYS_ADMIN))
+-		return -EPERM;
++	cancel_delayed_work(&ma->lock_timeout_work);
+ 
+-	mutex_lock(&ma->spk_mutex);
+-	if (!owner || owner != ma->spk_owner || ma->spk_dead)
+-		ret = -EPERM;
+-	mutex_unlock(&ma->spk_mutex);
+-	return ret;
+-}
++	if (ktime_after(now, ma->speaker_lock_timeout))
++		ma->speaker_lock_remain = 0;
++	else if (ma->speaker_lock_remain > 0)
++		ma->speaker_lock_remain = ktime_sub(ma->speaker_lock_timeout, now);
+ 
+-#define MACAUDIO_SPK_XOVER_NAME	"Speaker Protection Crossover"
++	dev_dbg(ma->card.dev, "Disabling volume limit timeout: %ld us left\n",
++		(long)ktime_to_us(ma->speaker_lock_remain));
+ 
+-/*
+- * The ownership controls are state between the kernel and the protection
+- * supervisor, not mixer settings. INACTIVE keeps mixers and alsactl's
+- * restore off them (the write would fail anyway: only the owner may),
+- * VOLATILE says the kernel changes them on its own.
+- */
+-#define MACAUDIO_SPK_OWNERSHIP_ACCESS (SNDRV_CTL_ELEM_ACCESS_READWRITE | \
+-				       SNDRV_CTL_ELEM_ACCESS_VOLATILE | \
+-				       SNDRV_CTL_ELEM_ACCESS_INACTIVE)
++	macaudio_vlimit_update(ma);
+ 
+-static const struct snd_kcontrol_new macaudio_spk_xover_control = {
+-	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+-	.name = MACAUDIO_SPK_XOVER_NAME,
+-	.access = MACAUDIO_SPK_OWNERSHIP_ACCESS,
+-	.info = snd_ctl_boolean_mono_info,
+-	.get = macaudio_spk_xover_get,
+-	.put = macaudio_spk_xover_put,
+-	.lock = macaudio_spk_xover_lock,
+-};
++	ma->speaker_lock_timeout_enabled = false;
+ 
+-/* ALSA serializes this with protection lock/unlock, including file close. */
+-static int macaudio_sense_owner_check(struct macaudio_snd_data *ma, struct snd_ctl_file *file)
+-{
+-	return ma->spk_owner && ma->spk_owner != file ? -EPERM : 0;
++	mutex_unlock(&ma->volume_lock_mutex);
+ }
+ 
+-static int macaudio_sense_write_check(struct snd_kcontrol *kctl, struct snd_ctl_file *file)
++static void macaudio_vlimit_timeout_work(struct work_struct *wrk)
+ {
+-	struct snd_soc_card *card = snd_soc_dapm_to_card(snd_soc_dapm_kcontrol_to_dapm(kctl));
+-	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
+-
+-	return macaudio_sense_owner_check(ma, file);
+-}
++        struct macaudio_snd_data *ma = container_of(to_delayed_work(wrk),
++						    struct macaudio_snd_data, lock_timeout_work);
++	ktime_t now, left;
+ 
+-/*
+- * The speaker route may not change under a grant: the owner admitted the
+- * front-end its engine drives, and another one routed to the speakers would
+- * reach the amps without protection until the owner noticed. Re-route only
+- * while protection is withdrawn.
+- */
+-static int macaudio_route_check(struct macaudio_snd_data *ma)
+-{
+-	/* Pairs with the release in macaudio_spk_grant() */
+-	return smp_load_acquire(&ma->spk_granted) ? -EBUSY : 0;
+-}
++	mutex_lock(&ma->volume_lock_mutex);
+ 
+-static int macaudio_route_write_check(struct snd_kcontrol *kctl, struct snd_ctl_file *file)
+-{
+-	struct snd_soc_card *card = snd_soc_dapm_to_card(snd_soc_dapm_kcontrol_to_dapm(kctl));
++	/*
++	 * A ping or a disabled timeout can have cancelled this work after it
++	 * had already started running; neither must expire the lease.
++	 */
++	if (!ma->speaker_lock_timeout_enabled || !ma->speaker_lock_owner ||
++	    ma->speaker_lock_remain <= 0)
++		goto out;
+ 
+-	return macaudio_route_check(snd_soc_card_get_drvdata(card));
+-}
++	/* A ping renewed the lease while this work was already running */
++	now = ktime_get();
++	if (ktime_before(now, ma->speaker_lock_timeout)) {
++		left = ktime_sub(ma->speaker_lock_timeout, now);
++		schedule_delayed_work(&ma->lock_timeout_work,
++				      usecs_to_jiffies(ktime_to_us(left)));
++		goto out;
++	}
+ 
+-/*
+- * Match both mono and prefixed amp DAPM sense switches, and the speaker
+- * route; leave jack controls alone.
+- */
+-static void macaudio_protect_sense(struct snd_soc_card *card)
+-{
+-	struct snd_kcontrol *kctl;
++	ma->speaker_lock_remain = 0;
++	macaudio_vlimit_update(ma);
+ 
+-	list_for_each_entry(kctl, &card->snd_card->controls, list) {
+-		if (snd_soc_control_matches(kctl, "* ISENSE Switch") ||
+-		    snd_soc_control_matches(kctl, "* VSENSE Switch") ||
+-		    !strcmp(kctl->id.name, "ISENSE Switch") ||
+-		    !strcmp(kctl->id.name, "VSENSE Switch"))
+-			kctl->write_check = macaudio_sense_write_check;
+-		else if (!strcmp(kctl->id.name, "Speaker Playback Mux"))
+-			kctl->write_check = macaudio_route_write_check;
+-	}
++out:
++	mutex_unlock(&ma->volume_lock_mutex);
+ }
+ 
+-/*
+- * The speaker volumes are the driver's: keep them, and take the write access
+- * away from userspace before the card is exposed.
+- *
+- * Context: before the card registers, or with the card's controls held.
+- */
+-static int macaudio_spk_take_volumes(struct macaudio_snd_data *ma)
++static void macaudio_vlimit_update_work(struct work_struct *wrk)
+ {
+-	const char *name = volume_control_names[ma->cfg->amp];
+-	struct device *dev = ma->card.dev;
+-	struct snd_kcontrol *kctl;
+-	unsigned int i, nr = 0;
+-
+-	if (!name)
+-		return -EINVAL;
++        struct macaudio_snd_data *ma = container_of(wrk,
++						    struct macaudio_snd_data, lock_update_work);
+ 
+-	list_for_each_entry(kctl, &ma->card.snd_card->controls, list)
+-		if (snd_soc_control_matches(kctl, name))
+-			nr++;
+-	if (!nr)
+-		return -ENOENT;
+-
+-	ma->spk_vols = devm_kcalloc(dev, nr, sizeof(*ma->spk_vols), GFP_KERNEL);
+-	ma->spk_uval = devm_kzalloc(dev, sizeof(*ma->spk_uval), GFP_KERNEL);
+-	if (!ma->spk_vols || !ma->spk_uval)
+-		return -ENOMEM;
+-
+-	list_for_each_entry(kctl, &ma->card.snd_card->controls, list) {
+-		if (!snd_soc_control_matches(kctl, name))
+-			continue;
+-		for (i = 0; i < kctl->count; i++)
+-			kctl->vd[i].access &= ~SNDRV_CTL_ELEM_ACCESS_WRITE;
+-		ma->spk_vols[ma->spk_nr_vols++] = kctl;
+-	}
+-	return 0;
++	/* An unlock here sets the kept volumes again: no volume write may race it */
++	down_read(&ma->card.snd_card->controls_rwsem);
++	if (ma->bes_active)
++		macaudio_vlimit_enable_timeout(ma);
++	else
++		macaudio_vlimit_disable_timeout(ma);
++	up_read(&ma->card.snd_card->controls_rwsem);
+ }
+ 
+-/* The item of enum control @kctl named @text, or a negative error */
+-static int macaudio_enum_item(struct snd_kcontrol *kctl, const char *text)
++static bool macaudio_sw_gain_pcm(struct snd_pcm_substream *substream)
+ {
+-	struct snd_ctl_elem_info *uinfo;
+-	unsigned int i, items;
+-	int ret;
++	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
++	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(rtd->card);
++	struct macaudio_link_props *props = &ma->link_props[rtd->dai_link->id];
+ 
+-	uinfo = kzalloc_obj(*uinfo);
+-	if (!uinfo)
+-		return -ENOMEM;
+-	uinfo->id = kctl->id;
+-	ret = kctl->info(kctl, uinfo);
+-	if (!ret && uinfo->type != SNDRV_CTL_ELEM_TYPE_ENUMERATED)
+-		ret = -EINVAL;
+-	items = ret ? 0 : uinfo->value.enumerated.items;
+-	ret = -ENOENT;
+-	for (i = 0; i < items; i++) {
+-		uinfo->value.enumerated.item = i;
+-		if (kctl->info(kctl, uinfo))
+-			break;
+-		if (!strcmp(uinfo->value.enumerated.name, text)) {
+-			ret = i;
+-			break;
+-		}
+-	}
+-	kfree(uinfo);
+-	return ret;
++	return props->sw_gain && substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
+ }
+ 
+-/*
+- * The tweeters' playback high-pass corners are the driver's where the
+- * machine opens them while granted: keep them, with both their items.
+- *
+- * Context: before the card registers, or with the card's controls held.
+- */
+-static int macaudio_spk_take_hpfs(struct macaudio_snd_data *ma)
++static void macaudio_sw_gain_stop_work(struct work_struct *work)
+ {
+-	struct device *dev = ma->card.dev;
+-	struct snd_kcontrol *kctl;
+-	struct snd_ctl_elem_value *uval;
+-	unsigned int i, nr = 0;
+-	int safe, ret;
+-
+-	if (!ma->cfg->tweeter_hpf_granted)
+-		return 0;
+-
+-	list_for_each_entry(kctl, &ma->card.snd_card->controls, list)
+-		if (snd_soc_control_matches(kctl, MACAUDIO_TWEETER_HPF_NAME))
+-			nr++;
+-	if (!nr)
+-		return -ENOENT;
+-
+-	ma->spk_hpfs = devm_kcalloc(dev, nr, sizeof(*ma->spk_hpfs), GFP_KERNEL);
+-	ma->spk_hpf_granted = devm_kcalloc(dev, nr, sizeof(*ma->spk_hpf_granted), GFP_KERNEL);
+-	if (!ma->spk_hpfs || !ma->spk_hpf_granted)
+-		return -ENOMEM;
+-
+-	uval = kzalloc_obj(*uval);
+-	if (!uval)
+-		return -ENOMEM;
++	struct macaudio_snd_data *ma = container_of(work, struct macaudio_snd_data,
++						  sw_gain_stop_work);
+ 
+-	list_for_each_entry(kctl, &ma->card.snd_card->controls, list) {
+-		if (!snd_soc_control_matches(kctl, MACAUDIO_TWEETER_HPF_NAME))
+-			continue;
+-		safe = macaudio_enum_item(kctl, MACAUDIO_TWEETER_HPF_SAFE);
+-		if (safe < 0) {
+-			ret = safe;
+-			goto out;
+-		}
+-		/* Capture before fixup installs the floor: the codec loaded the DT. */
+-		memset(uval, 0, sizeof(*uval));
+-		uval->id = kctl->id;
+-		ret = kctl->get(kctl, uval);
+-		if (ret < 0)
+-			goto out;
+-		if (ma->spk_nr_hpfs && safe != ma->spk_hpf_safe) {
+-			ret = -EINVAL;
+-			goto out;
+-		}
+-		ma->spk_hpf_safe = safe;
+-		ma->spk_hpf_granted[ma->spk_nr_hpfs] = uval->value.enumerated.item[0];
+-		for (i = 0; i < kctl->count; i++)
+-			kctl->vd[i].access &= ~SNDRV_CTL_ELEM_ACCESS_WRITE;
+-		ma->spk_hpfs[ma->spk_nr_hpfs++] = kctl;
+-	}
+-	ret = 0;
+-out:
+-	kfree(uval);
+-	return ret;
++	macaudio_stop_playback(ma, true);
+ }
+ 
+ static int macaudio_copy_link(struct device *dev, struct snd_soc_dai_link *target,
+@@ -1463,11 +894,8 @@ static bool macaudio_sn012776_levels_present(struct device *dev,
+ 	return n > 0;
+ }
+ 
+-static int macaudio_set_fixed_volume(struct snd_soc_card *card, const char *name,
+-				     int value);
+-
+-/* Every SN012776's "Amp Gain Volume" is fixed at its own level */
+-static int macaudio_fix_sn012776_levels(struct snd_soc_card *card)
++/* Every SN012776's "Amp Gain Volume" ends at its own level */
++static int macaudio_limit_sn012776_levels(struct snd_soc_card *card)
+ {
+ 	struct snd_soc_component *component;
+ 	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+@@ -1484,10 +912,10 @@ static int macaudio_fix_sn012776_levels(struct snd_soc_card *card)
+ 		snprintf(name, sizeof(name), "%s%sAmp Gain Volume",
+ 			 component->name_prefix ?: "",
+ 			 component->name_prefix ? " " : "");
+-		ret = macaudio_set_fixed_volume(card, name, level);
++		ret = snd_soc_limit_volume(card, name, level);
+ 		if (ret != 1)
+ 			return dev_err_probe(card->dev, ret < 0 ? ret : -EINVAL,
+-					     "fixed level on '%s': %d\n", name, ret);
++					     "limit on '%s': %d\n", name, ret);
+ 	}
+ 	return 0;
+ }
+@@ -1660,6 +1088,9 @@ static int macaudio_parse_of(struct macaudio_snd_data *ma)
+ 			link_props->bclk_ratio = ma->cfg->primary_bclk_ratio;
+ 		if (i == 1 && ma->cfg->secondary_bclk_ratio)
+ 			link_props->bclk_ratio = ma->cfg->secondary_bclk_ratio;
++		if (ma->cfg->sw_gain_dai)
++			link_props->sw_gain = !strcmp(link->cpus[0].dai_name,
++						      ma->cfg->sw_gain_dai);
+ 		link++; link_props++;
+ 	}
+ 
+@@ -1907,6 +1338,14 @@ static int macaudio_dpcm_hw_params(struct snd_pcm_substream *substream,
+ 			rate->min = rate->max = cpu_dai->symmetric_rate;
+ 
+ 			return 0;
++		} else {
++			/*
++			 * Set the sense PCM rate control to inform userspace of the
++			 * new sample rate.
++			 */
++			ma->speaker_sample_rate = params_rate(params);
++			snd_ctl_notify(ma->card.snd_card, SNDRV_CTL_EVENT_MASK_VALUE,
++				       &ma->speaker_sample_rate_kctl->id);
+ 		}
+ 	}
+ 
+@@ -2014,105 +1453,114 @@ static int macaudio_be_hw_free(struct snd_pcm_substream *substream)
+ 		for_each_rtd_dais(rtd, i, dai) {
+ 			dai->symmetric_rate = 0;
+ 		}
++
++		/* Notify userspace that the speakers are closed */
++		ma->speaker_sample_rate = 0;
++		snd_ctl_notify(ma->card.snd_card, SNDRV_CTL_EVENT_MASK_VALUE,
++			       &ma->speaker_sample_rate_kctl->id);
+ 	}
+ 
+ 	return 0;
+ }
+ 
+-static bool macaudio_trigger_starts(int cmd)
++static int macaudio_be_trigger(struct snd_pcm_substream *substream, int cmd)
+ {
+-	switch (cmd) {
+-	case SNDRV_PCM_TRIGGER_START:
+-	case SNDRV_PCM_TRIGGER_RESUME:
+-	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+-		return true;
+-	default:
+-		return false;
+-	}
+-}
++	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
++	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(rtd->card);
++	struct macaudio_link_props *props = &ma->link_props[rtd->dai_link->id];
+ 
+-/*
+- * The speakers start only while protection is granted (macaudio_spk_put()).
+- * DPCM triggers a back-end only for the first front-end that starts on it,
+- * so every front-end that drives the speakers is checked as well, before
+- * its DMA and its back-ends (see macaudio_fe_links): one that would join a
+- * speaker back-end left running across a withdrawal is refused too.
+- */
+-static bool macaudio_fe_refuses(struct macaudio_snd_data *ma, struct snd_soc_pcm_runtime *rtd,
+-				struct snd_pcm_substream *substream, int cmd)
+-{
+-	if (!ma->has_speakers || substream->stream != SNDRV_PCM_STREAM_PLAYBACK ||
+-	    !macaudio_trigger_starts(cmd))
+-		return false;
+-	return macaudio_fe_drives_speakers(ma, rtd, substream->stream) &&
+-	       !macaudio_spk_admitted(ma);
+-}
++	if (props->is_speakers && substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++		switch (cmd) {
++		case SNDRV_PCM_TRIGGER_START:
++		case SNDRV_PCM_TRIGGER_RESUME:
++		case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++			ma->bes_active |= BIT(rtd->dai_link->id);
++			break;
++		case SNDRV_PCM_TRIGGER_SUSPEND:
++		case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		case SNDRV_PCM_TRIGGER_STOP:
++			ma->bes_active &= ~BIT(rtd->dai_link->id);
++			break;
++		default:
++			return -EINVAL;
++		}
+ 
+-/* A refused speaker start: counted (debugfs speaker_starts_refused), never logged */
+-static int macaudio_spk_refuse(struct macaudio_snd_data *ma)
+-{
+-	atomic_inc(&ma->spk_refused);
+-	atomic_inc(&ma->spk_refused_since_grant);
+-	return -EPERM;
++		schedule_work(&ma->lock_update_work);
++	}
++
++	return 0;
+ }
+ 
+-/*
+- * A refused start is the floor doing its job, not a failure, and an audio
+- * server retries it from its data loop: dozens to hundreds of times per
+- * withdrawal. The links are marked quiet_trigger_eperm (see
+- * macaudio_quiet_refusals()), so ASoC fails these triggers without logging
+- * them; each refusal is counted instead, and the next grant reports the run.
+- */
+-static int macaudio_fe_trigger(struct snd_pcm_substream *substream, int cmd)
++static int macaudio_fe_prepare(struct snd_pcm_substream *substream)
+ {
+ 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+ 	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(rtd->card);
+ 
+-	return macaudio_fe_refuses(ma, rtd, substream, cmd) ? macaudio_spk_refuse(ma) : 0;
+-}
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
++	    READ_ONCE(ma->speaker_lock_failed))
++		return -EIO;
+ 
+-/* The gate's -EPERM on every link of a card with speakers is a quiet refusal */
+-static void macaudio_quiet_refusals(struct snd_soc_card *card)
+-{
+-	struct snd_soc_dai_link *link;
+-	int i;
++	if (!macaudio_sw_gain_pcm(substream))
++		return 0;
+ 
+-	for_each_card_prelinks(card, i, link)
+-		link->quiet_trigger_eperm = 1;
++	if (atomic_read(&ma->sw_gain_limit_failed))
++		return -EIO;
++	/* The CPU DAI's prepare clears the old samples out of the buffer next */
++	atomic_set(&ma->sw_gain_prepared_epoch,
++		   atomic_read(&ma->sw_gain_lock_epoch));
++	return 0;
+ }
+ 
+ /*
+- * The back-end's link trigger runs before its DAIs: a refused start starts
+- * nothing. A grant withdrawn after this check stops the stream through
+- * macaudio_stop_speaker_playback(), under the same stream lock.
++ * Runs before the CPU DAI and the back-ends are triggered (see the
++ * front-end links): a lock event since prepare means the buffer holds
++ * samples converted at the old gain, so the start is refused and the
++ * stream has to be prepared again.
+  */
+-static int macaudio_be_trigger(struct snd_pcm_substream *substream, int cmd)
++static int macaudio_fe_trigger(struct snd_pcm_substream *substream, int cmd)
+ {
+ 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+ 	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(rtd->card);
+-	struct macaudio_link_props *props = &ma->link_props[rtd->dai_link->id];
+ 
+-	if (!props->is_speakers || substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
++	/*
++	 * A prepare can pass just before a failed lock is recorded and the
++	 * stop work then find the stream not yet prepared: refuse its start.
++	 */
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
++	    READ_ONCE(ma->speaker_lock_failed)) {
++		switch (cmd) {
++		case SNDRV_PCM_TRIGGER_START:
++		case SNDRV_PCM_TRIGGER_RESUME:
++		case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++			return -EIO;
++		default:
++			break;
++		}
++	}
++
++	if (!macaudio_sw_gain_pcm(substream))
+ 		return 0;
+ 
+ 	switch (cmd) {
+ 	case SNDRV_PCM_TRIGGER_START:
+ 	case SNDRV_PCM_TRIGGER_RESUME:
+ 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+-		return macaudio_spk_admitted(ma) ? 0 : macaudio_spk_refuse(ma);
+-	case SNDRV_PCM_TRIGGER_SUSPEND:
+-	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+-	case SNDRV_PCM_TRIGGER_STOP:
+-		return 0;
++		if (atomic_read(&ma->sw_gain_limit_failed) ||
++		    atomic_read(&ma->sw_gain_prepared_epoch) !=
++				atomic_read(&ma->sw_gain_lock_epoch))
++			return -EPIPE;
++		break;
+ 	default:
+-		return -EINVAL;
++		break;
+ 	}
++	return 0;
+ }
+ 
+ static const struct snd_soc_ops macaudio_fe_ops = {
+ 	.startup	= macaudio_fe_startup,
+ 	.shutdown	= macaudio_dpcm_shutdown,
+ 	.hw_params	= macaudio_fe_hw_params,
++	.prepare	= macaudio_fe_prepare,
+ 	.trigger	= macaudio_fe_trigger,
+ };
+ 
+@@ -2417,29 +1865,16 @@ static int macaudio_late_probe(struct snd_soc_card *card)
+ 		}
+ 	}
+ 
+-	/* The hardware floor holds from here on, before userspace sees the card */
+-	if (ma->has_speakers) {
+-		ma->spk_kctl = snd_soc_card_get_kcontrol(card, "Speaker Protection");
+-		if (!ma->spk_kctl)
+-			return -EINVAL;
+-		ret = macaudio_spk_take_volumes(ma);
+-		if (ret)
+-			return dev_err_probe(card->dev, ret, "speaker volumes missing\n");
+-		/* Save codec-loaded DT corners before the floor and PM notifier. */
+-		ret = macaudio_spk_take_hpfs(ma);
+-		if (ret)
+-			return dev_err_probe(card->dev, ret,
+-					     "tweeter high-pass controls missing\n");
+-		mutex_lock(&ma->spk_mutex);
+-		macaudio_spk_floor(ma, "card bound");
+-		ret = ma->spk_floor_failed ? -EIO : 0;
+-		mutex_unlock(&ma->spk_mutex);
+-		if (ret)
+-			return dev_err_probe(card->dev, ret, "speaker safe level not set\n");
+-#ifdef CONFIG_DEBUG_FS
+-		debugfs_create_atomic_t("speaker_starts_refused", 0444, card->debugfs_card_root,
+-					&ma->spk_refused);
+-#endif
++	if (ma->has_speakers)
++		ma->speaker_sample_rate_kctl = snd_soc_card_get_kcontrol(card,
++									 "Speaker Sample Rate");
++	if (ma->has_safety) {
++		ma->speaker_lock_kctl = snd_soc_card_get_kcontrol(card,
++								  "Speaker Volume Unlock");
++
++		mutex_lock(&ma->volume_lock_mutex);
++		macaudio_vlimit_unlock(ma, false);
++		mutex_unlock(&ma->volume_lock_mutex);
+ 	}
+ 
+ 	/* Append identity metadata without renumbering the existing controls. */
+@@ -2449,16 +1884,6 @@ static int macaudio_late_probe(struct snd_soc_card *card)
+ 			return ret;
+ 	}
+ 
+-	/* After it, for the same reason */
+-	if (ma->has_speakers) {
+-		ret = snd_soc_add_card_controls(card, &macaudio_spk_xover_control, 1);
+-		if (ret)
+-			return ret;
+-		ma->spk_xover_kctl = snd_soc_card_get_kcontrol(card, MACAUDIO_SPK_XOVER_NAME);
+-		if (!ma->spk_xover_kctl)
+-			return -EINVAL;
+-	}
+-
+ 	/* The notifier walks the card's controls: only while the card is bound */
+ 	return register_pm_notifier(&ma->pm_nb);
+ }
+@@ -2469,42 +1894,23 @@ static int macaudio_card_remove(struct snd_soc_card *card)
+ 
+ 	unregister_pm_notifier(&ma->pm_nb);
+ 	/*
+-	 * A control file closed from here on still unlocks "Speaker Protection",
+-	 * while the codecs are going: nothing may touch them any more.
+-	 */
+-	mutex_lock(&ma->spk_mutex);
+-	ma->spk_dead = true;
+-	WRITE_ONCE(ma->spk_granted, false);
+-	mutex_unlock(&ma->spk_mutex);
+-	/*
+-	 * Nothing queues a withdrawal's work any more but a lease timer that
+-	 * is firing: stop it first. The works walk the card's runtimes and
+-	 * controls: finish them while those still exist.
++	 * No back-end can trigger any more, but a lock update it queued takes
++	 * the card's controls_rwsem: finish it while the snd_card still exists.
+ 	 */
+-	hrtimer_cancel(&ma->spk_lease_timer);
+-	kthread_cancel_work_sync(&ma->spk_expire_work);
+-	kthread_cancel_work_sync(&ma->spk_stop_work);
++	cancel_work_sync(&ma->lock_update_work);
++	cancel_delayed_work_sync(&ma->lock_timeout_work);
++	mutex_lock(&ma->volume_lock_mutex);
++	macaudio_pm_volumes_drop(ma);
++	mutex_unlock(&ma->volume_lock_mutex);
+ 	return 0;
+ }
+ 
+-/* Userspace may read the controls matching @name but never write them. */
+-static void macaudio_deny_write(struct snd_soc_card *card, const char *name)
+-{
+-	struct snd_kcontrol *kctl;
+-	unsigned int i;
+-
+-	list_for_each_entry(kctl, &card->snd_card->controls, list) {
+-		if (!snd_soc_control_matches(kctl, name))
+-			continue;
+-		for (i = 0; i < kctl->count; i++)
+-			kctl->vd[i].access &= ~SNDRV_CTL_ELEM_ACCESS_WRITE;
+-	}
+-}
+-
+ /* Called during control fixup, before the card is exposed to userspace. */
+ static int macaudio_set_fixed_enum(struct snd_soc_card *card, const char *name,
+ 				   const char *value)
+ {
++	struct snd_kcontrol *kctl;
++	unsigned int i;
+ 	int ret;
+ 
+ 	/* NULL: keep the value the control has */
+@@ -2519,50 +1925,14 @@ static int macaudio_set_fixed_enum(struct snd_soc_card *card, const char *name,
+ 		return ret;
+ 
+ 	/* INACTIVE only hides controls; direct ALSA writes require WRITE. */
+-	macaudio_deny_write(card, name);
+-	return ret;
+-}
+-
+-/*
+- * Hold the volumes matching @name at @value, their maximum, and take them
+- * away from userspace: a fixed operating point, as the protection engine's
+- * tuning assumes. Returns the number of controls, as snd_soc_limit_volume().
+- *
+- * Called during control fixup, before the card is exposed to userspace.
+- */
+-static int macaudio_set_fixed_volume(struct snd_soc_card *card, const char *name,
+-				     int value)
+-{
+-	struct snd_ctl_elem_value *uval;
+-	struct snd_kcontrol *kctl;
+-	int ret, hits;
+-
+-	hits = snd_soc_limit_volume(card, name, value);
+-	if (hits < 0)
+-		return hits;
+-
+-	uval = kzalloc_obj(*uval);
+-	if (!uval)
+-		return -ENOMEM;
+ 	list_for_each_entry(kctl, &card->snd_card->controls, list) {
+ 		if (!snd_soc_control_matches(kctl, name))
+ 			continue;
+-		memset(uval, 0, sizeof(*uval));
+-		uval->id = kctl->id;
+-		uval->value.integer.value[0] = value;
+-		uval->value.integer.value[1] = value;
+-		ret = kctl->put(kctl, uval);
+-		if (ret < 0) {
+-			hits = ret;
+-			break;
+-		}
++		for (i = 0; i < kctl->count; i++)
++			kctl->vd[i].access &= ~SNDRV_CTL_ELEM_ACCESS_WRITE;
+ 	}
+-	kfree(uval);
+-	if (hits < 0)
+-		return hits;
+ 
+-	macaudio_deny_write(card, name);
+-	return hits;
++	return ret;
+ }
+ 
+ #define CHECK(call, pattern, value, min)                                       \
+@@ -2598,20 +1968,19 @@ static int macaudio_set_speaker(struct snd_soc_card *card, const char *prefix, b
+ 		if (ma->cfg->stereo)
+ 			CHECK_CONCAT(macaudio_set_fixed_enum, "ASI1 Sel", "Left");
+ 
+-		CHECK_CONCAT(macaudio_set_fixed_volume, "Amp Gain Volume", ma->cfg->amp_gain);
++		CHECK_CONCAT(snd_soc_limit_volume, "Amp Gain Volume", ma->cfg->amp_gain);
+ 		break;
+ 	case AMP_SN012776:
+ 		if (ma->cfg->stereo)
+ 			CHECK_CONCAT(macaudio_set_fixed_enum, "ASI1 Sel", "Left");
+ 
+ 		/*
+-		 * Each amp's gain is fixed at its level from the Mac's ADT
+-		 * (macaudio_fix_sn012776_levels()). The tweeters' playback
+-		 * high-pass starts at the protection floor; the woofers keep
+-		 * the corner the amps were given from the ADT.
++		 * The tweeters' playback high-pass stays at 800 Hz, the
++		 * protection floor; the woofers keep the corner the amps were
++		 * given from the Mac's ADT.
+ 		 */
+ 		CHECK_CONCAT(macaudio_set_fixed_enum, "HPF Corner Frequency",
+-			     tweeter ? MACAUDIO_TWEETER_HPF_SAFE : NULL);
++			     tweeter ? "800 Hz" : NULL);
+ 
+ 		CHECK_CONCAT(macaudio_set_fixed_enum, "OCE Handling", "Retry");
+ 		break;
+@@ -2659,10 +2028,8 @@ static int macaudio_fixup_controls(struct snd_soc_card *card)
+ 	if (!ma->has_speakers)
+ 		return 0;
+ 
+-	macaudio_protect_sense(card);
+-
+ 	if (ma->cfg->amp == AMP_SN012776) {
+-		int ret = macaudio_fix_sn012776_levels(card);
++		int ret = macaudio_limit_sn012776_levels(card);
+ 
+ 		if (ret)
+ 			return ret;
+@@ -2737,8 +2104,165 @@ static const struct snd_soc_dapm_widget macaudio_snd_widgets[] = {
+ 	SND_SOC_DAPM_AIF_IN("Speaker Sense Capture", NULL, 0, SND_SOC_NOPM, 0, 0),
+ };
+ 
+-/* The speaker controls go last: a card without speakers drops them. */
+-#define MACAUDIO_NUM_SPEAKER_CONTROLS 1
++static int macaudio_sss_info(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
++	uinfo->count = 1;
++	uinfo->value.integer.min = 0;
++	uinfo->value.integer.max = 192000;
++
++	return 0;
++}
++
++static int macaudio_sss_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *uvalue)
++{
++	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
++	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
++
++	/*
++	 * TODO: Check if any locking is in order here. I would
++	 * assume there is some ALSA-level lock, but DAPM implementations
++	 * of kcontrol ops do explicit locking, so look into it.
++	 */
++	uvalue->value.integer.value[0] = ma->speaker_sample_rate;
++
++	return 0;
++}
++
++static int macaudio_slk_info(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
++	uinfo->count = 1;
++	uinfo->value.integer.min = INT_MIN;
++	uinfo->value.integer.max = INT_MAX;
++
++	return 0;
++}
++
++static int macaudio_slk_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *uvalue)
++{
++	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
++	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
++	long val = uvalue->value.integer.value[0];
++
++	/*
++	 * Reads return the lock state (0 or 1), so a saved mixer state holds
++	 * one of those. Writing it back changes nothing: only the lock owner's
++	 * magic value renews the lease. Accept it as a no-op so that restoring
++	 * a saved state before the daemon has taken the lock is not an error.
++	 */
++	if (val == 0 || val == 1)
++		return 0;
++
++	if (val != SPEAKER_MAGIC_VALUE)
++		return -EINVAL;
++
++	mutex_lock(&ma->volume_lock_mutex);
++
++	if (!ma->speaker_lock_owner) {
++		mutex_unlock(&ma->volume_lock_mutex);
++		return -EPERM;
++	}
++
++	/* Serves as a notification that the lock was lost at some point */
++	if (ma->speaker_volume_was_locked) {
++		ma->speaker_volume_was_locked = false;
++		mutex_unlock(&ma->volume_lock_mutex);
++		return -ETIMEDOUT;
++	}
++
++	/* Between suspend-prepare and the freeze: the lease starts again after the resume */
++	if (ma->pm_quiesced) {
++		mutex_unlock(&ma->volume_lock_mutex);
++		return 0;
++	}
++
++	cancel_delayed_work(&ma->lock_timeout_work);
++
++	ma->speaker_lock_remain = ms_to_ktime(SPEAKER_LOCK_TIMEOUT);
++	ma->speaker_lock_timeout = ktime_add(ktime_get(), ma->speaker_lock_remain);
++	macaudio_vlimit_update(ma);
++
++	if (ma->speaker_lock_timeout_enabled) {
++		dev_dbg(ma->card.dev, "Volume limit timeout ping: %ld us left\n",
++			(long)ktime_to_us(ma->speaker_lock_remain));
++		schedule_delayed_work(&ma->lock_timeout_work, usecs_to_jiffies(ktime_to_us(ma->speaker_lock_remain)));
++	}
++
++	mutex_unlock(&ma->volume_lock_mutex);
++
++	return 0;
++}
++
++static int macaudio_slk_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *uvalue)
++{
++	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
++	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
++
++	uvalue->value.integer.value[0] = ma->speaker_volume_unlocked ? 1 : 0;
++
++	return 0;
++}
++
++static int macaudio_slk_lock(struct snd_kcontrol *kcontrol, struct snd_ctl_file *owner)
++{
++	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
++	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
++
++	mutex_lock(&ma->volume_lock_mutex);
++
++	/*
++	 * A lease belongs to the owner that pinged for it. Whatever the
++	 * previous owner had left must not unlock the volume for a new one
++	 * before it has pinged itself.
++	 */
++	cancel_delayed_work(&ma->lock_timeout_work);
++	ma->speaker_lock_remain = 0;
++	ma->speaker_lock_timeout = 0;
++	/* A new owner sets the volumes itself */
++	macaudio_pm_volumes_drop(ma);
++
++	ma->speaker_lock_owner = owner;
++	macaudio_vlimit_update(ma);
++
++	/*
++	 * Reset the unintended lock flag when the control is first locked.
++	 * At this point the state is locked and cannot be unlocked until
++	 * userspace writes to this control, so this cannot spuriously become
++	 * true again until that point.
++	 */
++	ma->speaker_volume_was_locked = false;
++
++	mutex_unlock(&ma->volume_lock_mutex);
++
++	return 0;
++}
++
++static void macaudio_slk_unlock(struct snd_kcontrol *kcontrol)
++{
++	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
++	struct macaudio_snd_data *ma = snd_soc_card_get_drvdata(card);
++
++	mutex_lock(&ma->volume_lock_mutex);
++	cancel_delayed_work(&ma->lock_timeout_work);
++	ma->speaker_lock_owner = NULL;
++	ma->speaker_lock_remain = 0;
++	ma->speaker_lock_timeout = 0;
++	macaudio_vlimit_update(ma);
++	mutex_unlock(&ma->volume_lock_mutex);
++}
++
++/*
++ * Speaker limit controls go last. We only drop the unlock control,
++ * leaving sample rate, since that can be useful for safety
++ * bring-up before the kernel-side caps are ready.
++ */
++#define MACAUDIO_NUM_SPEAKER_LIMIT_CONTROLS 1
++/*
++ * If there are no speakers configured at all, we can drop both
++ * controls.
++ */
++#define MACAUDIO_NUM_SPEAKER_CONTROLS 2
+ 
+ static const struct snd_kcontrol_new macaudio_controls[] = {
+ 	SOC_DAPM_PIN_SWITCH("Speaker"),
+@@ -2746,11 +2270,20 @@ static const struct snd_kcontrol_new macaudio_controls[] = {
+ 	SOC_DAPM_PIN_SWITCH("Headset Mic"),
+ 	{
+ 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+-		.access = MACAUDIO_SPK_OWNERSHIP_ACCESS,
+-		.name = "Speaker Protection",
+-		.info = macaudio_spk_info,
+-		.put = macaudio_spk_put, .get = macaudio_spk_get,
+-		.lock = macaudio_spk_lock, .unlock = macaudio_spk_unlock,
++		.access = SNDRV_CTL_ELEM_ACCESS_READ |
++			SNDRV_CTL_ELEM_ACCESS_VOLATILE,
++		.name = "Speaker Sample Rate",
++		.info = macaudio_sss_info, .get = macaudio_sss_get,
++	},
++	{
++		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++		.access = SNDRV_CTL_ELEM_ACCESS_READ |
++			SNDRV_CTL_ELEM_ACCESS_WRITE |
++			SNDRV_CTL_ELEM_ACCESS_VOLATILE,
++		.name = "Speaker Volume Unlock",
++		.info = macaudio_slk_info,
++		.put = macaudio_slk_put, .get = macaudio_slk_get,
++		.lock = macaudio_slk_lock, .unlock = macaudio_slk_unlock,
+ 	},
+ };
+ 
+@@ -2803,9 +2336,9 @@ struct macaudio_platform_cfg macaudio_j313_cfg = {
+  * launched on the rising SCLK edge: DSP_A with an inverted bit clock. The
+  * speakers are one MAX98360A per channel on the "spkr" back-end, with no
+  * sense lines and no amplifier controls; the volume is the CPU DAI's
+- * software gain: full scale while a protection engine owns the speakers,
+- * 20 dB down otherwise. The "Speaker Sense" capture is the SpeakerTap, a
+- * digital tap of the words the amplifier receives; there is no V/I sense.
++ * software gain, which the lock holds 20 dB down until a protection daemon
++ * takes it. The daemon models the speaker from the SpeakerTap, a digital
++ * tap of the words the amplifier receives.
+  */
+ struct macaudio_platform_cfg macaudio_j700_cfg = {
+ 	.enable_speakers = true,
+@@ -2814,6 +2347,7 @@ struct macaudio_platform_cfg macaudio_j700_cfg = {
+ 	.stereo = true,
+ 	.safe_vol = -20,
+ 	.spk_out_widget = "Speaker",
++	.sw_gain_dai = "j700-pcm-1",
+ 	.fe_dai_names = { "j700-pcm-0", "j700-pcm-1", "j700-pcm-2" },
+ 	.dai_fmt = SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBC_CFC | SND_SOC_DAIFMT_IB_NF,
+ 	.primary_bclk_ratio = 125,
+@@ -2823,20 +2357,16 @@ struct macaudio_platform_cfg macaudio_j314_cfg = {
+ 	true,	AMP_SN012776,	SPKR_2W1T,	true,	0,	-20,
+ };
+ 
+-/* Granted, the tweeters restore their DT corner (see tweeter_hpf_granted) */
+ struct macaudio_platform_cfg macaudio_j316_cfg = {
+ 	true,	AMP_SN012776,	SPKR_2W1T,	true,	0,	-20,
+-	.tweeter_hpf_granted = true,
+ };
+ 
+ struct macaudio_platform_cfg macaudio_j37x_j47x_cfg = {
+ 	true,	AMP_SN012776,	SPKR_1W,	false,	0,	-20,
+ };
+ 
+-/* Granted, the tweeters restore their DT corner (see tweeter_hpf_granted) */
+ struct macaudio_platform_cfg macaudio_j413_cfg = {
+ 	true,	AMP_SN012776,	SPKR_1W1T,	true,	0,	-20,
+-	.tweeter_hpf_granted = true,
+ };
+ 
+ struct macaudio_platform_cfg macaudio_j415_cfg = {
+@@ -2874,16 +2404,13 @@ struct macaudio_platform_cfg macaudio_j616_cfg = {
+ 	.fe_cpu_is_platform = true,
+ 	/* No headphone codec on this card: the jack is a card of its own. */
+ 	.route_only_fes = BIT(0),
+-	/* Granted, the tweeters restore their DT corner */
+-	.tweeter_hpf_granted = true,
+ };
+ 
+ /*
+  * J614s: the same amps and frame as the J616s, but its speakers have not
+  * been brought up and have no protection profile. Keep them off entirely
+  * until they get their own bring-up: the speaker link is not bound, so no
+- * stream ever reaches the amps. The J604 (T8132, MacBook Pro 14" M4) has
+- * the same amps, frame and chassis, and is in the same state.
++ * stream ever reaches the amps.
+  */
+ struct macaudio_platform_cfg macaudio_j614_cfg = {
+ 	.enable_speakers = false,
+@@ -2899,23 +2426,6 @@ struct macaudio_platform_cfg macaudio_j614_cfg = {
+ 	.route_only_fes = BIT(0),
+ };
+ 
+-/*
+- * J773 (Mac mini, M4 Pro) and J575c (Mac Studio, M4 Max): one SN012776 on
+- * the AOP's speaker stream. Neither speaker has been brought up or has a
+- * protection profile, and the J773s stream returns no V/I sense, so keep
+- * them off as on the J614s: the speaker link is not bound.
+- */
+-struct macaudio_platform_cfg macaudio_j575c_j773_cfg = {
+-	.enable_speakers = false,
+-	.amp = AMP_SN012776,
+-	.speakers = SPKR_1W,
+-	.stereo = false,
+-	.safe_vol = -20,
+-	.fe_dai_names = { "j616-pcm-0", "j616-pcm-1", "j616-pcm-2" },
+-	.fe_cpu_is_platform = true,
+-	.route_only_fes = BIT(0),
+-};
+-
+ /*
+  * J713 (T8132, MacBook Air 13" M4): the J616s stream, six 32-bit playback
+  * and twelve 16-bit sense slots in the same 250-bit frame, with four
+@@ -2939,27 +2449,6 @@ struct macaudio_platform_cfg macaudio_j713_cfg = {
+ 	.speaker_fe_channels = 6,
+ };
+ 
+-/*
+- * J715 (T8132, MacBook Air 15" M4): the same stream with six SN012776 amps,
+- * two woofers and a tweeter per side, on all six playback and twelve sense
+- * slots. The speakers stay at their safe level as on the J713.
+- */
+-struct macaudio_platform_cfg macaudio_j715_cfg = {
+-	.enable_speakers = true,
+-	.amp = AMP_SN012776,
+-	.speakers = SPKR_2W1T,
+-	.stereo = true,
+-	.safe_vol = -20,
+-	.fe_dai_names = { "j616-pcm-0", "j616-pcm-1", "j616-pcm-2" },
+-	.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBC_CFC |
+-		   SND_SOC_DAIFMT_GATED | SND_SOC_DAIFMT_NB_IF,
+-	.secondary_bclk_ratio = 250,
+-	.fe_cpu_is_platform = true,
+-	/* No headphone codec on this card: the jack is a card of its own. */
+-	.route_only_fes = BIT(0),
+-	.speaker_fe_channels = 6,
+-};
+-
+ /*
+  * The J614s and J616s headphone jack, a card of its own: a CS42L84 on the
+  * AOP's "jack" back-end, which the firmware runs on MCA cluster 2 as a 64-SCLK
+@@ -2999,6 +2488,33 @@ struct macaudio_platform_cfg macaudio_fallback_cfg = {
+  *    speaker models/chassis) may share the data structure, since only userspace
+  *    cares about that (assuming our general -20dB safe level standard holds).
+  */
++struct macaudio_platform_cfg macaudio_j575c_j773_cfg = {
++	.enable_speakers = false,
++	.amp = AMP_SN012776,
++	.speakers = SPKR_1W,
++	.stereo = false,
++	.safe_vol = -20,
++	.fe_dai_names = { "j616-pcm-0", "j616-pcm-1", "j616-pcm-2" },
++	.fe_cpu_is_platform = true,
++	.route_only_fes = BIT(0),
++};
++
++struct macaudio_platform_cfg macaudio_j715_cfg = {
++	.enable_speakers = true,
++	.amp = AMP_SN012776,
++	.speakers = SPKR_2W1T,
++	.stereo = true,
++	.safe_vol = -20,
++	.fe_dai_names = { "j616-pcm-0", "j616-pcm-1", "j616-pcm-2" },
++	.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBC_CFC |
++		   SND_SOC_DAIFMT_GATED | SND_SOC_DAIFMT_NB_IF,
++	.secondary_bclk_ratio = 250,
++	.fe_cpu_is_platform = true,
++	/* No headphone codec on this card: the jack is a card of its own. */
++	.route_only_fes = BIT(0),
++	.speaker_fe_channels = 6,
++};
++
+ static const struct of_device_id macaudio_snd_device_id[]  = {
+ 	/* Model   ID      Amp         Gain    Speakers */
+ 	/* j180    AID19   sn012776    10      1× 1W+1T */
+@@ -3095,7 +2611,7 @@ static int macaudio_snd_platform_probe(struct platform_device *pdev)
+ 	card = &data->card;
+ 	snd_soc_card_set_drvdata(card, data);
+ 	dev_set_drvdata(&pdev->dev, data);
+-	mutex_init(&data->spk_mutex);
++	mutex_init(&data->volume_lock_mutex);
+ 
+ 	card->owner = THIS_MODULE;
+ 	card->driver_name = "macaudio";
+@@ -3141,11 +2657,13 @@ static int macaudio_snd_platform_probe(struct platform_device *pdev)
+ 	if (!data->has_sense)
+ 		card->num_dapm_routes--;
+ 
+-	/* Admitted speakers always have a safe level (macaudio_speakers_allowed()) */
+-	if (!data->has_speakers)
++	/* Remove useless controls */
++	if (!data->has_speakers) /* No speakers, remove both */
+ 		card->num_controls -= MACAUDIO_NUM_SPEAKER_CONTROLS;
+-	else
+-		macaudio_quiet_refusals(card);
++	else if (!data->cfg->safe_vol) /* No safety, remove unlock */
++		card->num_controls -= MACAUDIO_NUM_SPEAKER_LIMIT_CONTROLS;
++	else /* Speakers with safety, mark us as such */
++		data->has_safety = true;
+ 
+ 	for_each_card_prelinks(card, i, link) {
+ 		if (link->no_pcm) {
+@@ -3158,13 +2676,15 @@ static int macaudio_snd_platform_probe(struct platform_device *pdev)
+ 		}
+ 	}
+ 
+-	ret = macaudio_spk_init(data);
+-	if (ret)
+-		return dev_err_probe(dev, ret, "speaker protection workers not started\n");
+-	ret = devm_add_action_or_reset(dev, macaudio_spk_fini, data);
+-	if (ret)
+-		return ret;
++	INIT_WORK(&data->lock_update_work, macaudio_vlimit_update_work);
++	INIT_DELAYED_WORK(&data->lock_timeout_work, macaudio_vlimit_timeout_work);
++	INIT_WORK(&data->sw_gain_stop_work, macaudio_sw_gain_stop_work);
++	INIT_WORK(&data->lock_fail_work, macaudio_lock_fail_work);
++	atomic_set(&data->sw_gain_lock_epoch, 0);
++	atomic_set(&data->sw_gain_prepared_epoch, -1);
++	atomic_set(&data->sw_gain_limit_failed, 0);
+ 
++	data->pm_nb.notifier_call = macaudio_pm_notify;
+ 	return snd_soc_register_card(card);
+ }
+ 
+@@ -3172,8 +2692,15 @@ static void macaudio_snd_platform_remove(struct platform_device *pdev)
+ {
+ 	struct macaudio_snd_data *ma = dev_get_drvdata(&pdev->dev);
+ 
+-	/* The card's removal stops the lease timer and its works; devm frees them */
++	/*
++	 * Unregister first: a back-end trigger queues lock_update_work, which
++	 * arms lock_timeout_work, and neither may run once the card is gone.
++	 */
+ 	snd_soc_unregister_card(&ma->card);
++	cancel_work_sync(&ma->lock_update_work);
++	cancel_delayed_work_sync(&ma->lock_timeout_work);
++	cancel_work_sync(&ma->sw_gain_stop_work);
++	cancel_work_sync(&ma->lock_fail_work);
+ }
+ 
+ static struct platform_driver macaudio_snd_driver = {
+@@ -3193,8 +2720,7 @@ MODULE_LICENSE("GPL");
+ 
+ #if IS_ENABLED(CONFIG_KUNIT) && !defined(MODULE)
+ #include "macaudio-admission-test.h"
+-#include "macaudio-protection-test.h"
+-#include "macaudio-hpf-test.h"
++#include "macaudio-pm-volumes-test.h"
+ #if IS_ENABLED(CONFIG_OF_OVERLAY)
+ #include "macaudio-amp-level-test.h"
+ #endif
+diff --git a/tools/testing/selftests/alsa/macaudio-fixed-controls.py b/tools/testing/selftests/alsa/macaudio-fixed-controls.py
+index 12a94f6c20..b1db45f4dc 100644
+--- a/tools/testing/selftests/alsa/macaudio-fixed-controls.py
++++ b/tools/testing/selftests/alsa/macaudio-fixed-controls.py
+@@ -18,7 +18,7 @@ import tempfile
+ 
+ 
+ def function(source, name):
+-    match = re.search(r"^(?:static (?:inline )?)?(?:(?:int|bool|void) |const char \*)" + name +
++    match = re.search(r"^(?:static (?:inline )?)?(?:int|bool) " + name +
+                       r"\(.*?^\}", source, re.M | re.S)
+     if not match:
+         raise ValueError("missing source function: " + name)
+@@ -51,43 +51,20 @@ struct snd_ctl_elem_info {
+  union { struct { unsigned int items, item; char name[64]; } enumerated; } value;
+ };
+ struct snd_kcontrol_volatile { unsigned int access; struct snd_ctl_file *owner; };
+-struct snd_soc_card;
+-struct snd_soc_dapm_context { struct snd_soc_card *card; };
+-struct snd_soc_component { unsigned int reg, writes; struct snd_soc_dapm_context dapm; };
++struct snd_soc_component { unsigned int reg, writes; };
+ struct soc_enum { unsigned int items, shift_l, shift_r, mask, reg; };
+ struct snd_kcontrol {
+  struct snd_ctl_elem_id id; struct snd_kcontrol_volatile vd[2]; unsigned int count;
+  int (*put)(struct snd_kcontrol *, struct snd_ctl_elem_value *);
+  int (*info)(struct snd_kcontrol *, struct snd_ctl_elem_info *);
+- int (*get)(struct snd_kcontrol *, struct snd_ctl_elem_value *);
+- int (*write_check)(struct snd_kcontrol *, struct snd_ctl_file *);
+  unsigned long private_value; struct snd_soc_component *component;
+  struct snd_kcontrol *next; const char * const *texts;
+ };
+ struct snd_card { int controls_rwsem; struct snd_kcontrol *controls; };
+ enum { AMP_NONE, AMP_TAS5770, AMP_SN012776, AMP_SSM3515, AMP_MAX98360A };
+-struct macaudio_platform_cfg { int amp, amp_gain; bool stereo; bool tweeter_hpf_granted; };
+-struct macaudio_snd_data;
+-struct snd_soc_card { struct snd_card *snd_card; struct macaudio_snd_data *data; struct device *dev; };
+-struct macaudio_snd_data {
+- bool has_speakers; struct macaudio_platform_cfg *cfg;
+- struct snd_ctl_file *spk_owner; struct snd_soc_card card;
+- struct snd_kcontrol **spk_hpfs; unsigned int *spk_hpf_granted;
+- unsigned int spk_nr_hpfs, spk_hpf_safe; struct snd_ctl_elem_value *spk_uval;
+- bool spk_granted;
+-};
+-#define GFP_KERNEL 0
+-#define devm_kcalloc(d, n, s, g) calloc(n, s)
+-#define kzalloc_obj(o) calloc(1, sizeof(o))
+-#define kfree free
+-#define lockdep_assert_held(p) ((void)0)
+-#define smp_load_acquire(p) __atomic_load_n(p, __ATOMIC_ACQUIRE)
+-static void snd_ctl_notify(struct snd_card *c, int e, struct snd_ctl_elem_id *i) {}
+-static struct snd_soc_dapm_context *snd_soc_dapm_kcontrol_to_dapm(struct snd_kcontrol *k) { return &k->component->dapm; }
+-static struct snd_soc_card *snd_soc_dapm_to_card(struct snd_soc_dapm_context *d) { return d->card; }
+-static int enum_get(struct snd_kcontrol *k, struct snd_ctl_elem_value *v)
+-{ v->value.enumerated.item[0] = k->component->reg; return 0; }
+-
++struct macaudio_platform_cfg { int amp, amp_gain; bool stereo; };
++struct macaudio_snd_data { bool has_speakers; struct macaudio_platform_cfg *cfg; };
++struct snd_soc_card { struct snd_card *snd_card; struct macaudio_snd_data *data; };
+ static int please_blow_up_my_speakers;
+ #define snd_soc_card_get_drvdata(card) ((card)->data)
+ #define down_write(x) ((void)0)
+@@ -112,8 +89,8 @@ static struct snd_soc_component *snd_kcontrol_chip(struct snd_kcontrol *k) { ret
+ static unsigned int snd_soc_enum_item_to_val(struct soc_enum *e, unsigned int item) { return item; }
+ static int snd_soc_component_update_bits(struct snd_soc_component *c, unsigned int r, unsigned int m, unsigned int v)
+ { unsigned int old = c->reg; c->writes++; c->reg = (old & ~m) | (v & m); return old != c->reg; }
+-/* Amp gain is a fixed volume (KUnit apple-speaker-protection), not a fixed enum. */
+-static int macaudio_set_fixed_volume(struct snd_soc_card *c, const char *n, int v) { return 1; }
++/* Amp gain is volume-limited separately, not a fixed enum. */
++static int snd_soc_limit_volume(struct snd_soc_card *c, const char *n, int v) { return 1; }
+ static int enum_info(struct snd_kcontrol *k, struct snd_ctl_elem_info *i)
+ {
+  struct soc_enum *e = (void *)k->private_value;
+@@ -185,109 +162,9 @@ static void scenario(int amp, const char *prefix, bool tweeter, bool stereo)
+   }
+  }
+ }
+-static void sense_scenario(void)
+-{
+- const char *names[] = { "ISENSE Switch", "VSENSE Switch",
+-  "Left Woofer ISENSE Switch", "Left Woofer VSENSE Switch",
+-  "Right Tweeter ISENSE Switch", "Right Tweeter VSENSE Switch", "Jack Switch" };
+- struct snd_kcontrol controls[7] = {0};
+- struct snd_soc_component regs[7] = {0};
+- struct soc_enum e = { .items = 2, .mask = 1 };
+- struct snd_card card = { .controls = controls };
+- struct macaudio_snd_data ma = {0};
+- struct snd_soc_card soc = { .snd_card = &card, .data = &ma };
+- struct snd_ctl_file owner = {0}, other = {0};
+- unsigned int i, j;
+- for (i = 0; i < 7; i++) {
+-  snprintf(controls[i].id.name, sizeof(controls[i].id.name), "%s", names[i]);
+-  controls[i].count = 2; controls[i].vd[0].access = controls[i].vd[1].access = 3;
+-  controls[i].component = &regs[i]; regs[i].dapm.card = &soc;
+-  controls[i].put = snd_soc_put_enum_double; controls[i].private_value = (unsigned long)&e;
+-  controls[i].next = i < 6 ? &controls[i + 1] : NULL;
+- }
+- macaudio_protect_sense(&soc);
+- for (i = 0; i < 7; i++) for (j = 0; j < 2; j++) {
+-  struct snd_ctl_elem_value v = { .id = controls[i].id };
+-  v.id.index = j;
+-  ma.spk_owner = NULL;
+-  check(snd_ctl_elem_write(&card, &other, &v) == 0, "unowned writable", names[i]);
+-  ma.spk_owner = &owner;
+-  unsigned int before = regs[i].writes;
+-  int rc = snd_ctl_elem_write(&card, &other, &v);
+-  check(rc == (i < 6 ? -EPERM : 0), "other file during ownership", names[i]);
+-  if (i < 6) check(before == regs[i].writes, "denied before DAPM callback", names[i]);
+-  check(snd_ctl_elem_write(&card, &owner, &v) == 0, "owner writable", names[i]);
+-  /* An independent lock on the sense control cannot bypass protection. */
+-  controls[i].vd[j].owner = &other;
+-  check(snd_ctl_elem_write(&card, &other, &v) == (i < 6 ? -EPERM : 0), "sense lock is not protection ownership", names[i]);
+-  controls[i].vd[j].owner = NULL;
+-  ma.spk_owner = NULL;
+-  check(snd_ctl_elem_write(&card, &other, &v) == 0, "after owner close", names[i]);
+-  attempts += 5;
+- }
+-}
+-/* The speaker route is fixed while protection is granted, for every file. */
+-static void route_scenario(void)
+-{
+- struct snd_kcontrol control = {0};
+- struct snd_soc_component reg = {0};
+- struct soc_enum e = { .items = 2, .mask = 1 };
+- struct snd_card card = { .controls = &control };
+- struct macaudio_snd_data ma = {0};
+- struct snd_soc_card soc = { .snd_card = &card, .data = &ma };
+- struct snd_ctl_file owner = {0}, other = {0};
+- struct snd_ctl_elem_value v = {0};
+- snprintf(control.id.name, sizeof(control.id.name), "%s", "Speaker Playback Mux");
+- control.count = 1; control.vd[0].access = 3; control.component = &reg; reg.dapm.card = &soc;
+- control.put = snd_soc_put_enum_double; control.private_value = (unsigned long)&e;
+- macaudio_protect_sense(&soc);
+- v.id = control.id; v.value.enumerated.item[0] = 1;
+- check(snd_ctl_elem_write(&card, &other, &v) == 0, "route writable while withdrawn", control.id.name);
+- ma.spk_owner = &owner; ma.spk_granted = true;
+- unsigned int before = reg.writes;
+- v.value.enumerated.item[0] = 0;
+- check(snd_ctl_elem_write(&card, &other, &v) == -EBUSY, "route fixed while granted (other file)", control.id.name);
+- check(snd_ctl_elem_write(&card, &owner, &v) == -EBUSY, "route fixed while granted (owner)", control.id.name);
+- check(before == reg.writes, "route denied before DAPM callback", control.id.name);
+- ma.spk_granted = false;
+- check(snd_ctl_elem_write(&card, &owner, &v) == 0, "route writable after withdrawal", control.id.name);
+- attempts += 4;
+-}
+-static void hpf_scenario(void)
+-{
+- const char * const texts[] = { "Disabled", "2 Hz", "50 Hz", "100 Hz", "200 Hz", "400 Hz", "800 Hz" };
+- struct soc_enum e = { .items = 7, .mask = 7 };
+- struct snd_kcontrol controls[2] = {0};
+- struct snd_soc_component regs[2] = {0};
+- struct macaudio_platform_cfg cfg = { .tweeter_hpf_granted = true };
+- struct snd_card card = { .controls = controls };
+- struct snd_ctl_elem_value value = {0};
+- struct macaudio_snd_data ma = { .cfg = &cfg, .spk_uval = &value, .card.snd_card = &card };
+- unsigned int initial, i;
+- /* Every legal DT playback corner, including Disabled, must round trip. */
+- for (initial = 0; initial < 7; initial++) {
+-  ma.spk_nr_hpfs = 0;
+-  for (i = 0; i < 2; i++) {
+-   snprintf(controls[i].id.name, sizeof(controls[i].id.name), "%s Tweeter HPF Corner Frequency", i ? "Right" : "Left");
+-   controls[i].count = 1; controls[i].vd[0].access = 3;
+-   controls[i].info = enum_info; controls[i].get = enum_get; controls[i].put = snd_soc_put_enum_double;
+-   controls[i].private_value = (unsigned long)&e; controls[i].component = &regs[i]; controls[i].texts = texts;
+-   controls[i].next = i ? NULL : &controls[1]; regs[i].reg = (initial + i) % 7;
+-  }
+-  check(macaudio_spk_take_hpfs(&ma) == 0, "capture DT corner", "HPF");
+-  check(macaudio_spk_set_hpf(&ma, false) == 0, "floor", "HPF");
+-  check(regs[0].reg == 6 && regs[1].reg == 6, "safe 800 Hz", "HPF");
+-  check(macaudio_spk_set_hpf(&ma, true) == 0, "grant", "HPF");
+-  for (i = 0; i < 2; i++) check(regs[i].reg == (initial + i) % 7, "restore each amp DT corner", "HPF");
+-  free(ma.spk_hpfs); free(ma.spk_hpf_granted);
+- }
+-}
+ int main(void)
+ {
+  int values[] = {0, 1, 2, 3, -1}; unsigned int p;
+- sense_scenario();
+- route_scenario();
+- hpf_scenario();
+  for (p = 0; p < sizeof(values) / sizeof(values[0]); p++) {
+   please_blow_up_my_speakers = values[p];
+   scenario(AMP_SN012776, "* Tweeter ", true, true);
+@@ -319,22 +196,8 @@ def main():
+              function(core, "snd_ctl_elem_write"),
+              function(ops, "snd_soc_deactivate_kctl"),
+              function(ops, "soc_set_enum_kctl"), function(ops, "snd_soc_set_enum_kctl")]
+-    if "static void macaudio_deny_write(" in ma:
+-        parts.append(function(ma, "macaudio_deny_write"))
+     if "static int macaudio_set_fixed_enum(" in ma:
+         parts.append(function(ma, "macaudio_set_fixed_enum"))
+-    if "static const char *macaudio_speaker_hpf(" in ma:
+-        parts += re.findall(r"^#define MACAUDIO_\w*HPF\w*\s.*$", ma, re.M)
+-        parts.append(function(ma, "macaudio_speaker_hpf"))
+-    parts += re.findall(r"^#define MACAUDIO_\w*HPF\w*\s.*$", ma, re.M)
+-    parts += [function(ma, "macaudio_sense_owner_check"),
+-              function(ma, "macaudio_sense_write_check"),
+-              *([function(ma, "macaudio_route_check"), function(ma, "macaudio_route_write_check")]
+-                if "static int macaudio_route_write_check(" in ma else []),
+-              function(ma, "macaudio_protect_sense"),
+-              function(ma, "macaudio_enum_item"),
+-              function(ma, "macaudio_spk_take_hpfs"),
+-              function(ma, "macaudio_spk_set_hpf")]
+     parts += [ma[ma.index("#define CHECK(call,"):ma.index("static int macaudio_set_speaker(")],
+               function(ma, "macaudio_set_speaker"), MAIN]
+     with tempfile.TemporaryDirectory(prefix="macaudio-fixed-") as temp:
