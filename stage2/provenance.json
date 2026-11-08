@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/aurora-silicon/fedora-aurora",
-  "commit": "6aa1f7bc8f5b05e4c7e7f7557814d528b683f75d",
+  "commit": "1d7044c319ce7e2d9c5b849f6fb480d3b0ddf21b",
   "pull_request": "https://github.com/aurora-silicon/fedora-aurora/pull/193",
   "source_directory": "packages/update-m1n1",
   "upstream_files_sha256": {
