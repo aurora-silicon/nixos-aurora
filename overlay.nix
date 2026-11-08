@@ -855,6 +855,8 @@ in {
       (stableFile ./patches/omdrop-awdl-0.10.5-stable-cloned-mac.patch)
       # AWDL windows follow the Wi-Fi link's 5 GHz channel, as macOS schedules them.
       (stableFile ./patches/omdrop-awdl-0.10.5-follow-infra-channel.patch)
+      # Set AWDL's 5 GHz social channel (default 149), or macOS will not route to us.
+      (stableFile ./patches/omdrop-awdl-0.10.5-5ghz-social-channel.patch)
     ];
     nativeBuildInputs = [ final.makeWrapper py ];
     postUnpack = ''
@@ -909,6 +911,7 @@ in {
     installCheckPhase = ''
       grep -q stable-ssid $out/libexec/omdrop/.awdl-up-wrapped
       grep -q '^follow_infra()' $out/libexec/omdrop/.awdl-up-wrapped
+      grep -q awdl_osoc_chan $out/libexec/omdrop/omdrop-broadcom.sh
       test -s $out/share/omdrop/receiver/share/certs/apple_root_ca.pem
       if grep -rIl '/usr/lib/omdrop[/" ]' $out/libexec $out/lib $out/share/polkit-1; then exit 1; fi
       if grep -q '@PLUGIN_DIR@' $out/lib/systemd/user/airdrop-receiver.service; then exit 1; fi
