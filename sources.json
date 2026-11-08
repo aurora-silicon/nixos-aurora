@@ -296,11 +296,11 @@
   },
   "aurora-fido": {
     "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
-    "commit": "32ac7d2fcf306545363deb15ea8688568429ac43",
+    "commit": "582cdf8b6db4c9311e76c832da1811c0b1017d96",
     "version": "0.1.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/aurora-sep-userspace/tar.gz/32ac7d2fcf306545363deb15ea8688568429ac43",
-    "archive_root": "aurora-sep-userspace-32ac7d2fcf306545363deb15ea8688568429ac43",
-    "sha256": "22397358410061b32c9047966bf42f03fd147971f3b6bff204779df62bcaf373",
-    "nix_hash": "sha256-IjlzWEEAYbMskEeWa/QvA/0UeXHztr/yBHed9ivK83M="
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-sep-userspace/tar.gz/582cdf8b6db4c9311e76c832da1811c0b1017d96",
+    "archive_root": "aurora-sep-userspace-582cdf8b6db4c9311e76c832da1811c0b1017d96",
+    "sha256": "6ad1826d304b98e8e4bd3318d4bb13bfa9db280340bbbfffb3fa864224bcb4c0",
+    "nix_hash": "sha256-atGCbTBLmOjkvTMY1LsTv6nbKANAu7//s/qGQiS8tMA="
   }
 }
