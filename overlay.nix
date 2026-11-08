@@ -186,6 +186,7 @@ in {
       ./sep/0005-aurora-support-v4-and-v5.patch
       ./sep/0006-aurora-report-finger-lift-and-lockout.patch
       ./sep/0007-aurora-name-retry-causes-and-keep-waiting.patch
+      ./sep/0008-aurora-report-the-touch-id-lockout-as-locked-out.patch
     ];
     postPatch = (old.postPatch or "") + ''
       install -Dm644 ${stableFile ./sep/apple-sep.h} aurora-uapi/linux/apple-sep.h
@@ -198,6 +199,8 @@ in {
   fprintd = prev.fprintd.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ map stableFile [
       ./sep/0001-preserve-print-on-device-delete-failure.patch
+      # Needs FP_DEVICE_ERROR_LOCKED_OUT from libfprint 0008 above.
+      ./sep/0002-report-lockout-and-fall-back-to-the-password.patch
     ];
     postPatch = (old.postPatch or "") + ''
       ${final.python3.interpreter} ${stableFile ./sep/test_account_gate.py} src/device.c

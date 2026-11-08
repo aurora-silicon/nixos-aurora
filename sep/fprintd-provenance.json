@@ -1,8 +1,9 @@
 {
   "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
-  "commit": "2799b51243708d0a551b67d902472319f132c417",
+  "commit": "7f43d05f0b1f7366a3d40f1b0390899d4ea47cfe",
   "files": {
     "0001-preserve-print-on-device-delete-failure.patch": "ea41766b42cfd259e32ce37cf84c5557b2f31eb9db4b63160c54ddb5c6a11e7a",
-    "test_account_gate.py": "9d09fd49cb988b4b70784151d9d6757a40fa60b19c85048067598decd480bb83"
+    "test_account_gate.py": "9d09fd49cb988b4b70784151d9d6757a40fa60b19c85048067598decd480bb83",
+    "0002-report-lockout-and-fall-back-to-the-password.patch": "b29df6766dafadbdc2dac34b5fc0396ac24a7628e822018285189cf30f52c34e"
   }
 }
