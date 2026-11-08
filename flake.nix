@@ -114,7 +114,8 @@
       # without the v2 package, units or daemon gates.
       legacy-speaker-protection = let
         inherit (nixpkgs) lib;
-        config = (makeSystem "minimal").config;
+        profile = makeSystem "minimal";
+        config = profile.config;
         unit = name: config.systemd.units.${name} or { enable = false; text = ""; };
         guarded = name: lib.hasInfix "speakerguardd-gate" (unit name).text;
         preview = package: (package.pname or "") == "speakerguardd-v2";
@@ -122,8 +123,11 @@
            "The v2 rollout is held";
          assert lib.assertMsg (!(lib.any preview config.environment.systemPackages)
            && !(lib.any preview config.systemd.packages)) "The image must not install v2";
-         assert lib.assertMsg ((unit "speakersafetyd.service").enable
-           && (unit "speakerguardd.service").enable
+         # Services imported from systemd.packages do not all appear in
+         # config.systemd.units. Check their package imports here, and the
+         # actual packaged unit files in the derivation below.
+         assert lib.assertMsg (lib.all (package: lib.elem package config.systemd.packages)
+           [ profile.pkgs.speakersafetyd profile.pkgs.speakerguardd ]
            && !(guarded "speakersafetyd.service") && !(guarded "speakerguardd.service"))
            "Legacy daemons must remain available without the v2 gate";
          assert lib.assertMsg (lib.hasInfix "use-feedback-guard" (unit "speakersafetyd.service").text)
@@ -131,10 +135,12 @@
          assert lib.assertMsg (config.boot.kernelPackages.kernel.auroraLegacySpeakerProtection or false)
            "The image kernel must support legacy speaker protection";
          pkgs.runCommandNoCC "aurora-legacy-speaker-graphs" { } ''
+           test -s ${profile.pkgs.speakersafetyd}/lib/systemd/system/speakersafetyd.service
+           test -s ${profile.pkgs.speakerguardd}/lib/systemd/system/speakerguardd.service
            for board in j316 j413 j616 j700; do
-             test -s ${pkgs.asahi-audio}/share/asahi-audio/$board/graph.json
+             test -s ${profile.pkgs.asahi-audio}/share/asahi-audio/$board/graph.json
            done
-           test -s ${pkgs.asahi-audio}/share/asahi-audio/j700/48.wav
+           test -s ${profile.pkgs.asahi-audio}/share/asahi-audio/j700/48.wav
            touch $out
          '';
 
