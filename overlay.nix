@@ -279,7 +279,8 @@ in {
   # unity on every volume or mute update, so a repeated write no longer
   # applies the speaker volume twice (-31 dB at a 30 % slider). 1005: it
   # follows its plugins' latency after activation. 1007: spa-alsa waits a
-  # period after a refused start and reports refusals at most once per 5 s. 1000-1004: AirPlay (RAOP)
+  # period after a refused start and reports refusals at most once per 5 s;
+  # 1008: a retry on a PCM that a system sleep suspended is an info line. 1000-1004: AirPlay (RAOP)
   # sender fixes. nixpkgs runs the meson suite, with both new tests.
   aurora-pipewire = prev.pipewire.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ map stableFile [
@@ -291,6 +292,7 @@ in {
       ./patches/pipewire/1005-filter-graph-follow-plugin-latency-after-activation.patch
       ./patches/pipewire/1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch
       ./patches/pipewire/1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch
+      ./patches/pipewire/1008-alsa-a-start-on-a-suspended-PCM-is-expected-not-an-error.patch
     ];
     doCheck = true;
   });

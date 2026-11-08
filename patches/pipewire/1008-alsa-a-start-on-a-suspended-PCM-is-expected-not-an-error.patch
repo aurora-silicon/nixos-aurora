@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 09:10:00 +1100
+Subject: [PATCH] alsa: a start on a suspended PCM is expected, not an error
+
+A start that the driver refused is retried one period later from the
+write path. A system sleep can suspend the PCM in between, which is what
+happens when the kernel withdraws speaker protection for the sleep (its
+start refusals began just before userspace froze). After the resume,
+the retry then failed with -EBADFD and was logged as an error, and the
+next avail check (-ESTRPIPE) had alsa_recover() resume or re-prepare the
+stream as it should.
+
+Report a start that fails because the PCM is SUSPENDED at info level,
+through the same rate limit. Recovery is unchanged.
+
+Signed-off-by: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Assisted-by: LLM
+---
+ spa/plugins/alsa/alsa-pcm.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/spa/plugins/alsa/alsa-pcm.c b/spa/plugins/alsa/alsa-pcm.c
+--- a/spa/plugins/alsa/alsa-pcm.c
++++ b/spa/plugins/alsa/alsa-pcm.c
+@@ -2786,6 +2786,7 @@
+ static inline int do_start(struct state *state)
+ {
+ 	int res, suppressed;
++	bool suspended;
+ 	if (SPA_UNLIKELY(!state->alsa_started)) {
+ 		spa_log_debug(state->log, "%p: snd_pcm_start linked:%u", state, state->linked);
+ 		if (!state->linked && (res = snd_pcm_start(state->hndl)) < 0) {
+@@ -2800,10 +2801,19 @@
+ 				(uint64_t)state->threshold * SPA_NSEC_PER_SEC / state->rate :
+ 				SPA_NSEC_PER_MSEC * 10;
+ 			state->start_retry_time = now + period;
++			/* A system sleep can suspend the PCM between a refused start
++			 * and its retry. The start then fails with -EBADFD, and the
++			 * next avail check (-ESTRPIPE) has alsa_recover() resume or
++			 * re-prepare the stream: expected, not an error. */
++			suspended = (res == -EBADFD || res == -ESTRPIPE) &&
++				snd_pcm_state(state->hndl) == SND_PCM_STATE_SUSPENDED;
+ 			if ((suppressed = spa_ratelimit_test(&state->start_limit, now)) >= 0) {
+ 				if (res == -EPERM)
+ 					spa_log_info(state->log, "%s: snd_pcm_start: %s, retrying (%d suppressed)",
+ 							state->name, snd_strerror(res), suppressed);
++				else if (suspended)
++					spa_log_info(state->log, "%s: snd_pcm_start: stream suspended by a system sleep, "
++							"recovering (%d suppressed)", state->name, suppressed);
+ 				else
+ 					spa_log_error(state->log, "%s: snd_pcm_start: %s (%d suppressed)",
+ 							state->name, snd_strerror(res), suppressed);
+-- 
+2.54.0
+
