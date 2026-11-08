@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/aurora-silicon/fedora-aurora",
+  "commit": "6aa1f7bc8f5b05e4c7e7f7557814d528b683f75d",
+  "pull_request": "https://github.com/aurora-silicon/fedora-aurora/pull/193",
+  "source_directory": "packages/update-m1n1",
+  "upstream_files_sha256": {
+    "bootchain.py": "bf84b6577a9595e2854293baa9693c99e28849c3089f09f37bb2a448875178fc",
+    "test_bootchain.py": "2cba09f768fa24822db5862ff62d00fe27a3f47be4a2e613265ee3c149e06942"
+  },
+  "dtb_abi": {
+    "source": "packages/kernel-aurora/dtb-abi",
+    "copy": "kernel/dtb-abi"
+  },
+  "adaptations": "None in these files: change them in fedora-aurora first and copy them here. nixos_stage2.py subclasses bootchain.Update for NixOS: the Stage 2 is the one built and checked with the system (modules/installed.nix) instead of one composed from /boot; the kernels that must keep booting are those of the configurations GRUB lists (profile generations up to boot.loader.grub.configurationLimit, named profiles and specialisations), each declaring its kernel's DT ABI generation in aurora-dtb-abi, with an undeclared configuration taking the generation of a listed one with the same kernel store path, else 0; the guard applies only when the ESP Stage 2 would change; attempts are recorded per candidate SHA-256 instead of per kernel version; an armed candidate that never booted is withdrawn when a later bootloader install selects other bytes (including the live image after a rollback); and a trial boot that has committed may arm the next candidate."
+}
