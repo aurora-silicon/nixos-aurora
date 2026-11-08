@@ -214,6 +214,32 @@ in {
       ${final.python3.interpreter} ${stableFile ./sep/test_account_gate.py} src/device.c
     '';
   });
+  # Re-arms Touch ID with the password after a lockout: the PAM module that
+  # modules/sep.nix puts after pam_unix, and the root service it asks.
+  aurora-touchid-rearm = final.stdenv.mkDerivation {
+    pname = "aurora-touchid-rearm";
+    version = pins.aurora-touchid-rearm.version;
+    src = source "aurora-touchid-rearm";
+    buildInputs = [ final.pam ];
+    nativeCheckInputs = [ final.python3 ];
+    makeFlags = [
+      "-C" "touchid-rearm" "WARN=-Wall"
+      "LIBEXECDIR=${placeholder "out"}/libexec" "PAMDIR=${placeholder "out"}/lib/security"
+      "PAMCONFDIR=${placeholder "out"}/lib/pam.d" "UNITDIR=${placeholder "out"}/lib/systemd/system"
+      "DOCDIR=${placeholder "out"}/share/doc/aurora-touchid-rearm"
+      "SYSCONFDIR=${placeholder "out"}/etc"
+    ];
+    doCheck = true;
+    checkTarget = "check";
+    AURORA_TEST_PAM_DIR = "${final.pam}/lib/security";
+    passthru.commit = pins.aurora-touchid-rearm.commit;
+    meta = {
+      description = "Re-arm Touch ID with the password after a lockout";
+      homepage = "https://github.com/aurora-silicon/aurora-sep-userspace";
+      license = final.lib.licenses.gpl2Only;
+      platforms = final.lib.platforms.linux;
+    };
+  };
   aurora-firstboot = final.callPackage ./firstboot.nix { };
   aurora-avd-firmware = final.callPackage ./avd-fw.nix {
     src = source "avd-fw";
@@ -512,7 +538,7 @@ in {
   });
   asahi-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
-    version = "${pins.aurora-audio.version}-aurora9";
+    version = "${pins.aurora-audio.version}-aurora10";
     postInstall = (old.postInstall or "") + ''
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
     '';
@@ -607,7 +633,7 @@ in {
     # The crates this package ships; the rig and benchmark crates stay out.
     crates = [ "-p" "sgv2-core" "-p" "sgv2-lv2" "-p" "sgv2-supervisor" "-p" "aurora-speaker-tuning" ];
     units = [ "speakerguardd.service" "speakerguardd-provision.service" "speakerguardd-selfcheck.service"
-              "speakerguardd-seat.service" "speakerguardd-seat.path" "speakerguardd-sleep.service" ];
+              "speakerguardd-switchtest.service" "speakerguardd-seat.service" "speakerguardd-seat.path" "speakerguardd-sleep.service" ];
     userUnits = [ "speakerguardd-session.service" "speakerguardd-graph.service" ];
   in rustPackage "speakerguardd-v2" ./locks/speakerguardd-v2.Cargo.lock {
     cargoBuildFlags = crates;
@@ -664,9 +690,20 @@ in {
       grep -qx "ExecStart=$lx/speakerguardd-provision seat --unit speakerguardd-v2.service" $sd/speakerguardd-v2-seat.service
       grep -qx "ExecStartPost=$lx/speakerguardd-provision activate --graph-unit speakerguardd-v2-graph.service" $sd/speakerguardd-v2-selfcheck.service
       grep -qx "ExecStart=$lx/speakerguardd-provision sleep --unit speakerguardd-v2.service" $sd/speakerguardd-v2-sleep.service
+      # The switch test runs after login, before the supervisor (speakerguardd#102).
+      grep -qx 'Requires=speakerguardd-v2-switchtest.service' $sd/speakerguardd-v2.service
+      grep -qx 'After=speakerguardd-v2-selfcheck.service systemd-user-sessions.service' $sd/speakerguardd-v2-switchtest.service
+      grep -qx "ExecCondition=$lx/speakerguardd-selfcheck pending" $sd/speakerguardd-v2-switchtest.service
+      grep -qx "ExecStopPost=$lx/speakerguardd-selfcheck pending --clear" $sd/speakerguardd-v2-switchtest.service
       grep -qx "ExecStop=$lx/speakerguardd-provision wake --unit speakerguardd-v2.service" $sd/speakerguardd-v2-sleep.service
-      for u in speakerguardd-v2 speakerguardd-v2-provision speakerguardd-v2-selfcheck speakerguardd-v2-seat speakerguardd-v2-sleep; do
+      # The supervisor and the sleep hooks need a qualified board (gate v2);
+      # provisioning, the seat follower and the silent self-check run first,
+      # in the gate's prepare mode, and produce the records that qualify it.
+      for u in speakerguardd-v2 speakerguardd-v2-sleep; do
         grep -qx "ExecCondition=$lx/speakerguardd-gate v2" $sd/$u.service
+      done
+      for u in speakerguardd-v2-provision speakerguardd-v2-selfcheck speakerguardd-v2-seat; do
+        grep -qx "ExecCondition=$lx/speakerguardd-gate prepare" $sd/$u.service
       done
       if grep -Eq '^(OnFailure|OnSuccess)=|speakersafetyd|=speakerguardd\.service|/usr/' \
           $sd/speakerguardd-v2* $out/lib/systemd/user/speakerguardd-v2*; then
