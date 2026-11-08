@@ -1,0 +1,77 @@
+From 83d06eac85266d4f8a5a4c7a7c97729d0b0e13bd Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Mon, 9 Nov 2026 09:11:47 +1100
+Subject: [PATCH] ASoC: apple: mca: Bound the PCM buffer size again
+
+Commit 79af0bae4d0d ("ASoC: apple: mca: Make the capture buffers
+cacheable") stopped preallocating the capture buffers, so they are now
+allocated at hw_params to the buffer's own size. The 3 MiB preallocation
+was also what bounded the capture buffer: the core sets a substream's
+buffer_bytes_max to its preallocated size, and the runtime hardware
+leaves it at SIZE_MAX. Without a preallocation the sense PCM offers
+buffers of up to 4 GiB.
+
+speakersafetyd sets no buffer size on the speaker sense PCM, so alsa-lib
+picks the largest buffer and the NONCOHERENT allocation fails:
+
+  snd_pcm_hw_params failed with error 'Out of memory (12)'
+
+speakersafetyd then panics and restarts in a loop. It never takes the
+speaker volume lock, and the speakers stay at the kernel's floor, with
+no sound on every MCA Mac it protects (seen on a J316 on
+7.3.0-26.fc45.aurora, the kernel with the legacy unlock interface).
+
+Bound the PCM buffer at 3 MiB, the playback preallocation's size and
+the limit capture had before 79af0bae4d0d. Clients that size their own
+buffer (speakerguardd, PipeWire) ask for far less and are unaffected.
+
+Fixes: 79af0bae4d0d ("ASoC: apple: mca: Make the capture buffers cacheable")
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ sound/soc/apple/mca.c | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/sound/soc/apple/mca.c b/sound/soc/apple/mca.c
+index 69abfcda7e813..18d73b50af861 100644
+--- a/sound/soc/apple/mca.c
++++ b/sound/soc/apple/mca.c
+@@ -127,6 +127,9 @@
+ 			   SNDRV_PCM_FMTBIT_S24_LE | \
+ 			   SNDRV_PCM_FMTBIT_S32_LE)
+ 
++/* Largest PCM buffer, and the playback preallocation: 3 MiB. */
++#define MCA_BUFFER_BYTES_MAX (512 * 1024 * 6)
++
+ struct mca_cluster {
+ 	int no;
+ 	__iomem void *base;
+@@ -962,7 +965,15 @@ static int mca_set_runtime_hwparams(struct snd_soc_component *component,
+ 	hw.periods_max = UINT_MAX;
+ 	hw.period_bytes_min = 256;
+ 	hw.period_bytes_max = dma_get_max_seg_size(dma_dev);
+-	hw.buffer_bytes_max = SIZE_MAX;
++	/*
++	 * The capture buffer is not preallocated (see mca_pcm_new()), so the
++	 * core does not bound it by a preallocation: bound it here, at the size
++	 * the playback preallocation (and formerly the capture one) allows. An
++	 * unbounded maximum lets a client that sets no buffer size, such as
++	 * speakersafetyd on the speaker sense PCM, ask for gigabytes and fail
++	 * hw_params with -ENOMEM.
++	 */
++	hw.buffer_bytes_max = MCA_BUFFER_BYTES_MAX;
+ 	hw.fifo_size = 16;
+ 
+ 	ret = snd_dmaengine_pcm_refine_runtime_hwparams(substream, &dma_data,
+@@ -1245,7 +1256,7 @@ static int mca_pcm_new(struct snd_soc_component *component,
+ 						   chan->device->dev, 0, SIZE_MAX);
+ 		else
+ 			snd_pcm_set_managed_buffer(substream, SNDRV_DMA_TYPE_DEV_IRAM,
+-						   chan->device->dev, 512 * 1024 * 6,
++						   chan->device->dev, MCA_BUFFER_BYTES_MAX,
+ 						   SIZE_MAX);
+ 	}
+ 
+-- 
+2.54.0
+
