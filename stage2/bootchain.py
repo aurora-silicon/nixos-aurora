@@ -320,6 +320,44 @@ class Update:
             raise Refused('unrecognized aura-try marker; preserving it')
         return fields[0].decode(), fields[1].decode('ascii')
 
+    def attempts(self):
+        return self.path('/var/lib/aurora-stage2/attempts')
+
+    def attempt(self, digest):
+        """Return the path and record of this candidate's automatic attempt.
+
+        Attempts are keyed by the candidate's SHA-256, so an aura, U-Boot,
+        m1n1.conf or DTB change gets its own trial even for the same kernel.
+        Records from 20261107-1 are named after the kernel version; they still
+        count for the candidate whose hash they contain.
+        """
+        if not re.fullmatch(r'[0-9a-f]{64}', digest):
+            raise Refused('invalid Stage 2 candidate sha256')
+        path = self.attempts() / digest
+        if path.exists():
+            return path, json.loads(path.read_text())
+        if self.attempts().is_dir():
+            for legacy in sorted(self.attempts().iterdir()):
+                if legacy.name.startswith('.') or re.fullmatch(r'[0-9a-f]{64}', legacy.name):
+                    continue
+                details = json.loads(legacy.read_text())
+                if not isinstance(details, dict):
+                    raise Refused(f'unrecognized Stage 2 attempt record {legacy}')
+                if details.get('sha256') == digest:
+                    return legacy, details
+        return path, None
+
+    def trial_running(self, current):
+        """True while this boot is a trial that can still commit.
+
+        The aurora,trial property lasts for the whole boot, but only the spent
+        marker lets commit() publish the booted candidate, and commit removes
+        it. Without a spent marker a trial boot stages like an ordinary boot.
+        An armed marker was written after this boot's commit; the ownership,
+        attempt and armed checks apply to it.
+        """
+        return bool(self.chosen('aurora,trial')) and current is not None and current[0] == 'spent'
+
     def verify_stage2(self, payload, offset):
         """Traverse the composed FDT records, including the ESP read-back."""
         board = self.board()
@@ -365,14 +403,19 @@ class Update:
     def stage_trial(self, selected, payload):
         target, candidate, receipt, marker, relative = self.trial_paths()
         current = self.marker(marker)
-        if self.chosen('aurora,trial'):
+        if self.trial_running(current):
             raise Refused('a trial is running; preserve its candidate until the next boot')
         if current and current[1] != relative:
             raise Refused('another aura-try owns the ESP marker')
-        attempt = self.path('/var/lib/aurora-stage2/attempts') / selected
-        if attempt.exists():
-            print(f'Stage 2 trial already attempted for kernel {selected}; not rearming')
+        digest = hashlib.sha256(payload).hexdigest()
+        attempt, recorded = self.attempt(digest)
+        # Only a committed candidate may be tried again, e.g. after a package
+        # revert. One that fell back or was interrupted is never rearmed.
+        if recorded is not None and recorded.get('result') != 'committed':
+            print(f'Stage 2 trial already attempted for candidate {digest} '
+                  f'(kernel {recorded.get("kernel")}); not rearming')
             return
+        attempt = self.attempts() / digest
         if current and current[0] == 'armed':
             raise Refused('a Stage 2 trial is already armed')
         offset = len(self.path(self.env.get('M1N1', '/usr/lib64/m1n1/m1n1.bin')).read_bytes())
@@ -401,7 +444,7 @@ class Update:
         os.replace(temporary, marker)
         sync_dir(marker.parent)
         self.flush_esp()
-        print(f'Stage 2 trial armed for kernel {selected} at {relative}; live image kept')
+        print(f'Stage 2 trial armed for kernel {selected} at {relative}, sha256 {digest}; live image kept')
 
     def sanity(self):
         source = subprocess.check_output(['findmnt', '-nro', 'SOURCE', '--target', '/'], text=True).strip()
@@ -456,8 +499,8 @@ class Update:
             return
         details = json.loads(receipt.read_text())
         self.validate_version(details['kernel'])
-        attempt = self.path('/var/lib/aurora-stage2/attempts') / details['kernel']
-        if json.loads(attempt.read_text()) != details or details['path'] != relative:
+        attempt, recorded = self.attempt(details['sha256'])
+        if recorded != details or details['path'] != relative:
             raise Refused('trial receipt does not match its recorded attempt')
         payload = candidate.read_bytes()
         if hashlib.sha256(payload).hexdigest() != details['sha256']:
@@ -488,6 +531,17 @@ class Update:
         sync_dir(marker.parent)
         self.flush_esp()
         print(f'aurora-stage2-commit: committed {relative}, sha256 {details["sha256"]}; backup {target.name}.prev')
+        # The marker removal above is the commit. Recording the result lets a
+        # later update try this exact candidate again; failing to record it
+        # only keeps that candidate from another automatic trial.
+        try:
+            committed = self.attempts() / details['sha256']
+            replace_file(committed, (json.dumps(dict(details, result='committed'), sort_keys=True) + '\n').encode())
+            if attempt != committed:
+                attempt.unlink()
+                sync_dir(attempt.parent)
+        except OSError as error:
+            print(f'aurora-stage2-commit: could not record the committed attempt: {error}')
 
     def apply(self):
         selected, source, own, payload = self.plan()

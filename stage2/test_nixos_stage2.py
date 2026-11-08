@@ -289,6 +289,23 @@ class NixosTrialTests(unittest.TestCase):
         self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
         self.assertEqual(self.candidate.read_bytes(), following)
 
+    def test_a_committed_trial_boot_arms_again_after_withdrawing_an_image(self):
+        self.install()
+        committed = self.payload
+        self.trial_boot()
+        self.sane()
+        self.commit()
+        self.stage2(committed + b'chosen.bootargs=quiet\n')
+        self.install()
+        self.stage2(committed)
+        self.install()  # Back to the live image: the untried one is withdrawn.
+        self.assertFalse(self.marker.exists())
+        following = self.stage2(committed + b'chosen.bootargs=splash\n')
+        self.install()  # Same trial boot, receipt gone: still an ordinary boot.
+        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+        self.assertEqual(self.candidate.read_bytes(), following)
+        self.assertEqual(self.target.read_bytes(), committed)
+
     def test_an_uncommitted_trial_boot_refuses_a_new_image(self):
         self.install()
         self.trial_boot()
