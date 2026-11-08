@@ -56,6 +56,7 @@ NEEDS = {
     'aurora-bless': ['aurora-bless'],
     'camera-denoise': ['camera-denoise'],
     'kbd-light': ['kbd-light'],
+    'xart': ['aurora-xart'],
 }
 
 

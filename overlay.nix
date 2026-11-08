@@ -3,7 +3,7 @@ let
   # True once the pinned aura has no monitor (aura#77); its build checks this
   # against the source. Such an aura moves the kernel into the CTXR window, so it
   # needs kernelCtxrExecmem.
-  auraMonitorFree = false;
+  auraMonitorFree = true;
   # True with a kernel pin whose configuration resolves CONFIG_ARM64_CTXR_EXECMEM=y
   # (aurora-silicon/linux#985), which keeps every kernel code page inside that
   # window. The kernel build checks this against its configuration.
@@ -420,8 +420,8 @@ in {
       kernelLLVM.clang-unwrapped kernelLLVM.lld kernelLLVM.llvm final.buildPackages.python3
     ];
     makeFlags = [ "RELEASE=1" "CHAINLOADING=1" "BUILTIN_LOGO=aurora" "USE_CLANG=1" ];
-    # This pin carries the v1.0.0b5 release label in archive builds.
-    env = (old.env or { }) // { AURA_VERSION_TAG = "1.0.0b5"; };
+    # This pin carries the v1.0.0b8 release label in archive builds.
+    env = (old.env or { }) // { AURA_VERSION_TAG = "1.0.0b8"; };
     postBuild = ''
       mkdir -p stage1
       cp build/aura.bin stage1/aura-raw.bin
@@ -735,6 +735,36 @@ in {
       homepage = "https://github.com/aurora-silicon/kbd-light";
       license = final.lib.licenses.mit;
       mainProgram = "aurora-kbd-light";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
+  # Inspects the Linux side of the SEP and xART state and starts Touch ID over
+  # (aurora-xart reset-touchid). modules/sep.nix installs it.
+  aurora-xart = final.stdenvNoCC.mkDerivation {
+    pname = "aurora-xart";
+    version = pins.aurora-xart.version;
+    src = source "aurora-xart";
+    nativeBuildInputs = [ final.python3 ];
+    dontBuild = true;
+    doCheck = true;
+    checkPhase = ''
+      runHook preCheck
+      make check PYTHON=${final.python3.interpreter}
+      runHook postCheck
+    '';
+    installPhase = ''
+      runHook preInstall
+      make install DESTDIR=$out PREFIX=
+      substituteInPlace $out/bin/aurora-xart \
+        --replace-fail "#!/usr/bin/python3 -I" "#!${final.python3.interpreter} -I"
+      runHook postInstall
+    '';
+    passthru.commit = pins.aurora-xart.commit;
+    meta = {
+      description = "Inspect and manage the Linux side of the Secure Enclave and xART state";
+      homepage = "https://github.com/aurora-silicon/aurora-xart";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-xart";
       platforms = [ "aarch64-linux" ];
     };
   };
