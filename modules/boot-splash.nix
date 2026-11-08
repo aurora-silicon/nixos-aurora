@@ -9,6 +9,11 @@
 #   Plymouth starts on appledrm instead of waiting for the real root.
 # * Plymouth starts once udevd runs instead of after the whole coldplug has
 #   been queued (overlay.nix carries the unit patch).
+# * A serial console does not force Plymouth's text view (fedora-aurora #155).
+#   Without console=, the kernel also takes the device tree's stdout-path as a
+#   console (the Neo's DockChannel UART), and Plymouth then shows its details
+#   view on every display, the disk password prompt included. The kernel keeps
+#   the serial console.
 #
 # Every setting is a default: a system configuration's own choice wins.
 { config, lib, pkgs, ... }:
@@ -44,8 +49,10 @@ in {
   boot.loader.grub.timeoutStyle = lib.mkDefault "hidden";
   boot.loader.timeout = lib.mkDefault 1;
 
+  boot.kernelParams = lib.mkIf config.boot.plymouth.enable [ "plymouth.ignore-serial-consoles" ];
+
   boot.initrd.availableKernelModules = [ "appledrm" "mux-apple-display-crossbar" ];
-  boot.initrd.systemd.services.aurora-early-kms = lib.mkIf (config.boot.initrd.systemd.enable && config.boot.plymouth.enable) {
+  boot.initrd.systemd.services.aurora-early-kms = lib.mkIf config.boot.plymouth.enable {
     description = "Coldplug the Apple display before the other devices";
     unitConfig.DefaultDependencies = false;
     wantedBy = [ "sysinit.target" ];
@@ -55,5 +62,5 @@ in {
     serviceConfig.Type = "oneshot";
     serviceConfig.ExecStart = earlyKms;
   };
-  boot.initrd.systemd.storePaths = lib.mkIf (config.boot.initrd.systemd.enable && config.boot.plymouth.enable) [ earlyKms ];
+  boot.initrd.systemd.storePaths = lib.mkIf config.boot.plymouth.enable [ earlyKms ];
 }

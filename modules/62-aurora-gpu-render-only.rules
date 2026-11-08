@@ -1,0 +1,6 @@
+# The Apple GPU driver has no display engine: its card node only renders, and
+# the display controller is a separate card (apple-drm). Mutter tries to drive
+# every card as a display, fails on this one, and logs "Failed to open gpu" on
+# every login. Tell it to leave the render-only card alone; Mesa still renders
+# on it through the display card.
+SUBSYSTEM=="drm", KERNEL=="card[0-9]*", DRIVERS=="aurora", TAG+="mutter-device-ignore"

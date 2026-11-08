@@ -39,7 +39,7 @@ jobs:
         run: |
           nix flake check --no-build
           nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
-            .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.fedora-parity .#checks.aarch64-linux.ane-packaging \
+            .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.stage2-trial .#checks.aarch64-linux.fedora-parity .#checks.aarch64-linux.ane-packaging \
             .#checks.aarch64-linux.userpages
       - name: Inspect KDE graphical login configuration
         run: |
@@ -52,6 +52,8 @@ jobs:
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.requires
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.unitConfig.ConditionPathExists
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.blacklistedKernelModules
+          grep -Fx 'options apple_sep xart_writes=1 provision_keybag=1' \
+            "$(nix eval --raw '.#nixosConfigurations.aurora-kde.config.environment.etc."modprobe.d/aurora-sep-defaults.conf".source')"
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.initrd.availableKernelModules
   fex-overlay:
     runs-on: ubuntu-24.04-arm

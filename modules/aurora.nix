@@ -3,7 +3,7 @@
   imports = [ ./ane.nix ./firmware.nix ./platform.nix ./audio.nix ./system-fixes.nix
     ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix ./dbus.nix
     ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix
-    ./userpages.nix ./boot-splash.nix ];
+    ./userpages.nix ./boot-splash.nix ./speakerguardd-v2.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";
@@ -20,6 +20,10 @@
   config = {
     hardware.asahi.enable = true;
     nixpkgs.hostPlatform = "aarch64-linux";
+    # Keep Steam's GTK 2 runtime available with a warning, as in flake.nix.
+    # Remove this exception when Steam no longer needs GTK 2.
+    # https://github.com/NixOS/nixpkgs/issues/410814
+    nixpkgs.config.problems.handlers."gtk+".broken = lib.mkDefault "warn";
     nix.settings.extra-substituters = [ "https://aurorasilicon.org/nixos-aurora/cache" ];
     nix.settings.extra-trusted-public-keys = [ (lib.removeSuffix "\n" (builtins.readFile ../keys/cache.pub)) ];
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
@@ -29,6 +33,13 @@
     boot.loader.grub.efiSupport = true;
     boot.loader.grub.efiInstallAsRemovable = true;
     boot.loader.grub.device = "nodev";
+    # Every generation, the image's included, records its kernel's DT ABI
+    # generation (kernel/dtb-abi), so Stage 2 updates know which device trees
+    # each configuration GRUB lists can boot (modules/installed.nix). A kernel
+    # that declares none is generation 0.
+    system.systemBuilderCommands = ''
+      echo ${toString (config.boot.kernelPackages.kernel.auroraDtbAbi or 0)} > $out/aurora-dtb-abi
+    '';
     boot.loader.efi.canTouchEfiVariables = false;
     # Keep the Apple/USB/NVMe initrd set explicit. Native module additions
     # (including audio, sensors and systemd) still merge into this list.
@@ -62,16 +73,39 @@
     # Quiet by default: failures still reach the console, and systemd shows
     # status only when a unit fails or stalls.
     boot.consoleLogLevel = lib.mkDefault 3;
-    boot.initrd.verbose = lib.mkDefault false;
     boot.kernelParams = [ "quiet" "rd.udev.log_level=3" "udev.log_level=3" "systemd.show_status=auto" ];
     # Desktop images boot to a splash; first boot asks for the disk password
-    # on it, as every later boot does. The spinner theme needs no ACPI BGRT
-    # firmware logo. Plymouth runs in the systemd initrd.
+    # on it, as every later boot does. The Aurora theme draws the logo aura
+    # shows, at the same size and place, with the spinner below it and
+    # boot.plymouth.logo (the NixOS logo) at the bottom, so the logo stays
+    # still from power-on to the greeter. Plymouth runs in the systemd initrd.
     boot.plymouth.enable = lib.mkDefault (config.aurora.desktop != "minimal");
     boot.plymouth.package = lib.mkDefault pkgs.plymouth;
-    boot.plymouth.theme = lib.mkDefault "spinner";
+    boot.plymouth.themePackages = [ pkgs.plymouth-theme-aurora ];
+    boot.plymouth.theme = lib.mkDefault "aurora";
+    # The theme draws in device pixels, so the logo matches aura's to the
+    # pixel; Plymouth's own 2x scale on Retina panels would double it.
+    boot.plymouth.extraConfig = lib.mkIf (config.boot.plymouth.theme == "aurora") "DeviceScale=1";
+    # Each boot supplies the live DT geometry, including image builds and
+    # rebuilds done on another machine. Keep the store and /etc immutable.
+    boot.initrd.systemd.services.plymouth-start.preStart = lib.mkIf
+      (config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora") (lib.mkAfter ''
+        PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
+          ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
+          ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
+      '');
+    systemd.services.plymouth-start.preStart = lib.mkIf
+      (config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora") ''
+        PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
+          ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
+          ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
+      '';
     hardware.graphics.enable = true;
-    hardware.graphics.extraPackages = [ pkgs.aurora-rusticl pkgs.aurora-lavapipe ];
+    hardware.graphics.extraPackages = [
+      pkgs.aurora-rusticl
+      pkgs.aurora-lavapipe
+      pkgs.libvaV4l2RequestAvd
+    ];
     services.desktopManager.plasma6.enable = config.aurora.desktop == "kde";
     # Plasma Login Manager, as on Fedora 44 and Aurora Alarm: its greeter runs
     # on KWin Wayland at the display's scale.

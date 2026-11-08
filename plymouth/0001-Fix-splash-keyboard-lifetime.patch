@@ -1,0 +1,118 @@
+From: Ryan Murray <ryan@aurorasilicon.org>
+Subject: [PATCH] Keep splash keyboard references valid across renderer removal
+
+Notify consumers before freeing a renderer keyboard. Update the script
+library and input handler when its keyboard changes, and allow caps-lock
+queries while no keyboard is attached. Keep the selected keyboard across
+hide/show, but clear the library reference when the animation stops.
+
+The device manager otherwise leaves both the script plugin and its
+Plymouth library pointing at a freed keyboard. Hiding the splash then
+removes an input handler from freed memory.
+
+--- a/src/libply-splash-core/ply-device-manager.c
++++ b/src/libply-splash-core/ply-device-manager.c
+@@ -166,6 +166,8 @@
+                 keyboard_renderer = ply_keyboard_get_renderer (keyboard);
+ 
+                 if (keyboard_renderer == renderer) {
++                        if (manager->keyboard_removed_handler != NULL)
++                                manager->keyboard_removed_handler (manager->event_handler_data, keyboard);
+                         ply_keyboard_free (keyboard);
+                         ply_list_remove_node (manager->keyboards, node);
+                 }
+--- a/src/libply-splash-core/ply-boot-splash.c
++++ b/src/libply-splash-core/ply-boot-splash.c
+@@ -125,6 +125,7 @@
+                 return;
+ 
+         splash->plugin_interface->unset_keyboard (splash->plugin, splash->keyboard);
++        splash->keyboard = NULL;
+ }
+ 
+ void
+--- a/src/plugins/splash/script/plugin.c
++++ b/src/plugins/splash/script/plugin.c
+@@ -325,7 +325,6 @@
+                 ply_keyboard_remove_input_handler (plugin->keyboard,
+                                                    (ply_keyboard_input_handler_t)
+                                                    on_keyboard_input);
+-                plugin->keyboard = NULL;
+         }
+ 
+         script_state_destroy (plugin->script_state);
+@@ -333,6 +332,7 @@
+         plugin->script_sprite_lib = NULL;
+         script_lib_image_destroy (plugin->script_image_lib);
+         script_lib_plymouth_destroy (plugin->script_plymouth_lib);
++        plugin->script_plymouth_lib = NULL;
+         script_lib_math_destroy (plugin->script_math_lib);
+         script_lib_string_destroy (plugin->script_string_lib);
+ }
+@@ -377,14 +377,31 @@
+ set_keyboard (ply_boot_splash_plugin_t *plugin,
+               ply_keyboard_t           *keyboard)
+ {
++        if (plugin->keyboard == keyboard)
++                return;
++
++        if (plugin->script_plymouth_lib != NULL && plugin->keyboard != NULL)
++                ply_keyboard_remove_input_handler (plugin->keyboard,
++                                                   (ply_keyboard_input_handler_t)
++                                                   on_keyboard_input);
++
+         plugin->keyboard = keyboard;
++
++        if (plugin->script_plymouth_lib != NULL) {
++                plugin->script_plymouth_lib->keyboard = keyboard;
++                if (keyboard != NULL)
++                        ply_keyboard_add_input_handler (keyboard,
++                                                        (ply_keyboard_input_handler_t)
++                                                        on_keyboard_input, plugin);
++        }
+ }
+ 
+ static void
+ unset_keyboard (ply_boot_splash_plugin_t *plugin,
+                 ply_keyboard_t           *keyboard)
+ {
+-        plugin->keyboard = NULL;
++        if (plugin->keyboard == keyboard)
++                set_keyboard (plugin, NULL);
+ }
+ 
+ static void
+--- a/src/plugins/splash/script/script-lib-plymouth.c
++++ b/src/plugins/splash/script/script-lib-plymouth.c
+@@ -102,7 +102,7 @@
+ 
+         bool is_on = false;
+ 
+-        if (ply_keyboard_get_capslock_state != NULL) {
++        if (data->keyboard != NULL && ply_keyboard_get_capslock_state != NULL) {
+                 is_on = ply_keyboard_get_capslock_state (data->keyboard);
+         }
+ 
+--- a/src/main.c
++++ b/src/main.c
+@@ -1104,8 +1104,19 @@
+                                            (ply_keyboard_enter_handler_t)
+                                            on_enter);
+ 
+-        if (state->boot_splash != NULL)
++        if (state->boot_splash != NULL) {
++                ply_list_node_t *node;
++
+                 ply_boot_splash_unset_keyboard (state->boot_splash);
++                for (node = ply_list_get_first_node (ply_device_manager_get_keyboards (state->device_manager));
++                     node != NULL;
++                     node = ply_list_get_next_node (ply_device_manager_get_keyboards (state->device_manager), node)) {
++                        ply_keyboard_t *remaining_keyboard = ply_list_node_get_data (node);
++
++                        if (remaining_keyboard != keyboard)
++                                ply_boot_splash_set_keyboard (state->boot_splash, remaining_keyboard);
++                }
++        }
+ }
+ 
+ static void

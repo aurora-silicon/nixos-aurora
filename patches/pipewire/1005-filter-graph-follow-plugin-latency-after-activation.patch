@@ -1,0 +1,616 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Sun, 25 Oct 2026 18:11:31 +1100
+Subject: [PATCH 1005/1005] filter-graph: follow plugin latency after
+ activation
+
+The graph latency is added up once, in impl_activate(), from each node's
+latency notify port.  LV2 and LADSPA plugins only write that port from
+run(), so at that point it holds 0 on the first activation and the
+previous instance's value on every later one.  Nothing reads it again,
+so filter-chain keeps publishing a ProcessLatency that is 0 or stale for
+as long as the graph runs, and a client that schedules audio by the
+stream delay (shairport-sync through pipewire-alsa, for one) plays early
+or late by the difference.
+
+Check the latency ports after each process cycle.  When one changes,
+signal a main-loop event, add the graph latency up again there and emit
+the graph info only when the result moved.  The check is a few float
+compares per cycle and the signal is an eventfd write, so the process
+path stays real-time safe.  Without LoopUtils nothing changes.
+
+Add a test with a LADSPA plugin that reports 0, then 64 after its first
+run, then 128.  The published latency has to follow it, including the
+stale value after a new activation, with exactly one info per change and
+no event sources left behind by activate and deactivate cycles.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ spa/plugins/filter-graph/filter-graph.c | 205 +++++++++++++++++-------
+ test/meson.build                        |  16 ++
+ test/test-filter-graph-latency-plugin.c |  77 +++++++++
+ test/test-filter-graph-latency.c        | 183 +++++++++++++++++++++
+ 4 files changed, 421 insertions(+), 60 deletions(-)
+ create mode 100644 test/test-filter-graph-latency-plugin.c
+ create mode 100644 test/test-filter-graph-latency.c
+
+diff --git a/spa/plugins/filter-graph/filter-graph.c b/spa/plugins/filter-graph/filter-graph.c
+index 17f9f89..f111618 100644
+--- a/spa/plugins/filter-graph/filter-graph.c
++++ b/spa/plugins/filter-graph/filter-graph.c
+@@ -20,6 +20,7 @@
+ #include <spa/utils/json.h>
+ #include <spa/support/cpu.h>
+ #include <spa/support/plugin-loader.h>
++#include <spa/support/loop.h>
+ #include <spa/param/latency-utils.h>
+ #include <spa/param/tag-utils.h>
+ #include <spa/param/audio/raw.h>
+@@ -120,6 +121,8 @@ struct node {
+ 
+ 	unsigned int n_deps;
+ 	uint32_t latency_index;
++	/* value of the latency notify port last seen by impl_process() */
++	float latency_seen;
+ 
+ 	float min_latency;
+ 	float max_latency;
+@@ -221,6 +224,13 @@ struct impl {
+ 	struct spa_cpu *cpu;
+ 	struct spa_fga_dsp *dsp;
+ 	struct spa_plugin_loader *loader;
++	struct spa_loop_utils *loop_utils;
++
++	/* Plugins publish their latency on a notify port from run(), so the value
++	 * read at activation is 0 or left over from the previous activation.
++	 * impl_process() signals this main-loop event when a latency port changes,
++	 * and the graph latency is computed again there. */
++	struct spa_source *latency_event;
+ 
+ 	uint64_t info_all;
+ 	struct spa_filter_graph_info info;
+@@ -349,6 +359,23 @@ static int impl_process(void *object,
+ 		struct graph_hndl *hndl = &graph->hndl[i];
+ 		hndl->desc->run(*hndl->hndl, n_samples);
+ 	}
++	if (impl->latency_event != NULL) {
++		struct node *node;
++		bool changed = false;
++
++		spa_list_for_each(node, &graph->node_list, link) {
++			float latency;
++			if (node->latency_index == SPA_IDX_INVALID)
++				continue;
++			latency = node->notify_port[node->latency_index].control_data[0];
++			if (latency != node->latency_seen) {
++				node->latency_seen = latency;
++				changed = true;
++			}
++		}
++		if (changed)
++			spa_loop_utils_signal_event(impl->loop_utils, impl->latency_event);
++	}
+ 	return 0;
+ }
+ 
+@@ -1547,6 +1574,12 @@ static int impl_deactivate(void *object)
+ 		return 0;
+ 
+ 	graph->activated = false;
++	/* hosts stop calling process() before they deactivate (the plugin
++	 * instances go away here too), so nothing can signal the event now */
++	if (impl->latency_event != NULL) {
++		spa_loop_utils_destroy_source(impl->loop_utils, impl->latency_event);
++		impl->latency_event = NULL;
++	}
+ 	spa_list_for_each(node, &graph->node_list, link)
+ 		node_cleanup(node);
+ 	return 0;
+@@ -1582,6 +1615,107 @@ static struct node *sort_next_node(struct graph *graph)
+ 	return NULL;
+ }
+ 
++static bool graph_has_latency_ports(struct graph *graph)
++{
++	struct node *node;
++	spa_list_for_each(node, &graph->node_list, link)
++		if (node->latency_index != SPA_IDX_INVALID)
++			return true;
++	return false;
++}
++
++/* Add up the latency each node reports on its latency notify port, in graph
++ * order. Returns true when the graph latency changed and sets the PROPS change
++ * mask so the next emit_filter_graph_info() publishes it. With log_all every
++ * node is logged, otherwise only a change is. */
++static bool graph_update_latency(struct impl *impl, bool log_all)
++{
++	struct graph *graph = &impl->graph;
++	struct node *node;
++	struct port *port;
++	struct link *link;
++	float min_latency, max_latency;
++	uint32_t i;
++	bool changed;
++
++	sort_reset(graph);
++	while ((node = sort_next_node(graph)) != NULL) {
++		min_latency = FLT_MAX;
++		max_latency = 0.0f;
++
++		for (i = 0; i < node->desc->n_input; i++) {
++			spa_list_for_each(link, &node->input_port[i].link_list, input_link) {
++				min_latency = fminf(min_latency, link->output->node->min_latency);
++				max_latency = fmaxf(max_latency, link->output->node->max_latency);
++			}
++		}
++		min_latency = min_latency == FLT_MAX ? 0.0f : min_latency;
++
++		if (node->latency_index != SPA_IDX_INVALID) {
++			port = &node->notify_port[node->latency_index];
++			node->latency_seen = port->control_data[0];
++			min_latency += node->latency_seen;
++			max_latency += node->latency_seen;
++
++		}
++		node->min_latency = min_latency;
++		node->max_latency = max_latency;
++		if (log_all)
++			spa_log_info(impl->log, "%s latency:%f-%f", node->name, min_latency, max_latency);
++	}
++	min_latency = FLT_MAX;
++	max_latency = 0.0f;
++	for (i = 0; i < graph->n_outputs; i++) {
++		struct graph_port *port = &graph->output[i];
++		/* ports with no descriptor are ignored */
++		if (port->desc == NULL)
++			continue;
++		max_latency = fmaxf(max_latency, port->node->max_latency);
++		min_latency = fminf(min_latency, port->node->min_latency);
++	}
++	min_latency = min_latency == FLT_MAX ? 0.0f : min_latency;
++
++	changed = graph->min_latency != min_latency || graph->max_latency != max_latency;
++	if (!log_all && !changed)
++		return false;
++
++	spa_log_info(impl->log, "graph latency min:%f max:%f", min_latency, max_latency);
++	if (min_latency != max_latency) {
++		spa_log_warn(impl->log, "graph has unaligned latency min:%f max:%f, "
++				"consider adding delays or tweak node latency to "
++				"align the signals", min_latency, max_latency);
++		for (i = 0; i < graph->n_outputs; i++) {
++			struct graph_port *port = &graph->output[i];
++			/* port with no descriptor are ignored */
++			if (port->desc == NULL)
++				continue;
++			if (min_latency != port->node->min_latency ||
++			    max_latency != port->node->max_latency)
++				spa_log_warn(impl->log, "output port %d from %s min:%f max:%f",
++						i, port->node->name,
++						port->node->min_latency, port->node->max_latency);
++		}
++
++	}
++	if (changed) {
++		graph->min_latency = min_latency;
++		graph->max_latency = max_latency;
++		impl->info.change_mask |= SPA_FILTER_GRAPH_CHANGE_MASK_PROPS;
++	}
++	return changed;
++}
++
++/* Main loop: impl_process() saw a plugin's latency port change. */
++static void on_latency_changed(void *data, uint64_t count)
++{
++	struct impl *impl = data;
++
++	if (!impl->graph.activated)
++		return;
++	if (graph_update_latency(impl, false))
++		emit_filter_graph_info(impl, false);
++}
++
+ static int setup_graph(struct graph *graph);
+ 
+ static int impl_activate(void *object, const struct spa_dict *props)
+@@ -1596,7 +1730,7 @@ static int impl_activate(void *object, const struct spa_dict *props)
+ 	const struct spa_fga_plugin *p;
+ 	uint32_t i, j, max_samples = impl->quantum_limit, n_ports;
+ 	int res;
+-	float *sd, *dd, *data, min_latency, max_latency;
++	float *sd, *dd, *data;
+ 	const char *rate, *str;
+ 
+ 	if (graph->activated)
+@@ -1726,66 +1860,12 @@ static int impl_activate(void *object, const struct spa_dict *props)
+ 				d->control_changed(node->hndl[i]);
+ 		}
+ 	}
+-	/* calculate latency */
+-	sort_reset(graph);
+-	while ((node = sort_next_node(graph)) != NULL) {
+-		min_latency = FLT_MAX;
+-		max_latency = 0.0f;
+-
+-		for (i = 0; i < node->desc->n_input; i++) {
+-			spa_list_for_each(link, &node->input_port[i].link_list, input_link) {
+-				min_latency = fminf(min_latency, link->output->node->min_latency);
+-				max_latency = fmaxf(max_latency, link->output->node->max_latency);
+-			}
+-		}
+-		min_latency = min_latency == FLT_MAX ? 0.0f : min_latency;
+-
+-		if (node->latency_index != SPA_IDX_INVALID) {
+-			port = &node->notify_port[node->latency_index];
+-			min_latency += port->control_data[0];
+-			max_latency += port->control_data[0];
+-
+-		}
+-		node->min_latency = min_latency;
+-		node->max_latency = max_latency;
+-		spa_log_info(impl->log, "%s latency:%f-%f", node->name, min_latency, max_latency);
+-	}
+-	min_latency = FLT_MAX;
+-	max_latency = 0.0f;
+-	for (i = 0; i < graph->n_outputs; i++) {
+-		struct graph_port *port = &graph->output[i];
+-		/* ports with no descriptor are ignored */
+-		if (port->desc == NULL)
+-			continue;
+-		max_latency = fmaxf(max_latency, port->node->max_latency);
+-		min_latency = fminf(min_latency, port->node->min_latency);
+-	}
+-	min_latency = min_latency == FLT_MAX ? 0.0f : min_latency;
+-
+-	spa_log_info(impl->log, "graph latency min:%f max:%f", min_latency, max_latency);
+-	if (min_latency != max_latency) {
+-		spa_log_warn(impl->log, "graph has unaligned latency min:%f max:%f, "
+-				"consider adding delays or tweak node latency to "
+-				"align the signals", min_latency, max_latency);
+-		for (i = 0; i < graph->n_outputs; i++) {
+-			struct graph_port *port = &graph->output[i];
+-			/* port with no descriptor are ignored */
+-			if (port->desc == NULL)
+-				continue;
+-			if (min_latency != port->node->min_latency ||
+-			    max_latency != port->node->max_latency)
+-				spa_log_warn(impl->log, "output port %d from %s min:%f max:%f",
+-						i, port->node->name,
+-						port->node->min_latency, port->node->max_latency);
+-		}
+-
+-	}
+-	if (graph->min_latency != min_latency || graph->max_latency != max_latency) {
+-		graph->min_latency = min_latency;
+-		graph->max_latency = max_latency;
+-		impl->info.change_mask |= SPA_FILTER_GRAPH_CHANGE_MASK_PROPS;
+-	}
++	graph_update_latency(impl, true);
+ 	emit_filter_graph_info(impl, false);
++	if (impl->loop_utils != NULL && impl->latency_event == NULL &&
++	    graph_has_latency_ports(graph))
++		impl->latency_event = spa_loop_utils_add_event(impl->loop_utils,
++				on_latency_changed, impl);
+ 	spa_filter_graph_emit_props_changed(&impl->hooks, SPA_DIRECTION_INPUT);
+ 	return 0;
+ error:
+@@ -2365,6 +2445,9 @@ static int impl_clear(struct spa_handle *handle)
+ {
+ 	struct impl *impl = (struct impl *) handle;
+ 
++	if (impl->latency_event != NULL)
++		spa_loop_utils_destroy_source(impl->loop_utils, impl->latency_event);
++
+ 	graph_free(&impl->graph);
+ 
+ 	if (impl->dsp)
+@@ -2409,6 +2492,8 @@ impl_init(const struct spa_handle_factory *factory,
+ 
+ 	impl->loader = spa_support_find(support, n_support, SPA_TYPE_INTERFACE_PluginLoader);
+ 
++	impl->loop_utils = spa_support_find(support, n_support, SPA_TYPE_INTERFACE_LoopUtils);
++
+ 	spa_list_init(&impl->plugin_list);
+ 
+ 	for (i = 0; info && i < info->n_items; i++) {
+diff --git a/test/meson.build b/test/meson.build
+index 5e38db3..625240c 100644
+--- a/test/meson.build
++++ b/test/meson.build
+@@ -99,6 +99,22 @@ test('test-context',
+                             pipewire_module_session_manager])
+ )
+ 
++latency_step_plugin = shared_module('test-filter-graph-latency-plugin',
++    'test-filter-graph-latency-plugin.c',
++    include_directories: [configinc, include_directories('../spa/plugins/filter-graph')],
++    name_prefix: '',
++    install: false)
++
++test('test-filter-graph-latency',
++    executable('test-filter-graph-latency',
++               'test-filter-graph-latency.c',
++               include_directories: pwtest_inc,
++               dependencies: [spa_dep],
++               c_args: ['-DLATENCY_STEP_PLUGIN="@0@"'.format(latency_step_plugin.full_path())],
++               link_with: [pwtest_lib]),
++    depends: latency_step_plugin
++)
++
+ test('test-support',
+     executable('test-support',
+                'test-support.c',
+diff --git a/test/test-filter-graph-latency-plugin.c b/test/test-filter-graph-latency-plugin.c
+new file mode 100644
+index 0000000..2f8c981
+--- /dev/null
++++ b/test/test-filter-graph-latency-plugin.c
+@@ -0,0 +1,77 @@
++/* PipeWire */
++/* SPDX-FileCopyrightText: Copyright © 2026 Aurora Silicon */
++/* SPDX-License-Identifier: MIT */
++
++/* A LADSPA plugin for test-filter-graph-latency. Like real plugins (LSP, for
++ * example) it only writes its "latency" output port from run(): it reports 0
++ * until it has run, 64 frames after its first run and 128 after that. */
++
++#include <stdlib.h>
++#include <string.h>
++
++#include "ladspa.h"
++
++struct step {
++	LADSPA_Data *in, *out, *latency;
++	unsigned long runs;
++};
++
++static LADSPA_Handle step_instantiate(const LADSPA_Descriptor *d, unsigned long rate)
++{
++	return calloc(1, sizeof(struct step));
++}
++
++static void step_connect(LADSPA_Handle h, unsigned long port, LADSPA_Data *data)
++{
++	struct step *s = h;
++	switch (port) {
++	case 0: s->in = data; break;
++	case 1: s->out = data; break;
++	case 2: s->latency = data; break;
++	}
++}
++
++static void step_run(LADSPA_Handle h, unsigned long n_samples)
++{
++	struct step *s = h;
++	if (s->in && s->out)
++		memcpy(s->out, s->in, n_samples * sizeof(LADSPA_Data));
++	s->runs++;
++	if (s->latency)
++		*s->latency = s->runs == 1 ? 64.0f : 128.0f;
++}
++
++static void step_cleanup(LADSPA_Handle h)
++{
++	free(h);
++}
++
++static const LADSPA_PortDescriptor step_port_desc[] = {
++	LADSPA_PORT_INPUT | LADSPA_PORT_AUDIO,
++	LADSPA_PORT_OUTPUT | LADSPA_PORT_AUDIO,
++	LADSPA_PORT_OUTPUT | LADSPA_PORT_CONTROL,
++};
++static const char * const step_port_names[] = { "In", "Out", "latency" };
++static const LADSPA_PortRangeHint step_port_hints[] = { { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 } };
++
++static const LADSPA_Descriptor step_desc = {
++	.UniqueID = 0x7e57,
++	.Label = "latency_step",
++	.Name = "Latency that changes after the first run",
++	.Maker = "PipeWire test",
++	.Copyright = "MIT",
++	.PortCount = 3,
++	.PortDescriptors = step_port_desc,
++	.PortNames = step_port_names,
++	.PortRangeHints = step_port_hints,
++	.instantiate = step_instantiate,
++	.connect_port = step_connect,
++	.run = step_run,
++	.cleanup = step_cleanup,
++};
++
++__attribute__((visibility("default")))
++const LADSPA_Descriptor *ladspa_descriptor(unsigned long index)
++{
++	return index == 0 ? &step_desc : NULL;
++}
+diff --git a/test/test-filter-graph-latency.c b/test/test-filter-graph-latency.c
+new file mode 100644
+index 0000000..0b2b44b
+--- /dev/null
++++ b/test/test-filter-graph-latency.c
+@@ -0,0 +1,183 @@
++/* PipeWire */
++/* SPDX-FileCopyrightText: Copyright © 2026 Aurora Silicon */
++/* SPDX-License-Identifier: MIT */
++
++/* The filter-graph must keep the published graph latency in step with what its
++ * plugins report. Plugins write their latency port from run(), so the value at
++ * activation is 0; once the plugin has run, the graph latency has to follow,
++ * and nothing should be emitted while it stays the same. */
++
++#include <stdlib.h>
++#include <time.h>
++#include <dirent.h>
++
++#include "pwtest.h"
++
++#include <pipewire/pipewire.h>
++#include <spa/filter-graph/filter-graph.h>
++#include <spa/param/audio/raw.h>
++#include <spa/utils/dict.h>
++#include <spa/utils/string.h>
++
++struct data {
++	int n_info;
++	int n_latency;
++	double latency;
++};
++
++static void graph_info(void *object, const struct spa_filter_graph_info *info)
++{
++	struct data *d = object;
++	uint32_t i;
++
++	d->n_info++;
++	for (i = 0; info->props && i < info->props->n_items; i++) {
++		if (spa_streq(info->props->items[i].key, "latency")) {
++			d->latency = atof(info->props->items[i].value);
++			d->n_latency++;
++		}
++	}
++}
++
++static const struct spa_filter_graph_events graph_events = {
++	SPA_VERSION_FILTER_GRAPH_EVENTS,
++	.info = graph_info,
++};
++
++static void run_loop(struct pw_loop *loop, int msec)
++{
++	struct timespec start, now;
++	clock_gettime(CLOCK_MONOTONIC, &start);
++	do {
++		pw_loop_iterate(loop, 50);
++		clock_gettime(CLOCK_MONOTONIC, &now);
++	} while ((now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000 < msec);
++}
++
++static int count_fds(void)
++{
++	DIR *dir = opendir("/proc/self/fd");
++	struct dirent *e;
++	int n = 0;
++
++	pwtest_ptr_notnull(dir);
++	while ((e = readdir(dir)) != NULL)
++		if (e->d_name[0] != '.')
++			n++;
++	closedir(dir);
++	return n;
++}
++
++static void process(struct spa_filter_graph *graph, uint32_t n_samples)
++{
++	static float in[256], out[256];
++	const void *ins[1] = { in };
++	void *outs[1] = { out };
++	pwtest_int_eq(spa_filter_graph_process(graph, ins, outs, n_samples), 0);
++}
++
++PWTEST(filter_graph_latency_follows_plugin)
++{
++	struct pw_main_loop *ml;
++	struct pw_loop *loop;
++	struct pw_context *context;
++	struct pw_properties *props;
++	struct spa_handle *handle;
++	struct spa_filter_graph *graph = NULL;
++	struct spa_hook listener;
++	struct data d = { 0 };
++	int n;
++
++	pw_init(0, NULL);
++	ml = pw_main_loop_new(NULL);
++	pwtest_ptr_notnull(ml);
++	loop = pw_main_loop_get_loop(ml);
++	context = pw_context_new(loop, pw_properties_new(PW_KEY_CONFIG_NAME, "null", NULL), 0);
++	pwtest_ptr_notnull(context);
++
++	props = pw_properties_new(
++			SPA_KEY_LIBRARY_NAME, "filter-graph/libspa-filter-graph",
++			"clock.quantum-limit", "256",
++			"filter-graph.n_inputs", "1",
++			"filter-graph.n_outputs", "1",
++			NULL);
++	pw_properties_set(props, "filter.graph",
++			"{ nodes = [ { type = ladspa name = step label = latency_step "
++			"plugin = \"" LATENCY_STEP_PLUGIN "\" } ] }");
++	handle = pw_context_load_spa_handle(context, "filter.graph", &props->dict);
++	pw_properties_free(props);
++	pwtest_ptr_notnull(handle);
++	pwtest_neg_errno_ok(spa_handle_get_interface(handle,
++				SPA_TYPE_INTERFACE_FilterGraph, (void **)&graph));
++	pwtest_ptr_notnull(graph);
++
++	spa_filter_graph_add_listener(graph, &listener, &graph_events, &d);
++
++	props = pw_properties_new(SPA_KEY_AUDIO_RATE, "48000", NULL);
++	pwtest_neg_errno_ok(spa_filter_graph_activate(graph, &props->dict));
++	pw_properties_free(props);
++
++	/* the plugin has not run yet: nothing to report */
++	run_loop(loop, 300);
++	pwtest_double_eq(d.latency, 0.0);
++
++	/* its first run sets 64 frames, which the graph must now publish */
++	process(graph, 256);
++	run_loop(loop, 300);
++	pwtest_double_eq(d.latency, 64.0);
++
++	/* the second run moves it to 128: exactly one new info */
++	n = d.n_latency;
++	process(graph, 256);
++	run_loop(loop, 300);
++	pwtest_double_eq(d.latency, 128.0);
++	pwtest_int_eq(d.n_latency, n + 1);
++
++	n = d.n_latency;
++	process(graph, 256);
++	run_loop(loop, 300);
++	pwtest_double_eq(d.latency, 128.0);
++	pwtest_int_eq(d.n_latency, n);
++
++	/* a new activation makes new plugin instances. The port still holds 128
++	 * from the old instance until the new one runs and writes 64: the graph
++	 * must follow it (a stale value is what made shairport-sync play early). */
++	pwtest_neg_errno_ok(spa_filter_graph_deactivate(graph));
++	props = pw_properties_new(SPA_KEY_AUDIO_RATE, "48000", NULL);
++	pwtest_neg_errno_ok(spa_filter_graph_activate(graph, &props->dict));
++	pw_properties_free(props);
++	run_loop(loop, 300);
++	pwtest_double_eq(d.latency, 128.0);
++	process(graph, 256);
++	run_loop(loop, 300);
++	pwtest_double_eq(d.latency, 64.0);
++
++	/* deactivate/activate cycles must not leave event sources behind */
++	pwtest_neg_errno_ok(spa_filter_graph_deactivate(graph));
++	n = count_fds();
++	for (int i = 0; i < 5; i++) {
++		props = pw_properties_new(SPA_KEY_AUDIO_RATE, "48000", NULL);
++		pwtest_neg_errno_ok(spa_filter_graph_activate(graph, &props->dict));
++		pw_properties_free(props);
++		process(graph, 256);
++		run_loop(loop, 100);
++		pwtest_neg_errno_ok(spa_filter_graph_deactivate(graph));
++	}
++	pwtest_int_eq(count_fds(), n);
++	run_loop(loop, 200);
++
++	spa_hook_remove(&listener);
++	pw_unload_spa_handle(handle);
++	pw_context_destroy(context);
++	pw_main_loop_destroy(ml);
++	pw_deinit();
++
++	return PWTEST_PASS;
++}
++
++PWTEST_SUITE(filter_graph_latency)
++{
++	pwtest_add(filter_graph_latency_follows_plugin, PWTEST_NOARG);
++
++	return PWTEST_PASS;
++}

@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Thu, 15 Oct 2026 17:40:42 +1100
+Subject: [PATCH 1004/1005] module-raop-sink: give up on a session that never
+ reaches RECORD
+
+A receiver that cannot reach the sender's UDP timing port (a host
+firewall dropping its timing requests) never answers SETUP but keeps the
+RTSP connection open.  The sink then stays half set up forever: every
+later playback re-sends ANNOUNCE on the same connection, the receiver is
+still busy with the first SETUP, and nothing plays until PipeWire
+restarts.  Nothing is logged.
+
+Require OPTIONS..RECORD to complete within 10 s.  Otherwise warn, naming
+the request that went unanswered and the control/timing ports to check,
+and unload the sink, so raop-discover loads a fresh one.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ src/modules/module-raop-sink.c | 34 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+
+diff --git a/src/modules/module-raop-sink.c b/src/modules/module-raop-sink.c
+index 399210f..95e5a38 100644
+--- a/src/modules/module-raop-sink.c
++++ b/src/modules/module-raop-sink.c
+@@ -153,6 +153,8 @@ PW_LOG_TOPIC(mod_topic, "mod." NAME);
+ #define RAOP_STRIDE		(2*DEFAULT_CHANNELS)
+ #define RAOP_RATE		44100
+ #define RAOP_LATENCY_MS		250
++/* OPTIONS .. RECORD must complete within this time */
++#define SETUP_TIMEOUT_SEC	10
+ #define DEFAULT_LATENCY_MS	1500
+ 
+ #define MAX_CHANNELS		SPA_AUDIO_MAX_CHANNELS
+@@ -245,6 +247,8 @@ struct impl {
+ 	int control_fd;
+ 	struct spa_source *control_source;
+ 	struct pw_timer feedback_timer;
++	struct pw_timer setup_timer;
++	const char *last_request;
+ 
+ 	uint16_t timing_port;
+ 	int timing_fd;
+@@ -819,6 +823,7 @@ static int rtsp_send(struct impl *impl, const char *method,
+ 	int res;
+ 
+ 	rtsp_add_raop_auth_header(impl, method);
++	impl->last_request = method;
+ 
+ 	res = pw_rtsp_client_send(impl->rtsp, method, &impl->headers->dict,
+ 			content_type, content, reply, impl);
+@@ -882,6 +887,7 @@ static int rtsp_record_reply(void *data, int status, const struct spa_dict *head
+ 	struct spa_process_latency_info process_latency;
+ 
+ 	pw_log_info("record status: %d", status);
++	pw_timer_queue_cancel(&impl->setup_timer);
+ 	switch (status) {
+ 	case 200:
+ 		break;
+@@ -1497,6 +1503,7 @@ static void connection_cleanup(struct impl *impl)
+ 		impl->timing_fd = -1;
+ 	}
+ 	pw_timer_queue_cancel(&impl->feedback_timer);
++	pw_timer_queue_cancel(&impl->setup_timer);
+ 
+ 	free(impl->auth_method);
+ 	impl->auth_method = NULL;
+@@ -1552,12 +1559,37 @@ static void stream_report_error(void *data, const char *error)
+ 	}
+ }
+ 
++static void on_setup_timeout(void *data)
++{
++	struct impl *impl = data;
++	const char *ip = pw_properties_get(impl->props, "raop.ip");
++
++	if (impl->ready)
++		return;
++	/* A receiver that cannot reach our timing port never answers SETUP
++	 * and keeps the connection open, so without this the sink hangs. */
++	pw_log_warn("%s did not answer %s within %d s, closing the sink; "
++			"if it was SETUP, check that the receiver can reach UDP ports "
++			"%u/%u here (firewall)", ip ? ip : "receiver",
++			impl->last_request ? impl->last_request : "the session setup",
++			SETUP_TIMEOUT_SEC, impl->control_port, impl->timing_port);
++	pw_impl_module_schedule_destroy(impl->module);
++}
++
+ static int rtsp_do_connect(struct impl *impl)
+ {
+ 	const char *hostname, *port;
+ 	uint32_t session_id;
+ 	int res;
+ 
++	/* the session has to reach RECORD within SETUP_TIMEOUT_SEC */
++	if (!impl->ready) {
++		pw_timer_queue_cancel(&impl->setup_timer);
++		pw_timer_queue_add(impl->timer_queue, &impl->setup_timer,
++				NULL, SETUP_TIMEOUT_SEC * SPA_NSEC_PER_SEC,
++				on_setup_timeout, impl);
++	}
++
+ 	if (impl->connected) {
+ 		if (!impl->ready)
+ 			return rtsp_do_announce(impl);
+@@ -1725,6 +1757,8 @@ static const struct pw_proxy_events core_proxy_events = {
+ 
+ static void impl_destroy(struct impl *impl)
+ {
++	pw_timer_queue_cancel(&impl->setup_timer);
++
+ 	if (impl->stream)
+ 		rtp_stream_destroy(impl->stream);
+ 	if (impl->core && impl->do_disconnect)

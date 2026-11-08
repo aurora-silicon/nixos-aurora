@@ -1,7 +1,7 @@
 {
   description = "Aurora NixOS for Apple Silicon";
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/e7439b6b14ad3cc35d05608ebca9bce01a25f5f8";
+    nixpkgs.url = "github:NixOS/nixpkgs/1d060086d60cb76a40cf37109f979d88a5bd6396";
     apple-silicon.url = "github:nix-community/nixos-apple-silicon/12cd234285d3037cedfab979aa70b75284a59afc";
     apple-silicon.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -9,7 +9,13 @@
     let
       system = "aarch64-linux";
       overlays = [ apple-silicon.overlays.default self.overlays.default ];
-      pkgs = import nixpkgs { inherit system overlays; };
+      pkgs = import nixpkgs {
+        inherit system overlays;
+        # Steam's ARM64 runtime includes GTK 2; retain its deprecation warning.
+        # Remove this exception when Steam no longer needs GTK 2.
+        # https://github.com/NixOS/nixpkgs/issues/410814
+        config.problems.handlers."gtk+".broken = "warn";
+      };
       makeSystem = desktop: nixpkgs.lib.nixosSystem {
         inherit system;
         modules = [ apple-silicon.nixosModules.default self.nixosModules.default
@@ -39,12 +45,14 @@
       packages.${system} = {
         logos = pkgs.aurora-logos;
         plymouth = pkgs.plymouth;
+        plymouth-theme-aurora = pkgs.plymouth-theme-aurora;
         firstboot = pkgs.aurora-firstboot;
         docker = pkgs.docker;
         sep = pkgs.aurora-sep;
         libfprint = pkgs.libfprint;
         fprintd = pkgs.fprintd;
         avd-fw = pkgs.aurora-avd-firmware;
+        libva-v4l2-request-avd = pkgs.libvaV4l2RequestAvd;
         omarchy-ane-tools = pkgs.omarchy-ane-tools;
         mil-hwx-compiler = pkgs.mil-hwx-compiler;
         upower = pkgs.upower;
@@ -69,11 +77,13 @@
           '';
         };
         alsa-utils = pkgs.aurora-alsa-utils;
+        pipewire = pkgs.aurora-pipewire;
         audio = pkgs.asahi-audio;
         ucm = pkgs.alsa-ucm-conf-asahi;
         fex-mesa = pkgs.aurora-fex-mesa;
         flatpak-gl = pkgs.aurora-flatpak-gl;
         speakerguardd = pkgs.speakerguardd;
+        speakerguardd-v2 = pkgs.speakerguardd-v2;
         mutter = pkgs.mutter;
         speakersafetyd = pkgs.speakersafetyd;
         bankstown = pkgs.bankstown-lv2;
@@ -81,6 +91,7 @@
         aurora-bless = pkgs.aurora-bless;
         camera-denoise = pkgs.aurora-camera-denoise;
         kbd-light = pkgs.aurora-kbd-light;
+        xart = pkgs.aurora-xart;
       };
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;
@@ -97,6 +108,57 @@
             && lib.hasInfix "After=var-swap-swapfile.swap" unit.text) profiles;
       in assert lib.assertMsg valid "Aurora clean-boot packaging parity failed";
         pkgs.runCommandNoCC "aurora-clean-boot-defaults" { } "touch $out";
+
+      # speakerguardd 1.0 is installed on every Mac with the fleet gate on both
+      # stacks; enable = false removes it and its gate.
+      speakerguardd-v2-gated = let
+        inherit (nixpkgs) lib;
+        probe = extra: ((makeSystem "minimal").extendModules { modules = [ extra ]; }).config;
+        on = probe { };
+        off = probe { aurora.speakerguardd.v2.enable = false; };
+        # The system's own build: its nixpkgs instance is not the flake's
+        # pkgs, so the store paths differ.
+        pkg = c: c.aurora.speakerguardd.v2.package;
+        has = c: (pkg c).pname == "speakerguardd-v2"
+          && builtins.elem (pkg c) c.environment.systemPackages
+          && builtins.elem (pkg c) c.systemd.packages;
+        unit = c: name: c.systemd.units.${name} or { enable = true; wantedBy = [ ]; text = ""; };
+        wanted = c: name: builtins.elem "multi-user.target" (unit c name).wantedBy;
+        # A plain string: hasInfix cannot take a pattern that refers to a
+        # store path.
+        gate = builtins.unsafeDiscardStringContext "${pkg on}/libexec/speakerguardd-v2/speakerguardd-gate legacy";
+        gated = c: name: lib.hasInfix "ExecCondition=${gate}" (unit c "${name}.service").text;
+      in assert lib.assertMsg (has on) "speakerguardd 1.0 must be installed by default";
+         assert lib.assertMsg (wanted on "speakerguardd-v2.service") "speakerguardd-v2.service must be wanted by multi-user.target";
+         assert lib.assertMsg (wanted on "speakerguardd-v2-seat.path") "speakerguardd-v2-seat.path must be wanted by multi-user.target";
+         assert lib.assertMsg ((unit on "speakersafetyd.service").enable && (unit on "speakerguardd.service").enable
+             && gated on "speakersafetyd" && gated on "speakerguardd")
+           "the older daemons must stay installed and enabled, behind the fleet gate";
+         assert lib.assertMsg (lib.hasInfix "use-feedback-guard" (unit on "speakersafetyd.service").text)
+           "the gate must not replace speakersafetyd's own ExecCondition";
+         assert lib.assertMsg (!has off && !wanted off "speakerguardd-v2.service"
+             && !gated off "speakersafetyd" && !gated off "speakerguardd")
+           "enable = false must remove speakerguardd 1.0 and its gate";
+         pkgs.runCommand "speakerguardd-v2-package-check" { } ''
+           p=${pkgs.speakerguardd-v2}
+           lx=$p/libexec/speakerguardd-v2
+           test -x $lx/speakerguardd
+           test -x $lx/speakerguardd-provision
+           test -x $lx/speakerguardd-gate
+           test -x $p/bin/aurora-speaker-tuning
+           test -f $p/lib/lv2/sgv2.lv2/manifest.ttl
+           test -f $p/lib/lv2/sgv2.lv2/libsgv2_lv2.so
+           test -f $p/share/speakerguardd/gate.json
+           grep -qx "ExecStart=$lx/speakerguardd \$SGV2_ARGS" $p/lib/systemd/system/speakerguardd-v2.service
+           grep -qx "ExecStart=$lx/speakerguardd-provision run" $p/lib/systemd/system/speakerguardd-v2-provision.service
+           test -f $p/lib/systemd/system/speakerguardd-v2-seat.path
+           test -f $p/lib/systemd/user/speakerguardd-v2-graph.service
+           grep -q "$p/share/speakerguardd/gate.json" $lx/speakerguardd-gate
+           test -f $lx/wiring.py
+           test ! -e $p/share/speakerguardd/machines.json
+           test ! -e $p/bin/speakerguardd
+           touch $out
+         '';
 
       ane-packaging = let
         firmware = pkgs.runCommand "ane-test-firmware" { } ''
@@ -185,6 +247,13 @@
               "the display chain and its PMP come up before the root is unlocked" =
                 lib.all (m: lib.elem m config.boot.initrd.availableKernelModules)
                   [ "apple-pmp" "mux-apple-display-crossbar" "appledrm" ];
+              "the PipeWire daemon carries the filter-graph volume and latency fixes" = let
+                package = config.services.pipewire.package;
+                patched = suffix: lib.any (patch: lib.hasSuffix suffix (toString patch)) (package.patches or [ ]);
+              in package.doCheck
+                && patched "-1005-filter-graph-follow-plugin-latency-after-activation.patch"
+                && patched "-1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch"
+                && patched "-1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch";
               "PipeWire and WirePlumber use the pinned audio and UCM profiles" =
                 lib.elem value.pkgs.asahi-audio config.services.pipewire.configPackages
                 && lib.elem value.pkgs.asahi-audio config.services.pipewire.wireplumber.configPackages
@@ -246,6 +315,55 @@
       # It needs the kernel, so the image workflow builds it next to the system.
       stage2 = imageProbe.config.system.build.auroraStage2;
       stage2-tools = imageProbe.config.system.build.auroraStage2Tools;
+      # The Stage 2 trial (docs/updates.md): the package's install check runs
+      # fedora-aurora's updater suite and the NixOS transactions (arm, commit,
+      # fallback, guard, DT ABI refusal) against the installed copies, and this
+      # checks the installed system's wiring by evaluation, without the kernel.
+      stage2-trial = let
+        inherit (nixpkgs) lib;
+        probe = imageProbe.config;
+        disabled = (imageProbe.extendModules { modules = [ { aurora.stage2.enable = false; } ]; }).config;
+        text = value: builtins.unsafeDiscardStringContext (toString value);
+        commit = probe.systemd.services.aurora-stage2-commit;
+        guard = probe.systemd.services.aurora-stage2-guard;
+        timer = probe.systemd.timers.aurora-stage2-guard;
+        trial = "/proc/device-tree/chosen/aurora,trial";
+        esp = probe.boot.loader.efi.efiSysMountPoint;
+        expectations = {
+          "the commit runs once per boot after multi-user.target, only with an aura-try marker" =
+            lib.elem "multi-user.target" commit.wantedBy && lib.elem "multi-user.target" commit.after
+            && commit.unitConfig.DefaultDependencies == false && lib.elem "shutdown.target" commit.conflicts
+            && commit.unitConfig.ConditionPathExists == "${esp}/aura-try"
+            && commit.unitConfig.RequiresMountsFor == esp && !commit.restartIfChanged
+            && commit.serviceConfig.Type == "oneshot" && commit.serviceConfig.RemainAfterExit
+            && lib.hasSuffix "/bin/aurora-stage2-commit commit" (text commit.serviceConfig.ExecStart);
+          "a twelve-minute guard reboots only an uncommitted trial boot" =
+            lib.elem "timers.target" timer.wantedBy && timer.timerConfig.OnBootSec == "12min"
+            && timer.unitConfig.ConditionPathExists == trial && guard.unitConfig.ConditionPathExists == trial
+            && guard.wantedBy == [ ] && lib.hasSuffix "/bin/aurora-stage2-commit guard" (text guard.serviceConfig.ExecStart);
+          "bootloader installs hand the trial the configuration being installed" =
+            lib.hasInfix ''aurora-install-stage2 '' (text probe.boot.loader.grub.extraInstallCommands)
+            && lib.hasInfix ''"''${1:-}"'' (text probe.boot.loader.grub.extraInstallCommands)
+            && lib.hasInfix "AURORA_CONFIGURATION_LIMIT=${toString probe.boot.loader.grub.configurationLimit}"
+              (text probe.boot.loader.grub.extraInstallCommands);
+          "a switch checks the DT ABI generation before GRUB's menu changes" =
+            lib.hasInfix "/bin/aurora-stage2 check" (text probe.system.preSwitchChecks.aurora-stage2-dt-abi or "");
+          "every generation, the images' included, records its kernel's DT ABI generation from kernel/dtb-abi" =
+            lib.all (c: c.boot.kernelPackages.kernel.auroraDtbAbi == lib.toInt (lib.fileContents ./kernel/dtb-abi)
+              && lib.hasInfix "echo ${lib.fileContents ./kernel/dtb-abi} > $out/aurora-dtb-abi" (text c.system.systemBuilderCommands))
+              ([ probe ] ++ map (system: system.config) (lib.attrValues self.nixosConfigurations));
+          "aurora.stage2.enable = false leaves out the trial and its checks" =
+            !(disabled.systemd.services ? aurora-stage2-commit) && !(disabled.systemd.timers ? aurora-stage2-guard)
+            && !(disabled.system.preSwitchChecks ? aurora-stage2-dt-abi)
+            && !(lib.hasInfix "aurora-install-stage2" disabled.boot.loader.grub.extraInstallCommands);
+        };
+      in pkgs.runCommand "aurora-stage2-trial-evaluation" {
+        failures = lib.concatStringsSep "\n" (lib.attrNames (lib.filterAttrs (_: met: !met) expectations));
+        tested = pkgs.aurora-stage2;
+      } ''
+        if [[ -n "$failures" ]]; then printf '%s\n' "$failures" >&2; exit 1; fi
+        touch $out
+      '';
       # Per-process 4K userspace pages are on in every profile; an owner can
       # turn them off with user4k=off or aurora.userpages.enable = false.
       userpages = let
@@ -297,11 +415,16 @@
         kdeSshAtBoot = kdeWith { aurora.openssh.startAtBoot = true; };
         # Graphical first boot: each failed expectation is reported by name.
         desktopExpectations = {
-          "desktop images boot with the spinner splash" = kde.boot.plymouth.enable && gnome.boot.plymouth.enable
-            && kde.boot.plymouth.theme == "spinner" && gnome.boot.plymouth.theme == "spinner";
+          "desktop images boot with the Aurora splash" = kde.boot.plymouth.enable && gnome.boot.plymouth.enable
+            && kde.boot.plymouth.theme == "aurora" && gnome.boot.plymouth.theme == "aurora"
+            && lib.all (c: lib.any (p: (p.pname or "") == "plymouth-theme-aurora") c.boot.plymouth.themePackages) [ kde gnome ]
+            && lib.all (c: lib.hasInfix "DeviceScale=1" c.boot.plymouth.extraConfig) [ kde gnome ];
           "every profile selects the patched Plymouth" = lib.all (c:
             c.boot.plymouth.package.drvPath == pkgs.plymouth.drvPath
             && patchedWith "0001-ply-terminal-Keep-terminal-input-nonblocking.patch" c.boot.plymouth.package
+            && patchedWith "0001-Fix-splash-keyboard-lifetime.patch" c.boot.plymouth.package
+            && c.boot.plymouth.package.scriptKeyboardLifetime >= 1
+            && patchedWith "0002-drm-Reset-inherited-HDR-connector-state-before-SDR.patch" c.boot.plymouth.package
             && c.boot.plymouth.package.doCheck) [ kde gnome minimal ];
           "minimal images boot without a splash" = !minimal.boot.plymouth.enable;
           "the initrd asks for no TPM drivers, which the shared kernel lacks" = lib.all (c:

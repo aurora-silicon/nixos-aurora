@@ -1,0 +1,99 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Generate a boot-local script before plymouthd starts. No platform data is
+# written to /usr or captured from the image builder's device tree.
+# Usage: aurora-plymouth [theme-directory [output-script [device-tree]]]
+set -eu
+theme=${1:-/usr/share/plymouth/themes/aurora}
+out=${2:-/run/plymouth/aurora.script}
+dt=${3:-/sys/firmware/devicetree/base}
+# Another selected theme may omit Aurora's source from the initramfs.
+# Its Plymouth startup must not fail because this package is installed.
+[ -r "$theme/aurora.script" ] || exit 0
+
+# DT cells are big endian, regardless of the host byte order. Reading bytes
+# also works with BusyBox od. Reject truncated properties.
+be() {
+    bytes=$(od -An -v -tu1 -j "$2" -N "$3" "$1" 2>/dev/null) || return 1
+    set -- $bytes "$3"
+    value=0; count=0
+    while [ "$#" -gt 1 ]; do
+        value=$((value * 256 + $1)); count=$((count + 1)); shift
+    done
+    [ "$count" -eq "$1" ] && [ "$value" -ge 0 ] || return 1
+    printf '%s\n' "$value"
+}
+u32() { be "$1" 0 4; }
+cells() {
+    c=$(u32 "$1" 2>/dev/null) || c=$2
+    case $c in 1|2) printf '%s\n' "$c";; *) return 1;; esac
+}
+
+geometry() (
+    fb=; count=0
+    for node in "$dt"/chosen/framebuffer*; do
+        [ -f "$node/compatible" ] || continue
+        compat=$(tr '\000' '\n' < "$node/compatible")
+        case "$compat" in *simple-framebuffer*) ;; *) continue;; esac
+        status=$(tr -d '\000' < "$node/status" 2>/dev/null) || status=okay
+        case $status in okay|ok) ;; *) continue;; esac
+        fb=$node; count=$((count + 1))
+    done
+    # A second boot display cannot be identified by the script plugin.
+    [ "$count" -eq 1 ] || exit 1
+    w=$(u32 "$fb/width") || exit 1
+    h=$(u32 "$fb/height") || exit 1
+    stride=$(u32 "$fb/stride") || exit 1
+    [ "$w" -gt 0 ] && [ "$h" -gt 0 ] && [ "$stride" -ge "$w" ] || exit 1
+    root_ac=$(cells "$dt/#address-cells" 2) || exit 1
+    root_sc=$(cells "$dt/#size-cells" 1) || exit 1
+    ac=$(cells "$dt/chosen/#address-cells" "$root_ac") || exit 1
+    sc=$(cells "$dt/chosen/#size-cells" "$root_sc") || exit 1
+    addr=$(be "$fb/reg" 0 $((ac * 4))) || exit 1
+    size=$(be "$fb/reg" $((ac * 4)) $((sc * 4))) || exit 1
+    [ "$size" -ge "$((stride * h))" ] || exit 1
+    ac=$(cells "$dt/reserved-memory/#address-cells" "$root_ac") || exit 1
+    sc=$(cells "$dt/reserved-memory/#size-cells" "$root_sc") || exit 1
+    # Translated reserved-memory addresses would need a ranges decoder.
+    [ ! -s "$dt/reserved-memory/ranges" ] || exit 1
+    count=0; crop=0
+    for node in "$dt"/reserved-memory/framebuffer*; do
+        [ -f "$node/reg" ] || continue
+        compat=$(tr '\000' '\n' < "$node/compatible" 2>/dev/null) || continue
+        case "$compat" in framebuffer) ;; *) continue;; esac
+        base=$(be "$node/reg" 0 $((ac * 4))) || continue
+        length=$(be "$node/reg" $((ac * 4)) $((sc * 4))) || continue
+        delta=$((addr - base))
+        [ "$delta" -ge 0 ] && [ "$delta" -lt "$length" ] || continue
+        [ "$size" -le "$((length - delta))" ] || continue
+        [ "$((delta % stride))" -eq 0 ] || continue
+        rows=$((delta / stride))
+        [ "$rows" -lt "$h" ] || continue
+        crop=$rows; count=$((count + 1))
+    done
+    [ "$count" -eq 1 ] || exit 1
+    notch=0
+    if [ -f "$dt/aliases/dcp" ]; then
+        dcp=$(tr -d '\000' < "$dt/aliases/dcp")
+        case $dcp in /*) notch=$(u32 "$dt$dcp/apple,notch-height" 2>/dev/null) || notch=0;; esac
+    fi
+    # aura advances the simple-framebuffer base by notch * stride while its
+    # reserved framebuffer retains the original base. This is authoritative
+    # even on a DT without the DCP notch property, or with a stale one.
+    if [ "$crop" -gt 0 ]; then
+        notch=$crop
+    fi
+    [ "$notch" -ge 0 ] && [ "$notch" -lt "$h" ] || exit 1
+    printf '%s %s %s\n' "$w" "$((h + crop))" "$notch"
+)
+
+# Missing or ambiguous platform data keeps the ordinary centre rule.
+values=$(geometry 2>/dev/null) || values='0 0 0'
+set -- $values
+mkdir -p "${out%/*}"
+{
+    printf '# Generated for this boot from the live device tree.\n'
+    printf 'aurora_panel_width = %s;\naurora_panel_height = %s;\naurora_notch_height = %s;\n' "$1" "$2" "$3"
+    cat "$theme/aurora.script"
+} > "$out.tmp"
+mv -f "$out.tmp" "$out"

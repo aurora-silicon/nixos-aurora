@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
-  "commit": "f73bf267eed958d47a63a7a49c46e669d70f5c75",
+  "commit": "7f43d05f0b1f7366a3d40f1b0390899d4ea47cfe",
   "files": {
     "0001-preserve-print-on-device-delete-failure.patch": "ea41766b42cfd259e32ce37cf84c5557b2f31eb9db4b63160c54ddb5c6a11e7a",
     "test_account_gate.py": "9d09fd49cb988b4b70784151d9d6757a40fa60b19c85048067598decd480bb83",

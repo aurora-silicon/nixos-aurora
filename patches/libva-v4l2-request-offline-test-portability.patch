@@ -1,0 +1,127 @@
+From: Aurora contributors <noreply@aurora-silicon.org>
+Subject: [PATCH] tests: make startup, mapping and signal fixtures deterministic
+
+GPL-3.0-or-later, matching the pinned upstream files. No driver or hardware
+logic is changed. Recognize GCC's complete numeric VMA startup diagnostic,
+prevent anonymous VMA coalescing from hiding a fixture allocation, and wait
+for the guard start record before delivering the signal fixture.
+
+diff --git a/tests/concurrent-tsan.py b/tests/concurrent-tsan.py
+--- a/tests/concurrent-tsan.py
++++ b/tests/concurrent-tsan.py
+@@ -28,6 +28,12 @@
+     if 'WARNING: ThreadSanitizer' in output or 'SUMMARY: ThreadSanitizer' in output:
+         return 1
+     lines = [line for line in output.splitlines() if line.strip()]
++    # GCC emits a second, numeric line for unsupported address-space widths.
++    # Admit that complete startup diagnostic only; extra diagnostics still fail.
++    if (len(lines) == 2 and
++            re.fullmatch(r'FATAL: ThreadSanitizer: unsupported VMA range[^\n]*', lines[0]) and
++            re.fullmatch(r'FATAL: Found \d+ - Supported \d+(?:, \d+)*(?: and \d+)?', lines[1])):
++        return 77
+     if lines and all(STARTUP_UNAVAILABLE.fullmatch(line) for line in lines):
+         return 77
+     return 1
+@@ -52,6 +58,13 @@
+ 
+ def self_test():
+     assert probe_status(66, 'FATAL: ThreadSanitizer: unexpected memory mapping 0x1-0x2\n') == 77
++    vma = ('FATAL: ThreadSanitizer: unsupported VMA range\n'
++           'FATAL: Found 47 - Supported 39, 42 and 48\n')
++    assert probe_status(66, vma) == 77
++    assert probe_status(66, vma.splitlines()[1] + '\n') == 1
++    assert probe_status(66, vma + 'WARNING: ThreadSanitizer: data race\n') == 1
++    assert probe_status(66, vma + 'SUMMARY: ThreadSanitizer: data race\n') == 1
++    assert probe_status(66, vma + 'unknown diagnostic\n') == 1
+     assert probe_status(66, 'FATAL: ThreadSanitizer: unknown failure\n') == 1
+     assert probe_status(66, 'WARNING: ThreadSanitizer: data race\n') == 1
+     assert probe_status(66, 'FATAL: ThreadSanitizer: unexpected memory mapping 0x1-0x2\nSUMMARY: ThreadSanitizer: data race\n') == 1
+diff --git a/tests/resource-churn.py b/tests/resource-churn.py
+--- a/tests/resource-churn.py
++++ b/tests/resource-churn.py
+@@ -408,7 +408,11 @@
+         command = command.strip()
+         if command == "allocate":
+             descriptors = [os.open("/dev/null", os.O_RDONLY) for _ in range(4)]
+-            mapping = mmap.mmap(-1, 2 * mmap.PAGESIZE)
++            # A distinct backing inode prevents valid anonymous-VMA merging
++            # from hiding the fixture allocation in the process map count.
++            with tempfile.TemporaryFile() as backing:
++                backing.truncate(2 * mmap.PAGESIZE)
++                mapping = mmap.mmap(backing.fileno(), 2 * mmap.PAGESIZE)
+             print("ALLOCATED", flush=True)
+         elif command == "release":
+             mapping.close()
+@@ -429,19 +433,25 @@
+         [sys.executable, __file__, "_child"], stdin=subprocess.PIPE,
+         stdout=subprocess.PIPE, text=True)
+     assert child.stdout.readline().strip() == "READY"
++    # Prime allocation and release paths before the steady-state baseline.
++    # Lazy interpreter/allocator mappings are not fixture resource leaks.
++    for command, expected in (("allocate", "ALLOCATED"), ("release", "RELEASED")):
++        child.stdin.write(command + "\n")
++        child.stdin.flush()
++        assert child.stdout.readline().strip() == expected
+     baseline = snapshot(child.pid)
+     child.stdin.write("allocate\n")
+     child.stdin.flush()
+     assert child.stdout.readline().strip() == "ALLOCATED"
+     allocated = snapshot(child.pid)
+     assert allocated["fd_count"] >= baseline["fd_count"] + 4
+-    assert allocated["map_count"] >= baseline["map_count"] + 1
++    assert allocated["map_count"] >= baseline["map_count"] + 1, (baseline, allocated)
+     child.stdin.write("release\n")
+     child.stdin.flush()
+     assert child.stdout.readline().strip() == "RELEASED"
+     released = snapshot(child.pid)
+     assert released["fd_count"] == baseline["fd_count"]
+-    assert released["map_count"] == baseline["map_count"]
++    assert released["map_count"] == baseline["map_count"], (baseline, released)
+     child.stdin.write("exit\n")
+     child.stdin.flush()
+     assert child.wait() == 0
+@@ -452,7 +462,7 @@
+         "mapped_bytes": allocated["mapped_bytes"] - baseline["mapped_bytes"],
+         "vmrss_kib": max(0, allocated["vmrss_kib"] - baseline["vmrss_kib"]),
+     }, acceptance=True)
+-    assert bounded["passed"]
++    assert bounded["passed"], bounded
+     leaking = [dict(baseline), dict(baseline), dict(baseline)]
+     for index, sample in enumerate(leaking):
+         sample["fd_count"] += index
+diff --git a/tests/hwguard.py b/tests/hwguard.py
+--- a/tests/hwguard.py
++++ b/tests/hwguard.py
+@@ -788,10 +788,28 @@
+         [sys.executable, str(sig_script)], env=sig_env,
+         stdout=subprocess.PIPE, text=True,
+     )
+-    time.sleep(0.4)
+-    sig_proc.send_signal(signal.SIGINT)
+-    out, _ = sig_proc.communicate(timeout=10)
+-    check("signal" in out, f"SIGINT did not record signal status: {out!r}")
++    try:
++        # The start record is written after the guard installs its handlers.
++        # A fixed delay can instead interrupt the interpreter during imports.
++        ready_until = time.monotonic() + 10
++        while True:
++            try:
++                records = [json.loads(line) for line in
++                           Path(sig_env["LOG"]).read_text().splitlines()]
++            except (FileNotFoundError, json.JSONDecodeError):
++                records = []
++            if any(record.get("event") == "start" for record in records):
++                break
++            if sig_proc.poll() is not None or time.monotonic() >= ready_until:
++                raise RuntimeError("SIGINT fixture did not reach the guarded start")
++            time.sleep(0.01)
++        sig_proc.send_signal(signal.SIGINT)
++        out, _ = sig_proc.communicate(timeout=10)
++        check("signal" in out, f"SIGINT did not record signal status: {out!r}")
++    finally:
++        if sig_proc.poll() is None:
++            sig_proc.kill()
++            sig_proc.wait(timeout=5)
+ 
+     foreign_log = (work / "foreign.jsonl").read_text()
+     check("holders" in foreign_log, "foreign abort did not record holders")
