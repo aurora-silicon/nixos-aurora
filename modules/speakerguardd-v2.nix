@@ -44,11 +44,13 @@ in {
     environment.pathsToLink = [ "/lib/lv2" ];
     systemd.packages = [ cfg.package ];
     # Every v2 system unit carries the gate itself (ExecCondition= in the
-    # upstream unit). Provisioning and the self-check are pulled in by the
-    # supervisor (Requires= and After= in its unit).
+    # upstream unit). Provisioning and the self-check (with its switch test
+    # after login) are pulled in by the supervisor (Requires= and After= in
+    # its unit).
     systemd.services.speakerguardd-v2 = { wantedBy = [ "multi-user.target" ]; path = tools; };
     systemd.services.speakerguardd-v2-provision.path = tools;
     systemd.services.speakerguardd-v2-selfcheck.path = tools;
+    systemd.services.speakerguardd-v2-switchtest.path = tools;
     systemd.services.speakerguardd-v2-seat.path = tools;
     # Before every sleep: the amps unlinked and the supervisor stopped while
     # awake; after the resume it starts again and grants.
