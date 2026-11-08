@@ -21,11 +21,15 @@ in {
     settings = lib.mkOption {
       type = with lib.types; attrsOf (attrsOf (oneOf [ str int bool ]));
       default = { };
-      example = { touchid.timeout = 20; keys.store = "sep-key"; };
+      example = { touchid.policy = "touchid-current"; keys.store = "sep-key"; };
       description = ''
         /etc/aurora-fido/aurora-fido.conf, by section ([touchid],
         [authenticator], [keys]). Unset keys keep the daemon's defaults; see
-        docs/fido.md in aurora-sep-userspace.
+        docs/fido.md in aurora-sep-userspace. touchid.policy picks who may
+        approve new credentials, as on macOS: "touchid-or-password" (default:
+        Touch ID, or your password in the polkit dialog), "touchid-any" or
+        "touchid-current" (Touch ID only; the latter retires a credential
+        when the enrolled fingers change).
       '';
     };
   };
