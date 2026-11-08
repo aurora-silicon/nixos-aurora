@@ -100,6 +100,8 @@ in {
       systemd.services.aurora-touchid-boot = {
         description = "Touch ID after a restart (require_password_after_boot)";
         wantedBy = [ "multi-user.target" ];
+        wants = [ "aurora-sep-ready.service" ];
+        after = [ "aurora-sep-ready.service" ];
         before = [ "display-manager.service" "systemd-user-sessions.service" "fprintd.service" ];
         serviceConfig = {
           Type = "oneshot";
