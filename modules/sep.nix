@@ -21,11 +21,12 @@ in {
 
   options.aurora.sep.requirePasswordAfterBoot = lib.mkOption {
     type = lib.types.bool;
-    default = false;
+    default = true;
     description = ''
-      Touch ID after a restart. Off (the default): Touch ID works from the
-      first login after boot. On: as on macOS, the first login or unlock after
-      boot needs the password, and Touch ID works after that password. Written
+      Touch ID after a restart. On (the default): as on macOS, the first login
+      or unlock after boot needs the password ("Your password is required to
+      enable Touch ID."), and Touch ID works after that password. Off: Touch ID
+      works from the first login after boot. Written
       to /etc/aurora/touchid.conf (require_password_after_boot) and applied
       by aurora-touchid-boot.service at every boot.
     '';
