@@ -62,8 +62,8 @@ jobs:
           nix build --out-link grub ".#nixosConfigurations.aurora-$DESKTOP.pkgs.grub2_efi"
           # The Stage 2 installed systems refresh on rebuild, checked for the
           # same aura, the MacBook Neo's device tree and one U-Boot member.
-          nix build --print-build-logs --out-link stage2 .#checks.aarch64-linux.stage2
-          python3 scripts/verify-image-closure.py --proof build-import.json ./system ./installer ./aura ./grub ./stage2
+          nix build --print-build-logs --out-link stage2-result .#checks.aarch64-linux.stage2
+          python3 scripts/verify-image-closure.py --proof build-import.json ./system ./installer ./aura ./grub ./stage2-result
           # dbus-broker logs an error for each D-Bus name it reads twice.
           python3 scripts/dbus-service-names.py ./system
           nix flake check --print-build-logs
