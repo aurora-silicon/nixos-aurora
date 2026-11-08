@@ -594,7 +594,7 @@ in {
     # The crates this package ships; the rig and benchmark crates stay out.
     crates = [ "-p" "sgv2-core" "-p" "sgv2-lv2" "-p" "sgv2-supervisor" "-p" "aurora-speaker-tuning" ];
     units = [ "speakerguardd.service" "speakerguardd-provision.service" "speakerguardd-selfcheck.service"
-              "speakerguardd-seat.service" "speakerguardd-seat.path" "speakerguardd-sleep.service" ];
+              "speakerguardd-switchtest.service" "speakerguardd-seat.service" "speakerguardd-seat.path" "speakerguardd-sleep.service" ];
     userUnits = [ "speakerguardd-session.service" "speakerguardd-graph.service" ];
   in rustPackage "speakerguardd-v2" ./locks/speakerguardd-v2.Cargo.lock {
     cargoBuildFlags = crates;
@@ -651,6 +651,11 @@ in {
       grep -qx "ExecStart=$lx/speakerguardd-provision seat --unit speakerguardd-v2.service" $sd/speakerguardd-v2-seat.service
       grep -qx "ExecStartPost=$lx/speakerguardd-provision activate --graph-unit speakerguardd-v2-graph.service" $sd/speakerguardd-v2-selfcheck.service
       grep -qx "ExecStart=$lx/speakerguardd-provision sleep --unit speakerguardd-v2.service" $sd/speakerguardd-v2-sleep.service
+      # The switch test runs after login, before the supervisor (speakerguardd#102).
+      grep -qx 'Requires=speakerguardd-v2-switchtest.service' $sd/speakerguardd-v2.service
+      grep -qx 'After=speakerguardd-v2-selfcheck.service systemd-user-sessions.service' $sd/speakerguardd-v2-switchtest.service
+      grep -qx "ExecCondition=$lx/speakerguardd-selfcheck pending" $sd/speakerguardd-v2-switchtest.service
+      grep -qx "ExecStopPost=$lx/speakerguardd-selfcheck pending --clear" $sd/speakerguardd-v2-switchtest.service
       grep -qx "ExecStop=$lx/speakerguardd-provision wake --unit speakerguardd-v2.service" $sd/speakerguardd-v2-sleep.service
       # The supervisor and the sleep hooks need a qualified board (gate v2);
       # provisioning, the seat follower and the silent self-check run first,
