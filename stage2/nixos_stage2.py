@@ -12,10 +12,12 @@ only what differs on NixOS:
   of the generations GRUB lists. Each NixOS generation declares its kernel's
   DT ABI generation in `aurora-dtb-abi`; one without the file has the
   generation of another listed generation with the same kernel, or 0.
-- One attempt per candidate image (its SHA-256), not per kernel version, so
-  an aura, U-Boot or option change gets its own trial too.
 - The newest bootloader install decides the trial: an armed candidate that
   never booted is withdrawn when a later install selects other bytes.
+- Receipts name the candidate's SHA-256 where Fedora names the kernel.
+
+Attempts per candidate image and staging on a trial boot after its commit
+come from bootchain.py itself (fedora-aurora#207).
 
   nixos_stage2.py install|check|commit|guard
 
@@ -64,7 +66,6 @@ class Entry:
 class NixosUpdate(bootchain.Update):
     def __init__(self, root=Path('/'), env=None):
         super().__init__(root, env)
-        self.committed_trial = False
         self._generations = None
 
     # Generations GRUB lists, the way install-grub.pl walks them.
@@ -156,12 +157,6 @@ class NixosUpdate(bootchain.Update):
 
     # The trial, as bootchain.Update stages it.
 
-    def chosen(self, name):
-        # A trial boot that committed its candidate may arm the next one.
-        if name == 'aurora,trial' and self.committed_trial:
-            return ''
-        return super().chosen(name)
-
     def withdraw(self, digest):
         """Disarm this ESP's own untried candidate unless it is `digest`.
 
@@ -193,12 +188,7 @@ class NixosUpdate(bootchain.Update):
         if self.withdraw(selected):
             print(f'Stage 2 trial {selected} is already armed')
             return
-        _, _, _, marker, _ = self.trial_paths()
-        self.committed_trial = bool(super().chosen('aurora,trial')) and self.marker(marker) is None
-        try:
-            super().stage_trial(selected, payload)
-        finally:
-            self.committed_trial = False
+        super().stage_trial(selected, payload)
 
     def replace(self, target, previous, payload):
         """bootchain.Update.apply's direct replacement, for Stage 1 without aura-try."""

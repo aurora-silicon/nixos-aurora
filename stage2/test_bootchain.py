@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 import importlib.util
 import json
 import os
@@ -458,6 +459,12 @@ class TrialTests(unittest.TestCase):
     def commit(self):
         bootchain.Update(self.root, self.env).commit()
 
+    def ordinary_boot(self):
+        (self.root / 'proc/device-tree/chosen/aurora,trial').unlink(missing_ok=True)
+
+    def attempt(self, payload):
+        return self.root / 'var/lib/aurora-stage2/attempts' / hashlib.sha256(payload).hexdigest()
+
     def sane(self):
         self.put('/sys/kernel/debug/devices_deferred', b'')
         self.put('/proc/device-tree/soc/dcp/compatible', b'apple,t8112-dcp\0')
@@ -514,7 +521,7 @@ class TrialTests(unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
         self.assertFalse(self.prev.exists())
         self.assertEqual(self.backup.read_bytes(), b'OLDER-STAGE2')
-        self.assertTrue((self.root / 'var/lib/aurora-stage2/attempts/7.3').exists())
+        self.assertTrue(self.attempt(self.candidate.read_bytes()).exists())
         self.assertEqual(os.readlink(self.link), 'dtb-7.3')
         self.commit()  # Still on the ordinary boot that staged it.
         self.assertTrue(self.marker.exists())
@@ -547,6 +554,137 @@ class TrialTests(unittest.TestCase):
         self.assertEqual(self.candidate.read_bytes(), payload)
         self.apply()
         self.assertTrue(self.marker.read_bytes().startswith(b'spent\n'))
+
+    def test_same_kernel_boot_input_updates_trial_after_commit(self):
+        # aura, U-Boot and m1n1.conf updates keep the kernel but are new candidates.
+        self.trial_setup()
+        self.sane()
+        self.apply()
+        self.trial_boot()
+        self.commit()
+        self.ordinary_boot()
+        for path, content in (('/usr/lib64/m1n1/m1n1.bin', b'AURA-2'),
+                              ('/usr/share/uboot/apple_m1/u-boot-nodtb.bin', b'U-BOOT-2'),
+                              ('/etc/m1n1.conf', b'display=1920x1080\n')):
+            with self.subTest(path=path):
+                live = self.target.read_bytes()
+                self.put(path, content)
+                self.apply()
+                self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+                self.assertEqual(self.target.read_bytes(), live)
+                payload = self.candidate.read_bytes()
+                self.assertNotEqual(payload, live)
+                self.trial_boot()
+                self.commit()
+                self.ordinary_boot()
+                self.assertEqual(self.target.read_bytes(), payload)
+                self.assertFalse(self.marker.exists())
+        self.assertTrue(self.target.read_bytes().startswith(b'AURA-2'))
+        self.assertTrue(self.target.read_bytes().endswith(b'display=1920x1080\n'))
+
+    def test_reverted_committed_candidate_may_trial_again(self):
+        self.trial_setup()
+        self.sane()
+        self.apply()
+        first = self.candidate.read_bytes()
+        self.trial_boot()
+        self.commit()
+        self.ordinary_boot()
+        self.assertEqual(json.loads(self.attempt(first).read_text())['result'], 'committed')
+        self.put('/usr/lib64/m1n1/m1n1.bin', b'AURA-2')
+        self.apply()
+        self.trial_boot()
+        self.commit()
+        self.ordinary_boot()
+        self.put('/usr/lib64/m1n1/m1n1.bin', b'AURA')
+        self.apply()
+        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+        self.assertEqual(self.candidate.read_bytes(), first)
+        self.assertNotIn('result', json.loads(self.attempt(first).read_text()))
+
+    def test_fallen_back_candidate_is_never_rearmed_but_a_new_one_is(self):
+        self.trial_setup()
+        self.apply()
+        failed = self.candidate.read_bytes()
+        self.marker.write_bytes(b'spent\nm1n1/boot.bin.next\n')
+        self.commit()  # Stage 1 fell back to the live image.
+        self.put('/usr/lib64/m1n1/m1n1.bin', b'AURA-2')
+        self.apply()
+        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+        self.assertTrue(self.candidate.read_bytes().startswith(b'AURA-2'))
+        saved = self.target.with_name('boot.bin.failed-' + hashlib.sha256(failed).hexdigest())
+        self.assertEqual(saved.read_bytes(), failed)
+        self.marker.write_bytes(b'spent\nm1n1/boot.bin.next\n')
+        self.put('/usr/lib64/m1n1/m1n1.bin', b'AURA')
+        with patch('builtins.print') as log:
+            self.apply()  # Reverting to the failed candidate does not retry it.
+        self.assertIn('already attempted', log.call_args_list[0][0][0])
+        self.assertEqual(self.marker.read_bytes(), b'spent\nm1n1/boot.bin.next\n')
+        self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
+
+    def test_committed_trial_boot_accepts_package_updates(self):
+        self.trial_setup()
+        self.sane()
+        self.apply()
+        self.trial_boot()
+        self.commit()
+        committed = self.target.read_bytes()
+        self.put('/usr/lib64/m1n1/m1n1.bin', b'AURA-2')
+        self.apply()  # Same boot, after the commit removed the marker.
+        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+        self.assertEqual(self.target.read_bytes(), committed)
+        staged = self.candidate.read_bytes()
+        self.assertTrue(staged.startswith(b'AURA-2'))
+        self.apply()  # A repeated trigger with the same inputs changes nothing.
+        self.assertEqual(self.candidate.read_bytes(), staged)
+        self.put('/usr/lib64/m1n1/m1n1.bin', b'AURA-3')
+        with self.assertRaisesRegex(bootchain.Refused, 'already armed'):
+            self.apply()
+        self.assertEqual(self.candidate.read_bytes(), staged)
+        with patch.object(bootchain.subprocess, 'run') as command:
+            bootchain.Update(self.root, self.env).guard()
+        command.assert_not_called()
+        self.commit()  # The new candidate waits for its own trial boot.
+        self.assertEqual(self.target.read_bytes(), committed)
+        self.assertTrue(self.marker.exists())
+
+    def test_trial_without_its_marker_can_no_longer_commit_and_is_kept(self):
+        self.trial_setup()
+        self.apply()
+        self.trial_boot()
+        abandoned = self.candidate.read_bytes()
+        self.marker.unlink()  # Removed by hand: commit() can no longer publish it.
+        self.kernel('7.4', cells=5)
+        self.apply()
+        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+        saved = self.target.with_name('boot.bin.failed-' + hashlib.sha256(abandoned).hexdigest())
+        self.assertEqual(saved.read_bytes(), abandoned)
+        self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
+
+    def test_kernel_keyed_attempt_still_blocks_its_fallen_back_candidate(self):
+        self.trial_setup()
+        self.apply()
+        payload = self.candidate.read_bytes()
+        self.attempt(payload).rename(self.root / 'var/lib/aurora-stage2/attempts/7.3')
+        self.marker.write_bytes(b'spent\nm1n1/boot.bin.next\n')
+        self.apply()
+        self.assertEqual(self.marker.read_bytes(), b'spent\nm1n1/boot.bin.next\n')
+        self.put('/usr/lib64/m1n1/m1n1.bin', b'AURA-2')
+        self.apply()  # The kernel version alone no longer blocks a new candidate.
+        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+
+    def test_kernel_keyed_attempt_commits_and_is_rekeyed(self):
+        self.trial_setup()
+        self.sane()
+        self.apply()
+        payload = self.candidate.read_bytes()
+        legacy = self.root / 'var/lib/aurora-stage2/attempts/7.3'
+        self.attempt(payload).rename(legacy)
+        self.trial_boot()
+        self.commit()
+        self.assertEqual(self.target.read_bytes(), payload)
+        self.assertFalse(legacy.exists())
+        self.assertEqual(json.loads(self.attempt(payload).read_text())['result'], 'committed')
 
     def test_old_stage1_direct_replace_and_backup(self):
         self.trial_setup()
@@ -738,7 +876,7 @@ soc { dcp {}; display {}; }; };''')
                 self.assertEqual(Path(source).name, 'aura-try.tmp')
                 self.assertTrue(self.candidate.exists())
                 self.assertTrue(self.target.with_name('boot.bin.next.json').exists())
-                self.assertTrue((self.root / 'var/lib/aurora-stage2/attempts/7.3').exists())
+                self.assertTrue(self.attempt(self.candidate.read_bytes()).exists())
                 self.assertGreater(self.flush.call_count, 0)
                 self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
             original(source, destination)

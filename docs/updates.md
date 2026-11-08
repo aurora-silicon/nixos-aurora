@@ -142,10 +142,12 @@ different kernel: those count as generation 0, as Fedora counts kernels without 
 The behaviour above is Fedora's, except: the Stage 2 is the one built and checked with the configuration
 instead of one composed from `/boot`; the retained kernels are the configurations GRUB lists instead of
 the installed kernel packages, with same-kernel inheritance for undeclared ones; the guard applies only when
-the ESP file would change; attempts are per image instead of per kernel version; an untried armed
-candidate is withdrawn by a later install instead of refusing it; a trial boot that committed may arm the
-next image; and there is no `/boot/dtb` link, because each NixOS generation boots its own kernel's trees
-through Stage 2.
+the ESP file would change; an untried armed candidate is withdrawn by a later install instead of refusing
+it; and there is no `/boot/dtb` link, because each NixOS generation boots its own kernel's trees through
+Stage 2. As on Fedora since fedora-aurora#207, attempts are recorded per image (its SHA-256), so an aura,
+U-Boot or option change gets its own trial on the same kernel; an image that fell back is never armed
+again automatically, while one that committed may be after a rollback to it; and a trial boot that
+committed stages the next image like an ordinary boot.
 
 Recovery: boot the previous NixOS generation from GRUB if the new kernel misbehaves. If a committed Stage 2
 does not boot, restore `m1n1/<name>.prev` (after a trial) or `m1n1/<name>.old` (after a direct update) over

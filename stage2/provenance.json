@@ -1,15 +1,15 @@
 {
   "repository": "https://github.com/aurora-silicon/fedora-aurora",
-  "commit": "1d7044c319ce7e2d9c5b849f6fb480d3b0ddf21b",
-  "pull_request": "https://github.com/aurora-silicon/fedora-aurora/pull/193",
+  "commit": "cdcc79dd6cb37a4e86eb6be72261896aff86a5ee",
+  "pull_request": "https://github.com/aurora-silicon/fedora-aurora/pull/207",
   "source_directory": "packages/update-m1n1",
   "upstream_files_sha256": {
-    "bootchain.py": "bf84b6577a9595e2854293baa9693c99e28849c3089f09f37bb2a448875178fc",
-    "test_bootchain.py": "2cba09f768fa24822db5862ff62d00fe27a3f47be4a2e613265ee3c149e06942"
+    "bootchain.py": "7c3539f3aaa9d116fdb58602b702a763024ced4c07a71fd1383c3cd189d93519",
+    "test_bootchain.py": "08c85ec90b594183ab8388e45c1a4880adecac67d42adcd0566e241407613ce1"
   },
   "dtb_abi": {
     "source": "packages/kernel-aurora/dtb-abi",
     "copy": "kernel/dtb-abi"
   },
-  "adaptations": "None in these files: change them in fedora-aurora first and copy them here. nixos_stage2.py subclasses bootchain.Update for NixOS: the Stage 2 is the one built and checked with the system (modules/installed.nix) instead of one composed from /boot; the kernels that must keep booting are those of the configurations GRUB lists (profile generations up to boot.loader.grub.configurationLimit, named profiles and specialisations), each declaring its kernel's DT ABI generation in aurora-dtb-abi, with an undeclared configuration taking the generation of a listed one with the same kernel store path, else 0; the guard applies only when the ESP Stage 2 would change; attempts are recorded per candidate SHA-256 instead of per kernel version; an armed candidate that never booted is withdrawn when a later bootloader install selects other bytes (including the live image after a rollback); and a trial boot that has committed may arm the next candidate."
+  "adaptations": "None in these files: change them in fedora-aurora first and copy them here. nixos_stage2.py subclasses bootchain.Update for NixOS: the Stage 2 is the one built and checked with the system (modules/installed.nix) instead of one composed from /boot; the kernels that must keep booting are those of the configurations GRUB lists (profile generations up to boot.loader.grub.configurationLimit, named profiles and specialisations), each declaring its kernel's DT ABI generation in aurora-dtb-abi, with an undeclared configuration taking the generation of a listed one with the same kernel store path, else 0; the guard applies only when the ESP Stage 2 would change; receipts name the candidate SHA-256 in their kernel field; and an armed candidate that never booted is withdrawn when a later bootloader install selects other bytes (including the live image after a rollback). Attempts per candidate SHA-256 and staging on a trial boot after its commit are bootchain.py's own behaviour since fedora-aurora#207."
 }
