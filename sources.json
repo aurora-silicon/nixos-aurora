@@ -55,21 +55,21 @@
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",
-    "commit": "a3bffe5ab0bb8491831942f7ff4acef054e99164",
+    "commit": "099f2b9c32609a7eb7d4c2c4987692bbc02de1bd",
     "version": "10",
-    "source_url": "https://codeload.github.com/aurora-silicon/alsa-ucm-conf-asahi/tar.gz/a3bffe5ab0bb8491831942f7ff4acef054e99164",
-    "archive_root": "alsa-ucm-conf-asahi-a3bffe5ab0bb8491831942f7ff4acef054e99164",
-    "sha256": "fb01a3683d9f33d9820d28ea5fb5cf48315862620c9aad1a78bfde08ccb6edad",
-    "nix_hash": "sha256-+wGjaD2fM9mCDSjqX7XPSDFYYmIMmq0aeL/eCMy27a0="
+    "source_url": "https://codeload.github.com/aurora-silicon/alsa-ucm-conf-asahi/tar.gz/099f2b9c32609a7eb7d4c2c4987692bbc02de1bd",
+    "archive_root": "alsa-ucm-conf-asahi-099f2b9c32609a7eb7d4c2c4987692bbc02de1bd",
+    "sha256": "ac815057328f4fbc7c1d6a06e015ab1524f914eec0897799dddae4f2f1d63f40",
+    "nix_hash": "sha256-rIFQVzKPT7x8HWoG4BWrFST5FO7AiXeZ3drk8vHWP0A="
   },
   "aurora-audio": {
     "repository": "https://github.com/aurora-silicon/asahi-audio",
-    "commit": "a321ae95d04d08136934c643472f7d59aa0bbf94",
+    "commit": "c967141161bea3badc7754e23d80b39ffb1bdafd",
     "version": "4.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/asahi-audio/tar.gz/a321ae95d04d08136934c643472f7d59aa0bbf94",
-    "archive_root": "asahi-audio-a321ae95d04d08136934c643472f7d59aa0bbf94",
-    "sha256": "05ca18989fb88331284c747bea05498919ebcf6c64dea1738a875d4af42abe94",
-    "nix_hash": "sha256-BcoYmJ+4gzEoTHR76gVJiRnrz2xk3qFzioddSvQqvpQ="
+    "source_url": "https://codeload.github.com/aurora-silicon/asahi-audio/tar.gz/c967141161bea3badc7754e23d80b39ffb1bdafd",
+    "archive_root": "asahi-audio-c967141161bea3badc7754e23d80b39ffb1bdafd",
+    "sha256": "4a5fc1eb37113742791eb632819fb09301f97b76a78586e96760442be6c87dd7",
+    "nix_hash": "sha256-Sl/B6zcRN0J5HrYygZ+wkwH5e3anhYbpZ2BEK+bIfdc="
   },
   "aurora-bless": {
     "repository": "https://github.com/aurora-silicon/aurora-bless",
