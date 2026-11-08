@@ -40,6 +40,14 @@ in {
   ];
 
   config = lib.mkIf cfg.enable {
+    # The provisioning marker (speakerguardd#106) hides the speaker card's raw
+    # ports; without aurora-audio's keep-profile rule (asahi-audio#24) a Mac
+    # with a headphone jack drops the built-in card to "off" while nothing is
+    # plugged in. Fedora and ALARM carry the same hard requirement.
+    assertions = [{
+      assertion = pkgs.asahi-audio.keepsBuiltinProfile or false;
+      message = "aurora.speakerguardd.v2 needs Aurora's asahi-audio (aurora-audio >= 4.1-11, asahi-audio#24) with asahi-keep-profile.lua.";
+    }];
     environment.systemPackages = [ cfg.package ];
     environment.pathsToLink = [ "/lib/lv2" ];
     systemd.packages = [ cfg.package ];
