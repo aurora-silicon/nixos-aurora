@@ -1,4 +1,4 @@
-{ lib, stdenvNoCC, makeWrapper, python3, lzfse, util-linux, alsa-utils, systemd, gnumake, src, version }:
+{ lib, stdenvNoCC, makeWrapper, python3, lzfse, util-linux, alsa-utils, systemd, gnumake, speakerguardd-v2, src, version }:
 let
   py = python3.withPackages (p: [ p.cryptography ]);
 in
@@ -22,6 +22,11 @@ stdenvNoCC.mkDerivation {
     wrapProgram $out/bin/aurora-speaker-upgrade \
       --set-default AURORA_LZFSE_LIB ${lzfse}/lib/liblzfse.so \
       --prefix PATH : ${lib.makeBinPath [ util-linux alsa-utils systemd ]}
+    # v2's helpers live in its store path, not /usr/libexec: point the tool there
+    # (without it the tool reports v2 as not installed and never switches).
+    substituteInPlace $out/lib/aurora-speaker-upgrade/aurora_speaker_upgrade/upgrade.py \
+      --replace-fail 'LIBEXEC = ("/usr/libexec/speakerguardd-v2",' 'LIBEXEC = ("${speakerguardd-v2}/libexec/speakerguardd-v2", "/usr/libexec/speakerguardd-v2",' \
+      --replace-fail 'PARITY = ("/usr/share/speakerguardd/parity.json",)' 'PARITY = ("${speakerguardd-v2}/share/speakerguardd/parity.json", "/usr/share/speakerguardd/parity.json")'
     substituteInPlace $out/lib/systemd/system/aurora-speaker-upgrade.service $out/lib/systemd/system/speakerguardd-v2.service.d/50-aurora-speaker-upgrade.conf \
       --replace-fail /usr/bin/aurora-speaker-upgrade $out/bin/aurora-speaker-upgrade
     runHook postInstall
