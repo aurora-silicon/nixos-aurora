@@ -14,6 +14,7 @@ if [[ "$status" != 0 && "${1:-initrd}" != runtime ]]; then
 fi
 export AURORA_FIRMWARE_ROOT="$destination/vendorfw"
 export AURORA_ADMIT_BLUETOOTH=0
+export AURORA_RUNTIME_FIRMWARE_READY=0
 if [[ "${1:-initrd}" == runtime ]]; then
   # Activation replaces the initrd's firmware_class.path with the Nix
   # store firmware tree. Restore the per-device path while retaining the
@@ -27,6 +28,9 @@ if [[ "${1:-initrd}" == runtime ]]; then
   [[ -d "$fallback" ]] || { echo 'System firmware fallback is unavailable' >&2; exit 1; }
   printf '%s' "$destination/vendorfw" > "$parameter"
   export AURORA_ADMIT_BLUETOOTH=1
+  if [[ "$status" = 0 ]]; then
+    export AURORA_RUNTIME_FIRMWARE_READY=1
+  fi
 fi
 aurora-peripheral-admission
 exit "$status"
