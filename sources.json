@@ -320,5 +320,14 @@
       }
     },
     "nix_hash": "sha256-vFIxgpNhX3c+8PmpUjdyqDv3Ptqvh7Uo4qMoVv8C04U="
+  },
+  "aurora-speaker-upgrade": {
+    "repository": "https://github.com/aurora-silicon/speakerguardd",
+    "commit": "3fbe180b5c634350c1ece5e0da650109abf40edd",
+    "version": "0.1",
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/3fbe180b5c634350c1ece5e0da650109abf40edd",
+    "archive_root": "speakerguardd-3fbe180b5c634350c1ece5e0da650109abf40edd",
+    "sha256": "676f6571333ff78bcab414b6cd174c472d84d57d3eabaf5c0c8f515fa38718ec",
+    "nix_hash": "sha256-Z29lcTM/94vKtBS2zRdMRy2E1X0+q69cDI9RX6OHGOw="
   }
 }
