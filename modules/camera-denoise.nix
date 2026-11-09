@@ -8,52 +8,79 @@ in {
       type = lib.types.bool;
       default = true;
       description = ''
-        Run aurora-camera-denoise, a PipeWire filter that denoises the built-in
-        camera the way macOS does, as a user service for every user. It adds a
-        filtered node next to each built-in camera. A temporal filter runs on
-        every frame, and a low-light stage (a backend plugin) joins in above
-        the per-board gain levels in its boards.conf.
+        Start the denoise filter with each user's PipeWire service and enable
+        PipeWire by default. It publishes filtered camera nodes while retaining
+        the originals. False omits this integration, its settings and its
+        default PipeWire enablement; PipeWire then follows other configuration.
 
-        Backends load from the package's own `lib/aurora-camera-denoise`. The
-        CPU backend is built in; a Neural Engine backend has to be built into
-        the same package until its path becomes configurable.
+        CPU filtering is built in. Additional backends must be installed in
+        the selected package's `lib/aurora-camera-denoise` directory.
       '';
     };
     package = lib.mkPackageOption pkgs "aurora-camera-denoise" { };
     settings = lib.mkOption {
       type = lib.types.submodule {
-        freeformType = lib.types.attrsOf (lib.types.oneOf [ lib.types.str lib.types.int ]);
+        freeformType = lib.types.attrsOf (lib.types.oneOf [ lib.types.str lib.types.int lib.types.float ]);
         options = {
           mode = lib.mkOption {
             type = lib.types.nullOr (lib.types.enum [ "auto" "on" "off" ]);
             default = null;
-            description = "`auto` runs the temporal filter always and the low-light stage by sensor gain and noise, `on` runs both always, `off` passes frames through.";
+            description = ''
+              Trigger mode: `auto` follows gain/noise thresholds, `on` forces
+              filtering, and `off` passes frames through. Temporal filtering
+              is controlled separately. Null leaves the package default (`auto`).
+            '';
           };
           temporal = lib.mkOption {
             type = lib.types.nullOr (lib.types.enum [ "on" "off" ]);
             default = null;
-            description = "`on` (the default) runs the temporal filter on every frame, like macOS; `off` only filters above the low-light levels.";
+            description = ''
+              `on` runs the temporal filter on every frame unless mode is `off`;
+              `off` gates the selected backend with the trigger. Null leaves
+              the package default (`on`).
+            '';
           };
           backend = lib.mkOption {
             type = lib.types.nullOr lib.types.str;
             default = null;
-            description = "`auto` uses an installed Neural Engine backend when it works, else the CPU; `cpu` always uses the CPU.";
+            description = ''
+              `auto` tries preferred installed plugins. With temporal filtering
+              on, the CPU temporal filter remains when no plugin is usable;
+              `cpu` selects that filter alone. With temporal filtering off,
+              `auto` falls back to the CPU as the sole backend. Null keeps `auto`.
+            '';
           };
           threads = lib.mkOption {
             type = lib.types.nullOr lib.types.ints.unsigned;
             default = null;
-            description = "CPU worker threads; 0 means one, which costs the least CPU.";
+            description = "CPU worker count; 0 uses one worker. Null leaves the package default (0).";
           };
         };
       };
       default = { };
       example = { mode = "auto"; enter-gain = 1536; exit-gain = 1280; };
       description = ''
-        The `[denoise]` section of /etc/aurora-camera-denoise/denoise.conf.
-        Board levels (`enter-gain`, `exit-gain`, `enter-noise`, `exit-noise`,
-        `fps-threshold`, `ramp-up-frames`, `ramp-down-frames`) override the
-        board data. Each user's ~/.config/aurora-camera-denoise/denoise.conf
-        wins over this file. Running services pick up a change with
+        Values for `[denoise]` in `/etc/aurora-camera-denoise/denoise.conf`;
+        an empty set writes no file. Nix validates value types, not freeform
+        key names or numeric ranges. Unknown keys fail daemon configuration;
+        some numeric values are normalized instead of rejected.
+
+        Gain/noise thresholds (`enter-gain`, `exit-gain`, `enter-noise`,
+        `exit-noise`) override board data. Use nonnegative integer gains and
+        frame counts. Zero `enter-gain` disables its trigger; nonpositive
+        `enter-noise` disables the noise trigger. Exit thresholds are capped
+        at their entry thresholds. `fps-threshold` defaults to 30; nonpositive
+        values remove the frame-rate gate. `ramp-up-frames` and
+        `ramp-down-frames` default to 0 and 30; zero makes transitions immediate.
+
+        Other keys are `low-light-frame-rate` (`on` by default, permits longer
+        exposures and lower frame rates), `prefer` (preferred plugin names,
+        comma-separated; default `ane`) and `drivers` (camera driver names,
+        comma-separated; default `apple-isp`). Strings, integers and floats are
+        accepted as freeform values; use `"on"` or `"off"` for switch keys.
+        These values override board data; each user's
+        `~/.config/aurora-camera-denoise/denoise.conf` wins over this file.
+        Running services pick up a change with
         `systemctl --user reload aurora-camera-denoise`.
       '';
     };

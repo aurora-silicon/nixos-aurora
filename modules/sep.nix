@@ -12,10 +12,11 @@ in {
     type = lib.types.bool;
     default = false;
     description = ''
-      Offer fingerprint at the GNOME login screen as well as the lock screen.
-      GNOME Shell only offers it on the lock screen, because a fingerprint
-      login cannot unlock the keyring. The login screen also waits for Touch ID
-      to come up, up to 90 s after boot.
+      Patch GNOME Shell's greeter to offer fingerprint sign-in as well as
+      lock-screen authentication. The greeter waits for Touch ID readiness,
+      up to 90 seconds after boot; fingerprint sign-in does not unlock the
+      keyring. False leaves the normal password greeter and keeps lock-screen,
+      sudo and polkit fingerprint authentication enabled.
     '';
   };
 
@@ -41,7 +42,11 @@ in {
       # nixos.conf, so a read-only setting in either comes later and wins.
       environment.etc."modprobe.d/aurora-sep-defaults.conf".source = ../sep/aurora-sep-modprobe.conf;
       # aurora-xart reset-touchid starts Touch ID over when its keybag is stuck.
-      environment.systemPackages = [ pkgs.aurora-sep pkgs.aurora-xart pkgs.libfprint ];
+      # aurora-sep-sk: OpenSSH ecdsa-sk keys in the Secure Enclave for members
+      # of sep-key (its udev rule gives that group /dev/sep-key).
+      environment.systemPackages = [ pkgs.aurora-sep pkgs.aurora-xart pkgs.libfprint pkgs.aurora-sep-sk ];
+      services.udev.packages = [ pkgs.aurora-sep-sk ];
+      users.groups.sep-key = { };
       services.fprintd.enable = true;
       # Touch ID: a fingerprint or the password at sudo, polkit and the lock
       # screens (gdm-fingerprint, and kde-fingerprint from the Plasma module);
@@ -58,13 +63,13 @@ in {
             rules.auth = {
               unix.control = lib.mkForce "[success=ok new_authtok_reqd=ok default=2]";
               aurora-touchid-rearm = {
-                enable = unix.enable;
+                inherit (unix) enable;
                 order = unix.order + 1;
                 control = "optional";
                 modulePath = "${pkgs.aurora-touchid-rearm}/lib/security/pam_aurora_touchid.so";
               };
               aurora-touchid-rearm-done = {
-                enable = unix.enable;
+                inherit (unix) enable;
                 order = unix.order + 2;
                 control = "sufficient";
                 modulePath = "${pkgs.pam}/lib/security/pam_permit.so";
@@ -100,14 +105,15 @@ in {
         # Generated from aurora.sep.requirePasswordAfterBoot.
         require_password_after_boot = ${if cfg.requirePasswordAfterBoot then "yes" else "no"}
       '';
-      # Before the first login can offer Touch ID: with the setting on, the
-      # driver refuses Touch ID until the first password since boot.
+      # Before fprintd, through which every login, unlock and sudo reaches the
+      # reader: with the setting on, the driver refuses Touch ID until the
+      # first password since boot. The display manager does not wait for it.
       systemd.services.aurora-touchid-boot = {
         description = "Touch ID after a restart (require_password_after_boot)";
         wantedBy = [ "multi-user.target" ];
         wants = [ "aurora-sep-ready.service" ];
         after = [ "aurora-sep-ready.service" ];
-        before = [ "display-manager.service" "systemd-user-sessions.service" "fprintd.service" ];
+        before = [ "fprintd.service" ];
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;

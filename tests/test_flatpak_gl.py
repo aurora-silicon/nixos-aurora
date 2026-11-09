@@ -38,7 +38,7 @@ class RepositoryTests(unittest.TestCase):
         with patch.object(manager.repository, 'validate'), patch.object(manager, 'flatpak', side_effect=flatpak):
             manager.enable(self.root, COMMIT)
         self.assertEqual([args[-1] for args in calls if args[0] == 'pin'],
-                         [f'runtime/{repository.ID}/aarch64/{branch}' for branch in repository.BRANCHES])
+                         [f'runtime/{repository.ID}/aarch64/{branch}' for branch in repository.supported_branches()])
         self.assertEqual(calls[-1][0], 'override')
         self.assertTrue(all('--no-deps' in args and '--no-related' in args
                             for args in calls if args[0] == 'install'))

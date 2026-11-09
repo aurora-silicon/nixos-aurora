@@ -5,6 +5,7 @@ set -eu
 firmware_root=${AURORA_FIRMWARE_ROOT:-/lib/firmware}
 compatible=${AURORA_DT_COMPATIBLE:-/sys/firmware/devicetree/base/compatible}
 modprobe_command=${AURORA_MODPROBE:-modprobe}
+pci_root=${AURORA_PCI_ROOT:-/sys/bus/pci/devices}
 
 has_firmware() {
   [ -s "$firmware_root/vendor/$1" ] || [ -s "$firmware_root/$1" ]
@@ -55,5 +56,27 @@ else
   # Preserve ordinary non-Neo admission even if vendor extraction failed.
   "$modprobe_command" aop
 fi
-# Bluetooth is deliberately admitted later by its existing gated PCI service,
-# after root firmware extraction. It is not necessary to unlock the root disk.
+
+if [ "${AURORA_RUNTIME_FIRMWARE_READY:-0}" = 1 ]; then
+  # Resolve aliases with the running kernel instead of maintaining PCI IDs.
+  # These drivers were held back from udev until extraction and the real-root
+  # firmware search path were ready. Do not probe a partial firmware archive.
+  if [ -d "$firmware_root/brcm" ] || [ -d "$firmware_root/vendor/brcm" ]; then
+    for device in "$pci_root"/*; do
+      [ -r "$device/modalias" ] || continue
+      read -r alias < "$device/modalias" || continue
+      if modules=$("$modprobe_command" --resolve-alias "$alias" 2>/dev/null); then
+        for module in $modules; do
+          case "$module" in
+            brcmfmac|hci_bcm4377) "$modprobe_command" "$module" ;;
+          esac
+        done
+      fi
+    done
+  fi
+
+  # The ALS child reads calibration while probing, so it must follow the
+  # runtime path restoration too. Calibration remains optional for sensors
+  # that work without it; the driver diagnoses a missing required blob.
+  "$modprobe_command" aop_als
+fi

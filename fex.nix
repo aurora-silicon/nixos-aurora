@@ -4,17 +4,9 @@
 { lib, fex, fetchurl, runCommand, pin }:
 let
   short = builtins.substring 0 7 pin.commit;
-  # Submodule -> path in the tree.
-  paths = {
-    cpp-optparse = "Source/Common/cpp-optparse";
-    drm-headers = "External/drm-headers";
-    jemalloc = "External/jemalloc_glibc";
-    range-v3 = "External/range-v3";
-    rpmalloc = "External/rpmalloc";
-    Vulkan-Headers = "External/Vulkan-Headers";
-    vixl = "External/vixl";
-    unordered_dense = "External/unordered_dense";
-  };
+  # Source tracking records and verifies each gitlink alongside its path.
+  requiredSubmodules = [ "Vulkan-Headers" "cpp-optparse" "drm-headers" "jemalloc"
+    "range-v3" "rpmalloc" "unordered_dense" "vixl" ];
   archive = name: record: fetchurl {
     name = "${name}-${record.commit}.tar.gz";
     url = record.source_url;
@@ -24,13 +16,15 @@ let
     mkdir -p $out
     tar -xzf ${archive "fex" pin} --strip-components=1 -C $out
   '' + lib.concatStrings (lib.mapAttrsToList (name: record: ''
-    mkdir -p $out/${paths.${name}}
-    tar -xzf ${archive name record} --strip-components=1 -C $out/${paths.${name}}
+    mkdir -p $out/${record.path}
+    tar -xzf ${archive name record} --strip-components=1 -C $out/${record.path}
   '') pin.extra_sources));
 in
-assert lib.assertMsg (builtins.attrNames paths == builtins.attrNames pin.extra_sources)
+assert lib.assertMsg ((pin.submodules_commit or null) == pin.commit)
+  "Refresh every FEX submodule pin with the parent commit";
+assert lib.assertMsg (requiredSubmodules == builtins.attrNames pin.extra_sources)
   "Every pinned FEX submodule needs a path, and every path a pin";
-fex.overrideAttrs (finalAttrs: old: {
+fex.overrideAttrs (_finalAttrs: old: {
   # nixpkgs' postPatch writes FEX-<version> as the describe string.
   version = "${pin.version}-aurora-g${short}";
   inherit src;

@@ -12,6 +12,9 @@ spec = importlib.util.spec_from_file_location('basics', Path(__file__).with_name
 basics = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(basics)
 
+FLATPAK_BRANCHES = tuple(sorted(json.loads(
+    (Path(__file__).resolve().parents[1] / 'flatpak-gl/sdk-lock.json').read_text())))
+
 
 def cpio_names(stream):
     """Read newc archives without extracting or holding the initrd in memory."""
@@ -67,14 +70,15 @@ def check(root):
     required = {'skipLockedControls', 'initrdSequencer', 'malcontentSignal', 'flatpakGL', 'fexMesa'}
     if data.get('schema') != 1 or set(defaults) != required or not all(value is True for value in defaults.values()):
         raise ValueError('the image does not enable every Aurora parity default')
-    for key, file, commit in (
+    payloads = [
             ('kernel', 'aurora-source-commit', data['kernelCommit']),
             ('mesa', '.aurora-mesa-commit', data['mesaCommit']),
             ('audio', '.aurora-audio-commit', data['audioCommit']),
             ('ucm', '.aurora-ucm-commit', data['ucmCommit']),
-            ('fexMesa', '.aurora-mesa-commit', data['mesaCommit']),
-            ('flatpakGL', 'aurora-mesa-commit.25.08', data['mesaCommit']),
-            ('flatpakGL', 'aurora-mesa-commit.26.08', data['mesaCommit'])):
+            ('fexMesa', '.aurora-mesa-commit', data['mesaCommit'])]
+    payloads.extend(('flatpakGL', f'aurora-mesa-commit.{branch}', data['mesaCommit'])
+                    for branch in FLATPAK_BRANCHES)
+    for key, file, commit in payloads:
         if (root.text(f'{data[key]}/{file}') or '').strip() != commit:
             raise ValueError(f'{key}/{file}: missing or stale image payload')
     for arch in ('lib64', 'lib'):
@@ -85,7 +89,7 @@ def check(root):
     mic = root.text(f'{data["ucm"]}/share/alsa/ucm2/conf.d/aop_audio/3chan/HiFi.conf') or ''
     if 'JackControl "Internal Mic Jack"' not in mic:
         raise ValueError('the installed UCM profiles do not carry the microphone lid jack')
-    for branch in ('25.08', '26.08'):
+    for branch in FLATPAK_BRANCHES:
         if not root.path(f'{data["flatpakGL"]}/refs/heads/runtime/org.freedesktop.Platform.GL.aurora/aarch64/{branch}').is_file():
             raise ValueError(f'Flatpak GL {branch} is missing')
     for variant in ('v2-t0', 'v3-t0', 'v3-t1', 'v3-t2', 'v4-t0', 'v5-t0', 'v5-t1', 'v5-t2'):

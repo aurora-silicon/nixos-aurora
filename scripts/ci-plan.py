@@ -17,7 +17,8 @@ def select(current, previous=None, requested=(), changed_paths=()):
     if previous is None:
         return sorted(current)
     selected = {name for name, path in current.items() if previous.get(name) != path}
-    if 'scripts/test-graphics-generation' in changed_paths:
+    # The generation proof sources the shared checks.
+    if {'scripts/test-graphics-generation', 'scripts/testlib.sh'}.intersection(changed_paths):
         selected.add('graphics')
     return sorted(selected)
 
@@ -39,7 +40,7 @@ def main():
     previous = None
     changed_paths = []
     before = event.get('before', '')
-    if not requested:
+    if not requested and os.environ['GITHUB_EVENT_NAME'] != 'workflow_dispatch':
         if (os.environ['GITHUB_EVENT_NAME'] == 'pull_request'
                 or os.environ.get('GITHUB_REF', '').startswith('refs/heads/ci/')
                 or not before.strip('0')):

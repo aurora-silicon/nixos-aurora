@@ -1,6 +1,7 @@
 #!/bin/bash
 # A disposable Nix profile exercises real generations without machine access.
 set -euo pipefail
+source "$(dirname -- "${BASH_SOURCE[0]}")/testlib.sh"
 baseline=${1:?full baseline Git revision required}
 [[ $baseline =~ ^[0-9a-f]{40}$ ]]
 commit=$(python3 -c 'import json; print(json.load(open("sources.json"))["mesa-aurora"]["commit"])')
@@ -20,7 +21,7 @@ test -f "$profile/lib/libgbm.so"
 test -f "$(cat "$profile/etc/OpenCL/vendors/rusticl.icd")"
 strings "$profile/lib/libvulkan_asahi.so" | grep -F "(git-${commit:0:10}), Borealis"
 ldd "$profile/lib/libRusticlOpenCL.so.1.0.0" | tee "$proof/rusticl-ldd.txt"
-! grep -F 'not found' "$proof/rusticl-ldd.txt"
+nomatch -F 'not found' "$proof/rusticl-ldd.txt"
 OCL_ICD_VENDORS="$profile/etc/OpenCL/vendors" clinfo --list | tee "$proof/clinfo.txt"
 grep -i rusticl "$proof/clinfo.txt"
 VK_DRIVER_FILES="$profile/share/vulkan/icd.d/lvp_icd.aarch64.json" \

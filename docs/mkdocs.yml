@@ -1,0 +1,21 @@
+site_name: Aurora NixOS
+site_url: https://aurorasilicon.org/nixos-aurora/docs/
+repo_url: https://github.com/aurora-silicon/nixos-aurora
+edit_uri: edit/main/docs/
+docs_dir: content
+theme:
+  name: mkdocs
+  color_mode: auto
+nav:
+  - Home: index.md
+  - Modules: modules.md
+  - Options: /nixos-aurora/docs/options/
+  - Gaming: gaming.md
+  - Updates: updates.md
+  - Development: development.md
+  - Reference: reference.md
+markdown_extensions:
+  - tables
+  - fenced_code
+hooks:
+  - site-links.py

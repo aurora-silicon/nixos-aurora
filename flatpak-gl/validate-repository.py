@@ -13,8 +13,15 @@ import struct
 import subprocess
 import tempfile
 
-BRANCHES = ('25.08', '26.08')
 ID = 'org.freedesktop.Platform.GL.aurora'
+
+
+def supported_branches(sdk_lock=None):
+    lock = Path(sdk_lock) if sdk_lock is not None else Path(__file__).with_name('sdk-lock.json')
+    branches = tuple(sorted(json.loads(lock.read_text())))
+    if not branches:
+        raise ValueError('the Flatpak SDK lock must name at least one runtime')
+    return branches
 
 
 def validate_payload(root, commit):
@@ -54,7 +61,7 @@ def validate_payload(root, commit):
 
 
 
-def validate(repo, commit, checkout=None):
+def validate(repo, commit, checkout=None, *, branches=None):
     repo = Path(repo).resolve()
     if not re.fullmatch('[0-9a-f]{40}', commit):
         raise ValueError('expected a full Mesa commit')
@@ -62,7 +69,7 @@ def validate(repo, commit, checkout=None):
         def checkout(ref, tree):
             subprocess.run(['ostree', f'--repo={repo}', 'checkout', '--user-mode',
                             ref, str(tree)], check=True)
-    for branch in BRANCHES:
+    for branch in supported_branches() if branches is None else branches:
         if (repo / f'aurora-mesa-commit.{branch}').read_text().strip() != commit:
             raise ValueError(f'{branch}: stale repository Mesa stamp')
         ref = f'runtime/{ID}/aarch64/{branch}'
@@ -83,5 +90,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', required=True)
     parser.add_argument('--commit', required=True)
+    parser.add_argument('--sdk-lock', type=Path, help='pinned runtime lock (default: beside this script)')
     args = parser.parse_args()
-    validate(args.repo, args.commit)
+    validate(args.repo, args.commit, branches=supported_branches(args.sdk_lock))
