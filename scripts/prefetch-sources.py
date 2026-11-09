@@ -65,6 +65,7 @@ NEEDS = {
     'camera-denoise': ['camera-denoise'],
     'kbd-light': ['kbd-light'],
     'fido': ['aurora-fido'],
+    'sep-sk': ['aurora-sep-sk'],
     'omdrop-awdl': ['omdrop-awdl', 'omdrop-awdl/omdrop-plugin'],
     'xart': ['aurora-xart'],
 }

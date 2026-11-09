@@ -51,6 +51,9 @@ let
         "the keyboard backlight follows the light sensor from boot" = config.aurora.kbdLight.enable
           && lib.elem value.pkgs.aurora-kbd-light config.systemd.packages
           && lib.elem "multi-user.target" config.systemd.services.aurora-kbd-light.wantedBy;
+        "the sep-key group gets /dev/sep-key for Secure Enclave SSH keys" = config.users.groups ? sep-key
+          && lib.elem value.pkgs.aurora-sep-sk config.services.udev.packages
+          && lib.elem value.pkgs.aurora-sep-sk config.environment.systemPackages;
         "the Touch ID security key stays off unless asked for" = !config.aurora.fido.enable
           && !(config.systemd.services ? aurora-fido);
         "AirDrop over AWDL stays off unless asked for" = !config.aurora.awdl.enable

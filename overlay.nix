@@ -305,15 +305,7 @@ in {
       pin = pins.kernel-aurora;
       llvmPackages = kernelLLVM;
       inherit kernelCtxrExecmem kernelDtbAbi;
-      kernelPatches = [ {
-        name = "restore-legacy-speaker-protection";
-        patch = stableFile ./patches/0001-restore-legacy-speaker-protection.patch;
-      } {
-        # speakersafetyd could not open the speaker sense PCM (-ENOMEM) since
-        # linux 79af0bae4d0d dropped the capture preallocation that bounded it.
-        name = "mca-bound-pcm-buffer";
-        patch = stableFile ./patches/0002-mca-bound-pcm-buffer.patch;
-      } ] ++ _kernelPatches;
+      kernelPatches = _kernelPatches;
     }))) { };
   # Keep m1n1.override { customLogo = ...; } available to installed systems.
   m1n1 = assert final.lib.assertMsg (auraMonitorFree -> kernelCtxrExecmem)
@@ -602,6 +594,42 @@ in {
   aurora-kbd-light = final.callPackage ./pkgs/kbd-light.nix {
     src = source "kbd-light";
     pin = pins.kbd-light;
+  };
+  # OpenSSH ecdsa-sk keys in the Secure Enclave (aurora-sep-userspace sk/):
+  # the provider library, the udev rule giving the sep-key group /dev/sep-key
+  # and its sysusers entry. modules/sep.nix installs it and makes the group.
+  aurora-sep-sk = final.stdenv.mkDerivation {
+    pname = "aurora-sep-sk";
+    version = pins.aurora-sep-sk.version;
+    src = source "aurora-sep-sk";
+    sourceRoot = "${pins.aurora-sep-sk.archive_root}/sk";
+    nativeBuildInputs = [ final.pkg-config ];
+    buildInputs = [ final.openssl ];
+    # The OpenSSH flow against software P-256 stand-ins: no root, no hardware.
+    # Client tools only, as in the Fedora build: no sshd login in the sandbox.
+    nativeCheckInputs = [
+      (final.runCommand "openssh-client-tools" { } ''
+        mkdir -p $out/bin
+        for t in ssh ssh-keygen ssh-agent ssh-add; do ln -s ${final.openssh}/bin/$t $out/bin/$t; done
+      '')
+      final.gitMinimal
+    ];
+    makeFlags = [
+      "PREFIX=${placeholder "out"}" "LIBDIR=${placeholder "out"}/lib"
+      "UDEVRULESDIR=${placeholder "out"}/lib/udev/rules.d" "SYSUSERSDIR=${placeholder "out"}/lib/sysusers.d"
+    ];
+    doCheck = true;
+    checkTarget = "check";
+    postInstall = ''
+      install -Dm644 ../docs/ssh-sk.md $out/share/doc/aurora-sep-sk/ssh-sk.md
+    '';
+    passthru.commit = pins.aurora-sep-sk.commit;
+    meta = {
+      description = "OpenSSH security-key provider for Secure Enclave keys";
+      homepage = "https://github.com/aurora-silicon/aurora-sep-userspace";
+      license = final.lib.licenses.mit;
+      platforms = [ "aarch64-linux" ];
+    };
   };
   # Touch ID as a FIDO2/U2F security key (aurora-sep-userspace fido/).
   # modules/fido.nix runs it with aurora.fido.enable; off by default.

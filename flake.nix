@@ -79,6 +79,7 @@
         camera-denoise = pkgs.aurora-camera-denoise;
         kbd-light = pkgs.aurora-kbd-light;
         fido = pkgs.aurora-fido;
+        sep-sk = pkgs.aurora-sep-sk;
         xart = pkgs.aurora-xart;
       };
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
