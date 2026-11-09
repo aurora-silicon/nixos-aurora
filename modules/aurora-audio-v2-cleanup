@@ -13,8 +13,9 @@
 # reads them without v2, and aurora-speaker-upgrade can reuse the collected bundle.
 # Safe to run any number of times. Exit status is always 0.
 set -u
-# Fedora, Arch Linux ARM
-for helper in /usr/libexec/speakerguardd/speakerguardd-provision /usr/lib/speakerguardd-v2/speakerguardd-provision; do
+# Fedora (upstream and distro layouts), Arch Linux ARM
+for helper in /usr/libexec/speakerguardd/speakerguardd-provision /usr/libexec/speakerguardd-v2/speakerguardd-provision \
+              /usr/lib/speakerguardd-v2/speakerguardd-provision; do
     [ -e "$helper" ] && exit 0
 done
 command -v speakerguardd-provision >/dev/null 2>&1 && exit 0
