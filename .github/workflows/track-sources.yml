@@ -95,6 +95,10 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Install repository test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y device-tree-compiler openssl
       - id: plan
         env:
           GH_TOKEN: ${{ github.token }}
