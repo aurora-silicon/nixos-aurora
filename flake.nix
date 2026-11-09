@@ -155,7 +155,7 @@
         pkg = on.aurora.speakerguardd.v2.package;
         unit = name: on.systemd.units.${name} or { enable = false; wantedBy = [ ]; text = ""; };
         gate = builtins.unsafeDiscardStringContext "${pkg}/libexec/speakerguardd-v2/speakerguardd-gate legacy";
-        gated = name: lib.hasInfix "ExecCondition=${gate}" (unit "${name}.service").text;
+        gated = name: lib.hasInfix "ExecCondition=+${gate}" (unit "${name}.service").text;
       in assert lib.assertMsg (pkg.pname == "speakerguardd-v2"
            && builtins.elem pkg on.environment.systemPackages && builtins.elem pkg on.systemd.packages)
            "enable = true must install speakerguardd 1.0";
