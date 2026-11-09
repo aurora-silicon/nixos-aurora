@@ -265,6 +265,15 @@ in {
     ];
     doCheck = true;
   });
+  # AirPlay 2 receivers (services.shairport-sync with nqptp): nqptp's main loop
+  # polled with a 10 ms select() timeout, so its SCHED_FIFO thread woke 100
+  # times a second with no AirPlay session and held a CPU cluster at its top
+  # performance state (0.3-1.4 W at idle on Aurora's Macs). Fedora's nqptp
+  # 1.2.9 carries this patch; it blocks until a packet arrives or a clock is
+  # waiting to be awakened. Same file as fedora-aurora packages/nqptp.
+  nqptp = prev.nqptp.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ (stableFile ./patches/nqptp-1.2.9-idle-wakeups.patch) ];
+  });
   upower = prev.upower.overrideAttrs (old: {
     src = source "upower-aurora";
     version = pins.upower-aurora.version;

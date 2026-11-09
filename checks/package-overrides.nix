@@ -16,6 +16,10 @@ assert pkgs.lib.assertMsg
 assert pkgs.lib.assertMsg
   (builtins.elem (pkgs.lib.cmakeBool "BUILD_FEXCONFIG" false) fexWithoutQt.cmakeFlags)
   "Aurora FEX must preserve the upstream withQt override";
+assert pkgs.lib.assertMsg
+  (pkgs.nqptp.version == "1.2.9"
+    && builtins.any (patch: pkgs.lib.hasSuffix "-nqptp-1.2.9-idle-wakeups.patch" (toString patch)) pkgs.nqptp.patches)
+  "nqptp must carry Fedora's idle-wakeup patch, which is made for 1.2.9";
 assert pkgs.lib.assertMsg compilerSelected
   "Aurora Mesa must honor the caller's llvmPackages override";
 pkgs.runCommand "aurora-package-overrides" { } "touch $out"
