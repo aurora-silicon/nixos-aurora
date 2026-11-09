@@ -14,7 +14,20 @@ let
       ${lib.optionalString (lib.elem (lib.removeSuffix ".service" name) daemons) "SuccessExitStatus=71"}
     '';
   };
+  wakeForNetwork = pkgs.writeShellScriptBin "aurora-wake-for-network"
+    (builtins.replaceStrings [ "export PATH=/usr/sbin:/usr/bin" ]
+      [ "export PATH=${lib.makeBinPath [ pkgs.ethtool pkgs.iw pkgs.coreutils pkgs.gnugrep ]}" ]
+      (builtins.readFile ./aurora-wake-for-network.sh));
 in {
+  options.aurora.systemFixes.wakeForNetwork = lib.mkOption {
+    type = lib.types.enum [ "power-adapter" "always" "never" ];
+    default = "power-adapter";
+    description = ''
+      Wake for network access (magic packet on wired interfaces that support
+      it and on Wi-Fi phys with magic-packet WoWLAN). The default follows the
+      power adapter, as macOS laptops do: armed on AC, disarmed on battery.
+    '';
+  };
   options.aurora.systemFixes.malcontentSignal = lib.mkOption {
     type = lib.types.bool;
     default = true;
@@ -91,6 +104,15 @@ in {
         serviceConfig.ExecStart = [ "" "${config.networking.networkmanager.package}/libexec/nm-dispatcher --persist" ];
       };
     })
+    {
+      # Same policy script and udev triggers as fedora-aurora's aurora-platform.
+      environment.etc."aurora/wake-for-network".text = config.aurora.systemFixes.wakeForNetwork + "\n";
+      services.udev.extraRules = ''
+        SUBSYSTEM=="power_supply", ACTION=="change", ATTR{type}=="Mains", RUN+="${wakeForNetwork}/bin/aurora-wake-for-network"
+        SUBSYSTEM=="net", ACTION=="add", ENV{DEVTYPE}!="wlan", RUN+="${wakeForNetwork}/bin/aurora-wake-for-network"
+        SUBSYSTEM=="ieee80211", ACTION=="add", RUN+="${wakeForNetwork}/bin/aurora-wake-for-network"
+      '';
+    }
     {
       # Only contributes ordering when this optional swapfile unit exists.
       # Btrfs activates swapfiles under an exclusive filesystem operation.
