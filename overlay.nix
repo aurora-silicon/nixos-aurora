@@ -71,12 +71,17 @@ in {
     portabilityPatch = stableFile ./patches/libva-v4l2-request-offline-test-portability.patch;
   };
   plymouth = prev.plymouth.overrideAttrs (old: {
-    version = "${old.version}-aurora2";
+    version = "${old.version}-aurora3";
     # Keep the upstream archive tag when only changing the carry release.
     src = prev.plymouth.src;
     passthru = (old.passthru or { }) // { scriptKeyboardLifetime = 1; };
     nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.xvfb final.fontconfig final.dejavu_fonts ];
     patches = (old.patches or [ ]) ++ [
+      # Fedora's two upstream fixes, in Fedora's order: the frame-buffer plugin
+      # no longer opens the fbdev of a DRM device plymouth already drives, and
+      # the default XKB keymap no longer overrides KEYMAP.
+      (stableFile ./plymouth/0001-ply-device-manager-Fix-race-in-fb_device_has_drm_dev.patch)
+      (stableFile ./plymouth/0001-ply-device-manager-fix-default-XKB-keymap-fallback-o.patch)
       (stableFile ./plymouth/0001-ply-terminal-Keep-terminal-input-nonblocking.patch)
       (stableFile ./plymouth/0001-systemd-units-Start-plymouthd-without-waiting-for-coldplug.patch)
       (stableFile ./plymouth/0001-Fix-splash-keyboard-lifetime.patch)

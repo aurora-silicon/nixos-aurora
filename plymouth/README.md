@@ -14,6 +14,25 @@ built and bounds it to 15 seconds. It exercises stale readiness, termios
 changes, partial and complete canonical lines, close/reopen cleanup, and the
 real keyboard input handler without a physical console.
 
+## Frame-buffer race and XKB keymap fallback
+
+Fedora's Plymouth 26.134.222 recipe carries two upstream fixes that nixpkgs
+does not. The overlay applies them first, in Fedora's order, copied unchanged
+from fedora-aurora `packages/plymouth`:
+
+- `0001-ply-device-manager-Fix-race-in-fb_device_has_drm_dev.patch`: when udev
+  restarts on the real root, plymouth gets an add event for the fbdev of the
+  DRM device whose splash it already shows. Its udev query for a matching DRM
+  card could run before udev had enumerated that card, so plymouth loaded the
+  frame-buffer plugin and opened the same output a second time through fbdev.
+  The fix recognises DRM-emulated fbdevs by their `drmfb` name instead.
+- `0001-ply-device-manager-fix-default-XKB-keymap-fallback-o.patch`
+  (upstream `cea90be39d26`): the default XKB keymap no longer overrides the
+  console `KEYMAP`, so the passphrase prompt uses the configured layout.
+
+All six patches apply with no fuzz to the 26.134.222 tag after nixpkgs' own
+patches. The firstboot flake check requires both on every profile.
+
 ## SDR display handoff
 
 The overlay also appends
@@ -61,7 +80,7 @@ against the just-built libraries and private X11/label modules under Xvfb.
 The renderer fixture uses a private PTY and requires no hardware console.
 The original terminal-input PTY regression remains enabled.
 
-The combined derivation has release suffix `-aurora2` and exposes
+The combined derivation has release suffix `-aurora3` and exposes
 `scriptKeyboardLifetime = 1`. Theme 1-4 asserts that capability >= 1, and all
 Aurora profiles select the same patched Plymouth derivation.
 

@@ -36,6 +36,8 @@ let
       && lib.all (c: lib.hasInfix "DeviceScale=1" c.boot.plymouth.extraConfig) [ kde gnome ];
     "every profile selects the patched Plymouth" = lib.all (c:
       c.boot.plymouth.package.drvPath == pkgs.plymouth.drvPath
+      && patchedWith "0001-ply-device-manager-Fix-race-in-fb_device_has_drm_dev.patch" c.boot.plymouth.package
+      && patchedWith "0001-ply-device-manager-fix-default-XKB-keymap-fallback-o.patch" c.boot.plymouth.package
       && patchedWith "0001-ply-terminal-Keep-terminal-input-nonblocking.patch" c.boot.plymouth.package
       && patchedWith "0001-Fix-splash-keyboard-lifetime.patch" c.boot.plymouth.package
       && c.boot.plymouth.package.scriptKeyboardLifetime >= 1
