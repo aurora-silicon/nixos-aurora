@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,6 +105,64 @@ class CheckStage2Tests(unittest.TestCase):
                 check_stage2.check(image, aura, required)
 
 
+class PrepareStage2Tests(unittest.TestCase):
+    def prepare(self, image):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        combined, aura, output = root / 'combined', root / 'aura', root / 'boards'
+        combined.write_bytes(image)
+        aura.write_bytes(b'AURA-STAGE2-BINARY')
+        manifest = prepare_stage2.prepare(combined, aura, output)
+        return manifest, output
+
+    def test_board_payloads_preserve_options_and_pass_the_same_validator(self):
+        options = b'chosen.bootargs=quiet\ndisplay=auto\nmitigations=off\n'
+        image = stage2(options=options)
+        manifest, output = self.prepare(image)
+        self.assertEqual(set(manifest['boards']), {'j274ap', 'j700ap'})
+        self.assertEqual(manifest['deviceTreeCount'], 2)
+        for board in ('j274', 'j700'):
+            payload = (output / f'boot-{board}.bin').read_bytes()
+            checked = check_stage2.check(payload, b'AURA-STAGE2-BINARY', [board])
+            self.assertEqual(checked['boards'], [f'apple,{board}'])
+            self.assertEqual(checked['options'], options.decode().splitlines())
+            self.assertTrue(payload.endswith(options))
+
+    def test_checker_and_preparer_refuse_malformed_inputs(self):
+        aura = b'AURA-STAGE2-BINARY'
+        broken_tree = bytearray(device_tree('apple,j700'))
+        # Property name outside the strings block.
+        struct.pack_into('>I', broken_tree, 56, 0xffffffff)
+        images = [
+            stage2(options=b'\0binary'),
+            stage2() + gzip.compress(b'second member'),
+            stage2()[:-4],
+            aura + bytes(broken_tree) + gzip.compress(b'u-boot'),
+            aura + b'\xd0\x0d\xfe\xed',
+        ]
+        for image in images:
+            with self.subTest(image=image[-24:]):
+                with self.assertRaises(ValueError):
+                    check_stage2.check(image, aura)
+                with self.assertRaises(ValueError):
+                    self.prepare(image)
+
+    def test_checker_and_preparer_bound_uncompressed_next_stage(self):
+        aura = b'AURA-STAGE2-BINARY'
+        def image(size):
+            return aura + device_tree('apple,j700') + gzip.compress(b'x' * size)
+        # A small budget keeps the compressed input below the limit while
+        # exercising both the exact decompressed boundary and an overrun.
+        with patch('stage2.MAX_BYTES', 512):
+            self.assertEqual(check_stage2.check(image(512), aura)['ubootBytes'], 512)
+            self.prepare(image(512))
+            for operation in (lambda: check_stage2.check(image(513), aura),
+                              lambda: self.prepare(image(513))):
+                with self.assertRaisesRegex(ValueError, 'Uncompressed U-Boot size'):
+                    operation()
+
+
 @unittest.skipUnless(shutil.which('bash') and shutil.which('sha256sum'), 'bash and coreutils are required')
 class InstallStage2Tests(unittest.TestCase):
     def setUp(self):
@@ -157,14 +216,14 @@ class InstallStage2Tests(unittest.TestCase):
         path.write_text('#!/usr/bin/env bash\n' + script)
         path.chmod(0o755)
 
-    def run_install(self, *extra):
+    def run_install(self, *extra, device_tree=None, compatible=None):
         state = self.state
         self.stub('mountpoint', f'exit {0 if state["mounted"] == "1" else 1}\n')
         self.stub('findmnt', 'case " $* " in *FSTYPE*) echo ' + state['fstype'] + ';; *SOURCE*) echo /dev/fake1;; esac\n')
         self.stub('lsblk', f'echo {state["partuuid"]}\n')
         env = dict(os.environ, PATH=f'{self.stubs}:{os.environ["PATH"]}',
-                   AURORA_DEVICE_TREE_ESP=str(self.device_tree),
-                   AURORA_DEVICE_TREE_COMPATIBLE=str(self.compatible),
+                   AURORA_DEVICE_TREE_ESP=str(device_tree or self.device_tree),
+                   AURORA_DEVICE_TREE_COMPATIBLE=str(compatible or self.compatible),
                    AURORA_SYSTEM_PROFILES=str(self.profiles), AURORA_STAGE2_LOCK=str(self.lock))
         return subprocess.run(['bash', str(INSTALL), str(self.source), str(self.esp), *extra], env=env,
                               capture_output=True, text=True)
@@ -214,6 +273,15 @@ class InstallStage2Tests(unittest.TestCase):
         self.assertEqual(self.run_install().returncode, 0)
         self.assertEqual(self.target.read_bytes(), stage2())
         self.assertFalse((self.esp / 'm1n1/boot.bin.old').exists())
+
+    def test_image_assembly_checks_the_image_partition_not_the_build_hosts_esp(self):
+        self.device_tree.write_bytes(b'ffff-0000\0')
+        self.assert_untouched(self.run_install())
+        image_record = self.source / 'image-esp-partuuid'
+        image_record.write_text(self.state['partuuid'] + '\n')
+        result = self.run_install(device_tree=image_record)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.target.read_bytes(), stage2())
 
     def test_missing_or_mismatched_inputs_are_refused(self):
         (self.source / 'boot.bin.sha256').write_text('0' * 64 + '\n')
@@ -391,6 +459,16 @@ class InstallStage2Tests(unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), stage2())
         self.assertFalse(self.ctxr.exists())
 
+    def test_universal_image_install_ignores_the_macho_builder_board(self):
+        self.compatible.write_bytes(compatible_file('j700', 't8140'))
+        self.write_ctxr_source('j700', stage2(boards=('j700',)))
+        result = self.run_install(compatible=Path('/dev/null'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.target.read_bytes(), stage2())
+        self.assertFalse(self.ctxr.exists())
+        image_builder = (ROOT / 'scripts/build-image').read_text()
+        self.assertIn('AURORA_DEVICE_TREE_COMPATIBLE=/dev/null \\\n', image_builder)
+
     def test_another_machine_installs_boot_bin(self):
         (self.source / 'monitor-free').touch()
         self.compatible.write_bytes(b'linux,dummy-virt\0')
@@ -497,9 +575,9 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
     def flag(self, name):
         return re.search(rf'(?m)^  {name} = (true|false);$', (ROOT / 'overlay.nix').read_text())[1] == 'true'
 
-    def step(self, start, end):
-        """The lines of overlay.nix from the one starting `start` to the next one equal to `end`."""
-        text = (ROOT / 'overlay.nix').read_text()
+    def step(self, start, end, recipe):
+        """Run the recipe's production flag check in the temporary fixture."""
+        text = (ROOT / recipe).read_text()
         return re.search(rf'(?ms)^ +{re.escape(start)}.*?^ +{re.escape(end)}$', text)[0]
 
     def test_an_aura_without_the_monitor_needs_a_kernel_that_keeps_its_code_in_the_window(self):
@@ -514,28 +592,28 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
 
     def test_a_system_checks_the_kernel_it_boots_against_its_aura(self):
         # Not just the two constants: a system that overrides its kernel is checked too.
-        overlay = (ROOT / 'overlay.nix').read_text()
-        self.assertIn('auroraCtxrExecmem = kernelCtxrExecmem;', overlay)
-        self.assertIn('passthru = (old.passthru or { }) // { auroraMonitorFree = auraMonitorFree; };', overlay)
+        self.assertIn('auroraCtxrExecmem = kernelCtxrExecmem;', (ROOT / 'pkgs/kernel.nix').read_text())
+        self.assertIn('passthru = (old.passthru or { }) // { inherit auraMonitorFree; };',
+                      (ROOT / 'pkgs/aura.nix').read_text())
         installed = (ROOT / 'modules/installed.nix').read_text()
         self.assertIn('assertion = !(aura.auroraMonitorFree or false)\n'
                       '        || (config.boot.kernelPackages.kernel.auroraCtxrExecmem or false);', installed)
 
     def test_the_kernel_build_refuses_a_flag_its_configuration_disagrees_with(self):
-        check = self.step('ctxr=false', 'fi')
+        check = self.step('ctxr=false', 'fi', 'pkgs/kernel.nix')
         for line, value, ok in (('CONFIG_ARM64_CTXR_EXECMEM=y', 'true', True), ('', 'false', True),
                                 ('CONFIG_ARM64_CTXR_EXECMEM=y', 'false', False), ('', 'true', False)):
             with self.subTest(line=line, value=value), tempfile.TemporaryDirectory() as temporary:
                 (Path(temporary) / '.config').write_text(line + '\n')
-                script = check.replace('${final.lib.boolToString kernelCtxrExecmem}', value)
+                script = check.replace('${lib.boolToString kernelCtxrExecmem}', value)
                 result = subprocess.run(['bash', '-euc', script], capture_output=True, text=True,
                                         env=dict(os.environ, buildRoot=temporary))
                 self.assertEqual(result.returncode == 0, ok, result.stderr)
 
     def test_the_aura_build_refuses_a_flag_the_pinned_source_disagrees_with(self):
-        check = self.step('found=false', 'fi')
-        marker = '${final.lib.optionalString auraMonitorFree "touch $out/share/aura/monitor-free"}'
-        self.assertIn(marker, (ROOT / 'overlay.nix').read_text())
+        check = self.step('found=false', 'fi', 'pkgs/aura.nix')
+        marker = '${lib.optionalString auraMonitorFree "touch $out/share/aura/monitor-free"}'
+        self.assertIn(marker, (ROOT / 'pkgs/aura.nix').read_text())
         cases = {'monitor': (('monitor.c',), False), 'monitor-free': (('ctxr_exec.c',), True),
                  'both': (('monitor.c', 'ctxr_exec.c'), True), 'renamed': (('other.c',), True)}
         for name, (files, source) in cases.items():
@@ -545,7 +623,7 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
                     (root / 'src').mkdir()
                     for file in files:
                         (root / 'src' / file).write_text('')
-                    script = check.replace('${final.lib.boolToString auraMonitorFree}', str(value).lower())
+                    script = check.replace('${lib.boolToString auraMonitorFree}', str(value).lower())
                     result = subprocess.run(['bash', '-euc', script], cwd=root, capture_output=True, text=True)
                     self.assertEqual(result.returncode == 0, value == source, result.stderr)
 

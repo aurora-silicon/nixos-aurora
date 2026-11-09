@@ -81,6 +81,13 @@ class ImageParityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'stale image payload'):
             self.check()
 
+    def test_unidentified_kernel_source_is_not_accepted_as_verified(self):
+        self.metadata['kernelCommit'] = None
+        self.write('/nix/store/kernel/aurora-source-commit', 'unknown\n')
+        self.save_metadata()
+        with self.assertRaisesRegex(ValueError, 'kernel/aurora-source-commit'):
+            self.check()
+
     def test_the_patched_alsa_utility_must_be_installed(self):
         (self.root / 'nix/store/alsaUtils/bin/alsactl').unlink()
         with self.assertRaisesRegex(ValueError, 'patched ALSA utilities are missing'):

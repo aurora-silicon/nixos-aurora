@@ -1,5 +1,6 @@
 import base64
 import importlib.util
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -17,8 +18,15 @@ spec.loader.exec_module(module)
 PUBLISHED = 'StorePath: /nix/store/00g6x5iwc7lc6d4nq7h8kpdgl6fn85vl-unit-systemd-localed.service\nURL: https://github.com/aurora-silicon/nixos-aurora/releases/download/cache-testing-20261018.2/0cnyr6krn33ymivs46c9a62sj5q5s4bp7vd8ibzq4zv3xlmmv44b.nar.zst\nCompression: zstd\nFileHash: sha256:0cnyr6krn33ymivs46c9a62sj5q5s4bp7vd8ibzq4zv3xlmmv44b\nFileSize: 599\nNarHash: sha256:0q08r59vmvsfpri47sw59517gqimgdqi0z24dfnw4m7xq7a46j1m\nNarSize: 1304\nReferences: 11ra19d3cyh5kv0lk8v35wqcnz6wjrm0-findutils-4.11.0 2jk00rxplr3qjmjl2q46l7izbf8gxcs6-gnused-4.10 5g0149dc72bz1rdxjc10qnr4vdh9yp1x-tzdata-2026d 82643wb56lminz3a4b6gk92d2g4ydwks-gnugrep-3.12 8w0qabyr98chcmr4y9hh6h6l26albldx-systemd-261.3 dq1apsyiah48nmc4n45dpwc33k887hdn-coreutils-9.11 p6anq44imf9jm477g3q1ari69c6lrhdf-glibc-locales-2.44-25\nDeriver: y4nl68azh5735sr4vysd8ldyvd70msf5-unit-systemd-localed.service.drv\nSig: aurora-nixos-1:gJdnzsegH2tA3aTWji/uuibVoKD/3mRg1cqGTBr6i9rfelbBVkcZcwnzt9Oaq+PN0PqM/CvThZWG9mvUsG3iAA==\n'
 
 
-@unittest.skipUnless(shutil.which('openssl'), 'openssl is required')
 class SignCacheMetadataTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if shutil.which('openssl') is None:
+            message = 'OpenSSL is required; run tests with nix shell --inputs-from . nixpkgs#openssl -c python3 -m unittest discover -s tests'
+            if os.environ.get('GITHUB_ACTIONS') == 'true':
+                raise RuntimeError(message)
+            raise unittest.SkipTest(message)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

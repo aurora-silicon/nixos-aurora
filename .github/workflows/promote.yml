@@ -6,7 +6,7 @@ on:
         description: nixos-aurora commit to promote; empty promotes what channel-testing serves now
         default: ''
       allow-downgrade:
-        description: Allow a source pin to move backwards relative to stable
+        description: Allow stable or a source pin to move backwards
         type: boolean
         default: false
 permissions: {}

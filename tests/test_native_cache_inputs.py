@@ -1,14 +1,12 @@
-import importlib.util
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 import zipfile
 
-spec = importlib.util.spec_from_file_location('native_cache_inputs',
-    Path(__file__).resolve().parents[1] / 'scripts/collect-cache-inputs.py')
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+import cache_inputs as module
 
 
 class NativeCacheInputsTests(unittest.TestCase):
@@ -121,6 +119,43 @@ class NativeCacheInputsTests(unittest.TestCase):
         p.write_text(('StorePath: /nix/store/' + 'a' * 32 + '-fixture\n') * 2)
         with self.assertRaises(ValueError):
             module.store_paths(self.root)
+
+    def test_artifact_digest_and_attestation_failures_stop_before_extraction(self):
+        artifact = {'id': 1, 'expired': False, 'size_in_bytes': 16, 'digest': 'sha256:expected'}
+        for digest, provenance_error in [('wrong', None), ('expected', RuntimeError('bad attestation'))]:
+            with self.subTest(digest=digest), \
+                 patch.object(module.shutil, 'disk_usage') as usage, \
+                 patch.object(module.subprocess, 'run'), \
+                 patch.object(module, 'digest', return_value=digest), \
+                 patch.object(module, 'verify_attestation', side_effect=provenance_error) as attest, \
+                 patch.object(module, 'unpack') as unpack:
+                usage.return_value.free = 64 * 1024**3
+                with self.assertRaises((ValueError, RuntimeError)):
+                    with module.authenticated_artifact(artifact, 'a' * 40, parent=self.root):
+                        self.fail('untrusted artifact was yielded')
+                unpack.assert_not_called()
+                if digest == 'wrong':
+                    attest.assert_not_called()
+                else:
+                    attest.assert_called_once()
+
+    def test_matching_derivation_with_an_incomplete_verified_cache_is_rejected(self):
+        path = '/nix/store/' + 'a' * 32 + '-fixture'
+        cache = self.root / 'cache'
+        cache.mkdir()
+        expected = {'drvPath': '/nix/store/current.drv', 'outputs': [path]}
+        import json
+        (self.root / 'build.json').write_text(json.dumps([
+            {'drvPath': expected['drvPath'], 'outputs': {'out': path}}]))
+        with patch.object(module.subprocess, 'run') as run:
+            with self.assertRaisesRegex(ValueError, 'omits a declared output'):
+                module.verified_cache(self.root, expected)
+        run.assert_called_once()
+        command = run.call_args.args[0]
+        self.assertEqual(command[:3], ['nix', 'store', 'verify'])
+        self.assertEqual(command[command.index('--store') + 1], cache.as_uri())
+        self.assertTrue({'--all', '--no-trust'}.issubset(command))
+        self.assertTrue(run.call_args.kwargs['check'])
 
 
 if __name__ == '__main__':

@@ -31,7 +31,7 @@ def remotes():
 
 
 def enable(repo, commit):
-    # Validate both complete branches before making any host changes.
+    # Validate every pinned runtime before making any host changes.
     repository.validate(repo, commit)
     url = Path(repo).as_uri()
     if REMOTE in remotes():
@@ -39,7 +39,7 @@ def enable(repo, commit):
     else:
         flatpak('remote-add', '--no-gpg-verify', '--no-enumerate', '--no-use-for-deps',
                 '--title=Aurora Mesa (local)', REMOTE, url)
-    for branch in repository.BRANCHES:
+    for branch in repository.supported_branches():
         ref = f'runtime/{repository.ID}/aarch64/{branch}'
         flatpak('install', '--noninteractive', '-y', '--no-deps', '--no-related', '--or-update', REMOTE, ref)
         flatpak('pin', ref)

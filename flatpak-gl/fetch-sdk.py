@@ -90,8 +90,10 @@ def object_server(ca_file, downloader=fetch):
         thread.join()
 
 
-def fetch_sdk(repo, refs, ca_file):
-    if not refs or not all(re.fullmatch(r'runtime/org\.freedesktop\.(?:Sdk|Platform|Sdk\.Extension\.llvm22)/aarch64/(?:25|26)\.08', ref)
+def fetch_sdk(repo, refs, ca_file, *, sdk_lock=None):
+    lock = Path(sdk_lock) if sdk_lock is not None else Path(__file__).with_name('sdk-lock.json')
+    pinned_refs = {ref for runtime in json.loads(lock.read_text()).values() for ref in runtime['refs']}
+    if not refs or not all(ref in pinned_refs
                            and re.fullmatch('[0-9a-f]{64}', commit) for ref, commit in refs.items()):
         raise ValueError('Expected pinned Freedesktop SDK refs and full OSTree commits')
     def ostree(*args):
@@ -112,5 +114,6 @@ if __name__ == '__main__':
     parser.add_argument('--repo', required=True)
     parser.add_argument('--refs', type=Path, required=True)
     parser.add_argument('--ca-file', type=Path, required=True)
+    parser.add_argument('--sdk-lock', type=Path, help='pinned runtime lock (default: beside this script)')
     args = parser.parse_args()
-    fetch_sdk(args.repo, json.loads(args.refs.read_text()), args.ca_file)
+    fetch_sdk(args.repo, json.loads(args.refs.read_text()), args.ca_file, sdk_lock=args.sdk_lock)

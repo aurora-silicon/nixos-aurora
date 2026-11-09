@@ -6,7 +6,7 @@ in {
   environment.etc."aurora/parity.json".text = builtins.toJSON {
     schema = 1;
     mesaCommit = pins.mesa-aurora.commit;
-    kernelCommit = pins.kernel-aurora.commit;
+    kernelCommit = config.boot.kernelPackages.kernel.auroraSourceCommit or null;
     audioCommit = pins.aurora-audio.commit;
     ucmCommit = pins.alsa-ucm-conf-aurora.commit;
     kernel = toString config.boot.kernelPackages.kernel;
