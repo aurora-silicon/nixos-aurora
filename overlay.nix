@@ -561,11 +561,14 @@ in {
   });
   asahi-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
-    version = "${pins.aurora-audio.version}-aurora12";
+    version = "${pins.aurora-audio.version}-aurora15";
     patches = (old.patches or [ ]) ++ [ (stableFile ./patches/0001-restore-legacy-speaker-graphs.patch) ];
     postInstall = (old.postInstall or "") + ''
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
       test -e "$out/share/wireplumber/scripts/device/asahi-keep-profile.lua"
+      # MCA speaker PCMs wake on period interrupts: a chrony slew no longer
+      # re-prepares the timer-scheduled sink (aurora-audio 4.1-14 on Fedora/ALARM).
+      install -Dm644 ${stableFile ./patches/99-aurora-speaker-irq.conf} "$out/share/wireplumber/wireplumber.conf.d/99-aurora-speaker-irq.conf"
     '';
     # nixpkgs' fixup phase rewrites /usr paths to this output first.
     postFixup = (old.postFixup or "") + ''

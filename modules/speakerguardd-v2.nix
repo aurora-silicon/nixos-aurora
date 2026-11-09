@@ -37,7 +37,7 @@ in {
       "aurora.speakerguardd.v2.enable installs v2 beside the legacy daemons; aurora-speaker-upgrade makes the switch.")
   ];
 
-  config = lib.mkIf cfg.enable {
+  config = lib.mkMerge [ (lib.mkIf cfg.enable {
     # The provisioning marker (speakerguardd#106) hides the speaker card's raw
     # ports; without aurora-audio's keep-profile rule (asahi-audio#24) a Mac
     # with a headphone jack drops the built-in card to "off" while nothing is
@@ -68,5 +68,20 @@ in {
     # no v2 interface.
     systemd.services.speakersafetyd = legacyGate;
     systemd.services.speakerguardd = legacyGate;
-  };
+  })
+  (lib.mkIf (!cfg.enable) {
+      # The preview linked its generated PipeWire and WirePlumber configuration
+      # into each user's ~/.config, pointing into /run/speakerguardd-graph. Nothing
+      # creates that directory without v2, so the links dangle and PipeWire logs an
+      # error at every login. Remove only links into that directory, at every boot
+      # and switch; /var/lib/speakerguardd stays for aurora-speaker-upgrade.
+      system.activationScripts.aurora-audio-v2-cleanup.text = let
+        cleanup = pkgs.writeShellApplication {
+          name = "aurora-audio-v2-cleanup";
+          runtimeInputs = [ pkgs.getent pkgs.coreutils ];
+          # writeShellApplication writes its own shebang (shellcheck SC1128).
+          text = lib.removePrefix "#!/bin/sh\n" (builtins.readFile ./aurora-audio-v2-cleanup);
+        };
+      in "${cleanup}/bin/aurora-audio-v2-cleanup || true";
+  }) ];
 }
