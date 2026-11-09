@@ -112,26 +112,19 @@
       in assert lib.assertMsg valid "Aurora clean-boot packaging parity failed";
         pkgs.runCommandNoCC "aurora-clean-boot-defaults" { } "touch $out";
 
-      # Evaluate the actual image module graph: legacy protection is selected
-      # without the v2 package, units or daemon gates.
+      # Evaluate the actual image module graph: the legacy protection stays
+      # installed and available as the fallback the v2 gate starts on a Mac
+      # aurora-speaker-upgrade has not switched (switch-on, Ryan + DJ go).
       legacy-speaker-protection = let
         inherit (nixpkgs) lib;
         profile = makeSystem "minimal";
         config = profile.config;
         unit = name: config.systemd.units.${name} or { enable = false; text = ""; };
-        guarded = name: lib.hasInfix "speakerguardd-gate" (unit name).text;
-        preview = package: (package.pname or "") == "speakerguardd-v2";
-      in assert lib.assertMsg (!config.aurora.speakerguardd.v2.enable)
-           "The v2 rollout is held";
-         assert lib.assertMsg (!(lib.any preview config.environment.systemPackages)
-           && !(lib.any preview config.systemd.packages)) "The image must not install v2";
-         # Services imported from systemd.packages do not all appear in
-         # config.systemd.units. Check their package imports here, and the
-         # actual packaged unit files in the derivation below.
+      in assert lib.assertMsg (config.aurora.speakerguardd.v2.enable && config.aurora.speakerguardd.upgrade.enable)
+           "The image ships speakerguardd v2 and aurora-speaker-upgrade";
          assert lib.assertMsg (lib.all (package: lib.elem package config.systemd.packages)
-           [ profile.pkgs.speakersafetyd profile.pkgs.speakerguardd ]
-           && !(guarded "speakersafetyd.service") && !(guarded "speakerguardd.service"))
-           "Legacy daemons must remain available without the v2 gate";
+           [ profile.pkgs.speakersafetyd profile.pkgs.speakerguardd ])
+           "Legacy daemons must remain available as the fallback";
          assert lib.assertMsg (lib.hasInfix "use-feedback-guard" (unit "speakersafetyd.service").text)
            "Keep the board-specific legacy protection selector";
          assert lib.assertMsg (config.boot.kernelPackages.kernel.auroraLegacySpeakerProtection or false)
@@ -146,12 +139,12 @@
            touch $out
          '';
 
-      # speakerguardd v2 (RC8) is opt-in: with aurora.speakerguardd.v2.enable
-      # it installs beside the legacy daemons behind its gate, which keeps
-      # speakersafetyd in charge until aurora-speaker-upgrade switches.
+      # speakerguardd v2 (RC8 or later) is on by default: it installs beside
+      # the legacy daemons behind its gate, which keeps speakersafetyd in
+      # charge until aurora-speaker-upgrade (run at boot) switches the Mac.
       speakerguardd-v2-opt-in = let
         inherit (nixpkgs) lib;
-        on = ((makeSystem "minimal").extendModules { modules = [ { aurora.speakerguardd.v2.enable = true; } ]; }).config;
+        on = (makeSystem "minimal").config;
         pkg = on.aurora.speakerguardd.v2.package;
         unit = name: on.systemd.units.${name} or { enable = false; wantedBy = [ ]; text = ""; };
         gate = builtins.unsafeDiscardStringContext "${pkg}/libexec/speakerguardd-v2/speakerguardd-gate legacy";
@@ -164,8 +157,9 @@
          assert lib.assertMsg (gated "speakersafetyd" && gated "speakerguardd"
            && lib.hasInfix "use-feedback-guard" (unit "speakersafetyd.service").text)
            "the legacy daemons stay enabled behind the gate, beside their own ExecCondition";
-         assert lib.assertMsg (!on.aurora.speakerguardd.upgrade.enable)
-           "aurora-speaker-upgrade stays off unless asked for";
+         assert lib.assertMsg (on.aurora.speakerguardd.upgrade.enable
+           && builtins.elem "multi-user.target" (unit "aurora-speaker-upgrade.service").wantedBy)
+           "aurora-speaker-upgrade must run at boot on the image";
          pkgs.runCommand "speakerguardd-v2-package-check" { } ''
            p=${pkgs.speakerguardd-v2}
            lx=$p/libexec/speakerguardd-v2
