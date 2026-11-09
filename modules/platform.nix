@@ -11,7 +11,7 @@
   services.upower.enable = true;
   hardware.wirelessRegulatoryDatabase = true;
   systemd.packages = [ pkgs.speakerguardd ];
-  # Speakers on speakerguardd v2 (Ryan + DJ go): v2 installs beside the legacy
+  # Speakers on speakerguardd v2: v2 installs beside the legacy
   # daemons behind its gate, and aurora-speaker-upgrade switches a Mac at boot
   # only when its own tuning passes the silent self-check. A refused Mac keeps
   # speakersafetyd. Both stay user options (set them to false to opt out).

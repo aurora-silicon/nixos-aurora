@@ -114,7 +114,7 @@
 
       # Evaluate the actual image module graph: the legacy protection stays
       # installed and available as the fallback the v2 gate starts on a Mac
-      # aurora-speaker-upgrade has not switched (switch-on, Ryan + DJ go).
+      # aurora-speaker-upgrade has not switched (switch-on).
       legacy-speaker-protection = let
         inherit (nixpkgs) lib;
         profile = makeSystem "minimal";

@@ -9,7 +9,7 @@
   options.aurora.speakerguardd.upgrade.enable = lib.mkOption {
     type = lib.types.bool;
     default = false;
-    description = "Install aurora-speaker-upgrade and run it at boot: it moves the speakers to speakerguardd v2 when this Mac's own tuning passes the silent self-check (needs aurora.speakerguardd.v2.enable).";
+    description = "Install aurora-speaker-upgrade and run it at boot: it moves the speakers to speakerguardd v2 when this Mac's own tuning passes the silent self-check (needs aurora.speakerguardd.v2.enable). The legacy protection keeps a refused Mac; sudo aurora-speaker-upgrade --revert goes back.";
   };
   config = lib.mkIf config.aurora.speakerguardd.upgrade.enable {
     assertions = [{
