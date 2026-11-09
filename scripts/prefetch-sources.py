@@ -26,6 +26,7 @@ MIRROR = 'https://github.com/aurora-silicon/nixos-aurora/releases/download/sourc
 NEEDS = {
     'sep': [],  # helpers vendored in this Git source
     'plymouth': [],  # nixpkgs release with local patches
+    'plymouth-theme-aurora': [],  # theme and artwork are vendored in this Git source
     'logos': [],  # licensed artwork is vendored in this Git source
     'kernel': ['kernel-aurora', 'bindgen'],
     'bindgen': ['bindgen'],
