@@ -59,8 +59,9 @@ cannot be distinguished from the internal panel.
   hook for initramfs builds without systemd. Rebuild with `mkinitcpio -P`.
 - NixOS: the module extends the systemd initrd's `plymouth-start` pre-start
   script, after the stock runtime links are created. It also prepares the
-  script for a daemon started in the real root. The helper and coreutils enter
-  the initrd through the service closure; the geometry is read at boot.
+  script for a daemon started in the real root. The helper and theme directory
+  are explicitly included in the initrd; references inside shell scripts do
+  not pull them in automatically. The geometry is read at boot.
 
 The helper must also run before a manual `plymouthd` start outside these
 services. Removing the package and rebuilding the initramfs removes its

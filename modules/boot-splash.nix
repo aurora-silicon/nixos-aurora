@@ -106,5 +106,11 @@ in {
     serviceConfig.Type = "oneshot";
     serviceConfig.ExecStart = earlyKms;
   };
-  boot.initrd.systemd.storePaths = lib.mkIf config.boot.plymouth.enable [ earlyKms ];
+  boot.initrd.systemd.storePaths = lib.mkIf config.boot.plymouth.enable (
+    [ earlyKms ] ++ lib.optionals (config.boot.plymouth.theme == "aurora") [
+      # The initrd copier does not follow store references inside shell scripts.
+      "${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth"
+      "${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora"
+    ]
+  );
 }

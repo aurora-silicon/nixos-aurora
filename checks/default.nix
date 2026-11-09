@@ -24,6 +24,7 @@ in (import ./nix-lint.nix { inherit pkgs; }) // {
   stage2-tools = imageProbe.config.system.build.auroraStage2Tools;
   stage2-trial = import ./stage2-trial.nix { inherit pkgs nixpkgs self imageProbe; };
   userpages = import ./userpages.nix { inherit pkgs nixpkgs self; };
+  plymouth-initrd = import ./plymouth-initrd.nix { inherit pkgs makeSystem; };
   firstboot-image = import ./firstboot-image.nix { inherit pkgs nixpkgs self imageProbe; };
   firstboot-rekey = import ./firstboot-rekey.nix { inherit pkgs imageProbe self; };
   sep-lifecycle = import ./sep-lifecycle.nix { inherit pkgs; };
