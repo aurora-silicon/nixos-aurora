@@ -23,6 +23,22 @@ class PrefetchSourcesTests(unittest.TestCase):
         self.assertEqual(module.select_sources(['userpages'], self.archives), ['kernel-aurora'])
         self.assertEqual(module.select_sources(['steam'], self.archives), ['aurora-steam-native'])
 
+    def test_speaker_preview_and_upgrade_fetch_distinct_pinned_archives(self):
+        self.assertEqual(module.select_sources(['speakerguardd-v2'], self.archives), ['speakerguardd-v2'])
+        selected = module.select_sources(['speaker-upgrade'], self.archives)
+        self.assertEqual(selected, ['aurora-speaker-upgrade', 'speakerguardd-v2'])
+        names = set()
+        for key in selected:
+            pin = self.pins[key]
+            name, urls, digest = self.archives[key]
+            self.assertEqual(name, f'{key}-{pin["commit"]}.tar.gz')
+            self.assertEqual(urls[0].rsplit('/', 1)[-1], name)
+            self.assertEqual(urls[-1], pin['source_url'])
+            self.assertEqual(digest, pin['sha256'])
+            self.assertEqual(module.lib.sri_from_hex(digest), pin['nix_hash'])
+            names.add(name)
+        self.assertEqual(len(names), len(selected))
+
     def test_fex_prefetches_every_gitlink_under_the_exact_fetchurl_names(self):
         keys = module.select_sources(['fex'], self.archives)
         expected = ['fex-emu'] + ['fex-emu/' + name for name in self.pins['fex-emu']['extra_sources']]

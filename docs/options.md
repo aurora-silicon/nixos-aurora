@@ -581,7 +581,7 @@ by aurora-touchid-boot.service at every boot.
 
 ## `aurora.speakerguardd.upgrade.enable`
 
-Install aurora-speaker-upgrade (the legacy-to-speakerguardd-v2 upgrade tool); it never runs by itself.
+Install aurora-speaker-upgrade (the legacy-to-speakerguardd-v2 upgrade tool); it never runs by itself. speakerguardd v2 is a preview. It does not fully match macOS yet. The legacy protection (speakersafetyd, speakerguardd 0.1) is the supported default and stays installed. To go back at any time: sudo aurora-speaker-upgrade --revert.
 
 **Type:** boolean
 
@@ -591,11 +591,26 @@ Install aurora-speaker-upgrade (the legacy-to-speakerguardd-v2 upgrade tool); it
 
 ## `aurora.speakerguardd.v2.enable`
 
-The speakerguardd v2 preview is held; use the legacy Asahi protection stack.
+Install speakerguardd 1.0 (preview) beside the 0.1 speakerguardd and
+speakersafetyd, with its gate on both stacks. Nothing changes for the
+speakers by itself: the gate keeps speakersafetyd in charge until
+aurora-speaker-upgrade (aurora.speakerguardd.upgrade.enable) has
+verified this Mac's own tuning and switched the dual-interface
+kernel to v2's lease. Off by default.
 
 **Type:** boolean
 
 **Default:** `false`
+
+**Declared in:** [speakerguardd-v2.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/speakerguardd-v2.nix)
+
+## `aurora.speakerguardd.v2.package`
+
+The speakerguardd-v2 package to use.
+
+**Type:** package
+
+**Default:** `pkgs.speakerguardd-v2`
 
 **Declared in:** [speakerguardd-v2.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/speakerguardd-v2.nix)
 

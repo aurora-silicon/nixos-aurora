@@ -53,6 +53,7 @@ jobs:
           nix flake check --no-build
           nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
             .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.stage2-trial .#checks.aarch64-linux.fedora-parity .#checks.aarch64-linux.ane-packaging \
+            .#checks.aarch64-linux.legacy-speaker-protection .#checks.aarch64-linux.speakerguardd-v2-opt-in \
             .#checks.aarch64-linux.userpages .#checks.aarch64-linux.module-composition \
             .#checks.aarch64-linux.kernel-overrides .#checks.aarch64-linux.bootloader-overrides .#checks.aarch64-linux.package-overrides \
             .#checks.aarch64-linux.peripheral-firmware

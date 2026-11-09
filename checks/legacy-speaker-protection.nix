@@ -7,7 +7,7 @@ let
   guarded = name: lib.hasInfix "speakerguardd-gate" (unit name).text;
   preview = package: (package.pname or "") == "speakerguardd-v2";
 in assert lib.assertMsg (!config.aurora.speakerguardd.v2.enable)
-     "The v2 rollout is held";
+     "The v2 preview must stay disabled by default";
    assert lib.assertMsg (!(lib.any preview config.environment.systemPackages)
      && !(lib.any preview config.systemd.packages)) "The image must not install v2";
    # Services imported from systemd.packages do not all appear in

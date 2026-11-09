@@ -54,6 +54,8 @@ NEEDS = {
     'mil-hwx-compiler': ['mil-hwx-compiler'],
     'upower': ['upower-aurora'],
     'speakerguardd': ['speakerguardd'],
+    'speakerguardd-v2': ['speakerguardd-v2'],
+    'speaker-upgrade': ['aurora-speaker-upgrade', 'speakerguardd-v2'],
     'mutter': [],
     'docker': [],  # nixpkgs' pinned release, with the local engine patch
     'speakersafetyd': [],

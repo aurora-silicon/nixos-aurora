@@ -43,7 +43,7 @@
         inherit (pkgs)
           plymouth docker libfprint fprintd omarchy-ane-tools mil-hwx-compiler upower
           fex steam mesa speakerguardd mutter speakersafetyd aurora-bless
-          plymouth-theme-aurora omdrop-awdl;
+          plymouth-theme-aurora omdrop-awdl speakerguardd-v2;
         logos = pkgs.aurora-logos;
         firstboot = pkgs.aurora-firstboot;
         sep = pkgs.aurora-sep;
