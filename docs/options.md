@@ -579,6 +579,16 @@ by aurora-touchid-boot.service at every boot.
 
 **Declared in:** [sep.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep.nix)
 
+## `aurora.speakerguardd.upgrade.enable`
+
+Install aurora-speaker-upgrade (the legacy-to-speakerguardd-v2 upgrade tool); it never runs by itself.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [speaker-upgrade.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/speaker-upgrade.nix)
+
 ## `aurora.speakerguardd.v2.enable`
 
 The speakerguardd v2 preview is held; use the legacy Asahi protection stack.

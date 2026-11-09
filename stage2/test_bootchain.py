@@ -835,6 +835,20 @@ soc { dcp {}; display {}; }; };''')
         self.assertEqual(self.marker.read_bytes(), b'armed\nother/image.bin\n')
         self.assertFalse(self.candidate.exists())
 
+    def test_foreign_trial_boot_is_skipped_by_commit(self):
+        # A trial armed by hand with aura-try, booted: commit skips it cleanly.
+        self.trial_setup()
+        self.marker.write_bytes(b'spent\nother/image.bin\n')
+        self.put('/proc/device-tree/chosen/aurora,trial', b'other/image.bin\0')
+        with patch('builtins.print') as log:
+            self.commit()
+        self.assertEqual(log.call_count, 1)
+        self.assertIn('not managed here', log.call_args[0][0])
+        self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
+        self.assertEqual(self.marker.read_bytes(), b'spent\nother/image.bin\n')
+        self.assertFalse(self.candidate.exists())
+        bootchain.Update(self.root, self.env).guard()  # not this updater's trial: no reboot
+
     def test_new_kernel_preserves_previous_trial_evidence(self):
         self.trial_setup()
         self.apply()

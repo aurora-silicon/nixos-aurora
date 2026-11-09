@@ -569,7 +569,11 @@ class Update:
         if not current:
             return
         if current[1] != relative:
-            raise Refused('another aura-try owns the ESP marker')
+            # A trial armed by hand with aura-try (or by another tool) is not
+            # this updater's to commit: leave its marker and image alone.
+            print(f'aurora-stage2-commit: the aura-try marker names {current[1]}, not {relative}; '
+                  'that trial is not managed here, nothing to commit')
+            return
         if current[0] == 'spent' and not trial:
             print(f'aurora-stage2-commit: trial {relative} fell back; live Stage 2 kept, candidate left for inspection')
             return

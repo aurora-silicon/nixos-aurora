@@ -132,6 +132,7 @@ settings; they do not need separate imports. Full option details are in the
 | `plasma-setup.nix` | KDE owner-account setup when an image layout is present. `aurora.plasmaSetup.enable`; requires Plasma Login Manager and mutable users. |
 | `platform.nix` | Bluetooth, UPower, regulatory data, speaker protection and model-specific platform rules. No Aurora-specific options. |
 | `sep.nix` | Touch ID/PAM integration; ordinary login still uses a password. `aurora.sep.greeterFingerprint.enable` adds GNOME greeter authentication. Logind defaults a short power-key press to suspend. See [Touch ID setup](../sep/README.md). |
+| `speaker-upgrade.nix` | Opt-in speaker migration tool and units. `aurora.speakerguardd.upgrade.enable` installs them without starting migration. Manual use requires a separately available v2 provisioner; the held preview is not installed. |
 | `speakerguardd-v2.nix` | The v2 preview is held. Enabling `aurora.speakerguardd.v2.enable` is rejected; shipped systems retain the legacy Asahi speaker-protection stack. |
 | `steam.nix` | Adapts the standard `programs.steam` module to ARM64 host graphics/audio. Steam is not enabled automatically; x86-only `extest` injection is rejected. |
 | `system-fixes.nix` | Malcontent shutdown and persistent NetworkManager dispatcher fixes through `aurora.systemFixes.*`, plus swapfile ordering. |

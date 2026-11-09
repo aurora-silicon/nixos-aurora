@@ -206,6 +206,11 @@ in {
     };
   };
   aurora-firstboot = final.callPackage ./firstboot.nix { };
+  # The legacy-to-speakerguardd-v2 upgrade tool (modules/speaker-upgrade.nix).
+  aurora-speaker-upgrade = final.callPackage ./aurora-speaker-upgrade.nix {
+    src = source "aurora-speaker-upgrade";
+    version = pins.aurora-speaker-upgrade.version;
+  };
   aurora-avd-firmware = final.callPackage ./avd-fw.nix {
     src = source "avd-fw";
     version = pins.avd-fw.version;
@@ -241,7 +246,9 @@ in {
   # applies the speaker volume twice (-31 dB at a 30 % slider). 1005: it
   # follows its plugins' latency after activation. 1007: spa-alsa waits a
   # period after a refused start and reports refusals at most once per 5 s;
-  # 1008: a retry on a PCM that a system sleep suspended is an info line. 1000-1004: AirPlay (RAOP)
+  # 1008: a retry on a PCM that a system sleep suspended is an info line.
+  # 1009: display audio nodes carry the ELD product name (upstream efb5aa06).
+  # 1000-1004: AirPlay (RAOP)
   # sender fixes. nixpkgs runs the meson suite, with both new tests.
   aurora-pipewire = prev.pipewire.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ map stableFile [
@@ -254,6 +261,7 @@ in {
       ./patches/pipewire/1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch
       ./patches/pipewire/1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch
       ./patches/pipewire/1008-alsa-a-start-on-a-suspended-PCM-is-expected-not-an-error.patch
+      ./patches/pipewire/1009-alsa-put-the-ELD-product-name-on-HDMI-DP-nodes.patch
     ];
     doCheck = true;
   });
@@ -300,6 +308,11 @@ in {
       kernelPatches = [ {
         name = "restore-legacy-speaker-protection";
         patch = stableFile ./patches/0001-restore-legacy-speaker-protection.patch;
+      } {
+        # speakersafetyd could not open the speaker sense PCM (-ENOMEM) since
+        # linux 79af0bae4d0d dropped the capture preallocation that bounded it.
+        name = "mca-bound-pcm-buffer";
+        patch = stableFile ./patches/0002-mca-bound-pcm-buffer.patch;
       } ] ++ _kernelPatches;
     }))) { };
   # Keep m1n1.override { customLogo = ...; } available to installed systems.
@@ -352,13 +365,35 @@ in {
       ./patches/alsactl-skip-locked-controls.patch
     ];
   });
+  # loud_comp reports 7680 frames of latency at every FFT size while delaying
+  # exactly the FFT size (1024 in every speaker graph): filter-chain then
+  # published 7.5x that node's delay and AirPlay receivers ran ~150 ms early.
+  # The patch (fedora-aurora#27, rebased on 1.2.37) reads the latency after the
+  # new FFT rank is set. The install check runs every plugin the speaker graphs
+  # use and compares its latency port with the measured impulse delay.
+  lsp-plugins = prev.lsp-plugins.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./patches/lsp-plugins/1000-loud_comp-report-the-latency-of-the-FFT-size-in-use.patch)
+    ];
+    nativeInstallCheckInputs = (old.nativeInstallCheckInputs or [ ]) ++ [ final.lilv final.pkg-config ];
+    doInstallCheck = true;
+    installCheckPhase = ''
+      runHook preInstallCheck
+      $CC -O2 -o lsp-latency-check ${stableFile ./patches/lsp-plugins/lsp-latency-check.c} $(pkg-config --cflags --libs lilv-0) -lm
+      LV2_PATH=$out/lib/lv2 ./lsp-latency-check
+      runHook postInstallCheck
+    '';
+  });
   asahi-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
-    version = "${pins.aurora-audio.version}-aurora12";
+    version = "${pins.aurora-audio.version}-aurora15";
     patches = (old.patches or [ ]) ++ [ (stableFile ./patches/0001-restore-legacy-speaker-graphs.patch) ];
     postInstall = (old.postInstall or "") + ''
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
       test -e "$out/share/wireplumber/scripts/device/asahi-keep-profile.lua"
+      # MCA speaker PCMs wake on period interrupts: a chrony slew no longer
+      # re-prepares the timer-scheduled sink (aurora-audio 4.1-14 on Fedora/ALARM).
+      install -Dm644 ${stableFile ./patches/99-aurora-speaker-irq.conf} "$out/share/wireplumber/wireplumber.conf.d/99-aurora-speaker-irq.conf"
     '';
     # nixpkgs' fixup phase rewrites /usr paths to this output first.
     postFixup = (old.postFixup or "") + ''
@@ -401,6 +436,13 @@ in {
   # rule that starts the daemon for its card. The daemon reads its models from
   # its own share directory, so they go into the package.
   speakersafetyd = prev.speakersafetyd.overrideAttrs (old: {
+    # Downstream: a sense period read after a startup probe closed the speakers
+    # is skipped instead of panicking the daemon (every boot and PipeWire restart
+    # on an M2 Air). Any other invalid rate still fails safe. Same change as
+    # fedora-aurora/alarm-aurora speakersafetyd 2.0.1, on nixpkgs' 3.0.0.
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./speakersafetyd/0001-skip-a-sense-period-read-after-a-probe-closed-the-speakers.patch)
+    ];
     postInstall = (old.postInstall or "") + ''
       install -Dm644 ${stableFile ./speakersafetyd/j616.conf} $out/share/speakersafetyd/apple/j616.conf
       install -Dm644 ${stableFile ./speakersafetyd/96-speakersafetyd-aurora.rules} \
