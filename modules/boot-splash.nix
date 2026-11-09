@@ -36,9 +36,12 @@ let
       done
     done
     [ ''${#devices[@]} -gt 0 ] || exit 0
-    ${udevadm} trigger --action=add --settle "''${devices[@]}"
-    ${udevadm} settle --timeout=5
-    ${udevadm} trigger --action=add --subsystem-match=drm --settle
+    # Queue them ahead of the coldplug, then the DRM cards that exist
+    # already, without waiting: the display processors take a second or
+    # more to start and the root file system does not need them. Plymouth
+    # adds appledrm's card from its udev add event.
+    ${udevadm} trigger --action=add "''${devices[@]}"
+    ${udevadm} trigger --action=add --subsystem-match=drm
   '';
 in {
   # Desktop images boot to a splash. The Aurora theme draws the logo aura
