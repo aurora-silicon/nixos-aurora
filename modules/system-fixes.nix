@@ -33,6 +33,16 @@ in {
       only when NetworkManager is enabled; false retains its packaged lifecycle.
     '';
   };
+  options.aurora.systemFixes.drkonqiOrdering = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = ''
+      Break the ordering cycle that drkonqi's coredump cleanup timer and sentry
+      path units create, which makes systemd delete a stop job every time a
+      Plasma session stops (KDE bug 528003). Used only with Plasma; false
+      retains the packaged units unchanged.
+    '';
+  };
   options.aurora.systemFixes.nmKeepWakeOnLan = lib.mkOption {
     type = lib.types.bool;
     default = true;
@@ -42,6 +52,24 @@ in {
     (lib.mkIf config.aurora.systemFixes.malcontentSignal {
       systemd.units = lib.genAttrs (map (name: "${name}.service")
         (daemons ++ [ "malcontent-webd-update" ])) signalFix;
+    })
+    (lib.mkIf (config.aurora.systemFixes.drkonqiOrdering && config.services.desktopManager.plasma6.enable) {
+      # drkonqi orders these user units after the target that their default
+      # dependencies order them before: the cleanup timer after timers.target,
+      # the sentry path after default.target, which comes after paths.target.
+      # Keep the dependencies a user unit needs without that implicit ordering.
+      # Same drop-in as Fedora's aurora-release and ALARM's aurora-system-fixes.
+      systemd.user.units = lib.genAttrs [ "drkonqi-coredump-cleanup.timer" "drkonqi-sentry-postman.path" ] (_: {
+        overrideStrategy = "asDropin";
+        text = ''
+          # KDE bug 528003. Remove when drkonqi's units no longer order
+          # themselves after the targets they are wanted by.
+          [Unit]
+          DefaultDependencies=no
+          Conflicts=shutdown.target
+          Before=shutdown.target
+        '';
+      });
     })
     (lib.mkIf (config.aurora.systemFixes.nmKeepWakeOnLan && config.networking.networkmanager.enable) {
       # NetworkManager leaves Wake-on-LAN devices up at sleep so they stay
