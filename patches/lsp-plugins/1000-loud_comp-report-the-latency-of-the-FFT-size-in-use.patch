@@ -1,0 +1,52 @@
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Sun, 25 Oct 2026 19:30:00 +1100
+Subject: [PATCH] loud_comp: report the latency of the FFT size in use (rebased on 1.2.37)
+
+update_settings() reads the spectral processor's latency before it
+passes the new FFT rank to it, so the dry-path delay and the reported
+latency always describe the previous rank.  The processor starts at the
+largest rank (16384 frames) and the dry delay line only holds 8192, so
+after the first update the delay wraps to 7680 frames.  In FFT mode the
+plugin then reports 7680 frames whatever the FFT size, while the audio
+is delayed by exactly the FFT size, 1024 frames at the default of most
+speaker graphs.  A later change of any setting fixes the value only for
+the size before it.
+
+Hosts that compensate latency (PipeWire's filter-chain publishes it as
+the stream delay) mis-time the audio by the difference, and the dry
+signal used when bypassing is out of step with the processed one.
+
+Set the rank first and take the latency afterwards, and size the dry
+delay line for the largest FFT, which needs 16384 frames.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ modules/lsp-plugins-loud-comp/src/main/plug/loud_comp.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+--- a/modules/lsp-plugins-loud-comp/src/main/plug/loud_comp.cpp
++++ b/modules/lsp-plugins-loud-comp/src/main/plug/loud_comp.cpp
+@@ -203,7 +203,7 @@
+                 c->sEqualizer.construct();
+                 c->sClipInd.construct();
+ 
+-                c->sDelay.init(1 << (meta::loud_comp_metadata::FFT_RANK_MAX - 1));
++                c->sDelay.init(1 << meta::loud_comp_metadata::FFT_RANK_MAX);
+                 c->sProc.init(meta::loud_comp_metadata::FFT_RANK_MAX);
+                 c->sProc.bind(process_callback, this, c);
+                 c->sProc.set_phase(0.5f * i);
+@@ -507,11 +507,12 @@
+             for (size_t i=0; i<nChannels; ++i)
+             {
+                 channel_t * const c     = vChannels[i];
+-                const size_t latency    = (nMode == meta::loud_comp_metadata::MODE_FFT) ? c->sProc.latency() : c->sEqualizer.get_latency();
+ 
+                 c->sBypass.set_bypass(bypass);
+                 c->sProc.set_rank(rank);
+ 
++                // Take the latency after the new rank is set, so it matches the processing
++                const size_t latency    = (nMode == meta::loud_comp_metadata::MODE_FFT) ? c->sProc.latency() : c->sEqualizer.get_latency();
+                 c->sDelay.set_delay(latency);
+                 if (rst_clip)
+                     c->bHClip       = false;
