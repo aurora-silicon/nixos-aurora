@@ -245,6 +245,11 @@ in {
     };
   };
   aurora-firstboot = final.callPackage ./firstboot.nix { };
+  # The legacy-to-speakerguardd-v2 upgrade tool (modules/speaker-upgrade.nix).
+  aurora-speaker-upgrade = final.callPackage ./aurora-speaker-upgrade.nix {
+    src = source "aurora-speaker-upgrade";
+    version = pins.aurora-speaker-upgrade.version;
+  };
   aurora-avd-firmware = final.callPackage ./avd-fw.nix {
     src = source "avd-fw";
     version = pins.avd-fw.version;
