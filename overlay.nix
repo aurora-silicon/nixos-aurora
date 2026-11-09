@@ -559,6 +559,25 @@ in {
       ./patches/alsactl-skip-locked-controls.patch
     ];
   });
+  # loud_comp reports 7680 frames of latency at every FFT size while delaying
+  # exactly the FFT size (1024 in every speaker graph): filter-chain then
+  # published 7.5x that node's delay and AirPlay receivers ran ~150 ms early.
+  # The patch (fedora-aurora#27, rebased on 1.2.37) reads the latency after the
+  # new FFT rank is set. The install check runs every plugin the speaker graphs
+  # use and compares its latency port with the measured impulse delay.
+  lsp-plugins = prev.lsp-plugins.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./patches/lsp-plugins/1000-loud_comp-report-the-latency-of-the-FFT-size-in-use.patch)
+    ];
+    nativeInstallCheckInputs = (old.nativeInstallCheckInputs or [ ]) ++ [ final.lilv final.pkg-config ];
+    doInstallCheck = true;
+    installCheckPhase = ''
+      runHook preInstallCheck
+      $CC -O2 -o lsp-latency-check ${stableFile ./patches/lsp-plugins/lsp-latency-check.c} $(pkg-config --cflags --libs lilv-0) -lm
+      LV2_PATH=$out/lib/lv2 ./lsp-latency-check
+      runHook postInstallCheck
+    '';
+  });
   asahi-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
     version = "${pins.aurora-audio.version}-aurora15";
