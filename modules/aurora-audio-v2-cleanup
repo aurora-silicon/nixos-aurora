@@ -1,0 +1,38 @@
+#!/bin/sh
+# aurora-audio-v2-cleanup: remove the speakerguardd v2 preview's per-user session links.
+#
+# The v2 preview (removed by aurora-audio 4.1-12) linked its generated PipeWire and
+# WirePlumber configuration into each user's ~/.config/pipewire/pipewire.conf.d and
+# ~/.config/wireplumber/wireplumber.conf.d, pointing into /run/speakerguardd-graph.
+# Without v2 nothing creates that directory any more, so the links dangle and
+# PipeWire logs "error loading config ... No such file or directory" at every login.
+#
+# This removes only symbolic links whose target is inside /run/speakerguardd-graph,
+# and only while v2's provisioning helper is not installed (an opt-in v2 install
+# manages its own links). /etc/speakerguardd and /var/lib/speakerguardd stay: nothing
+# reads them without v2, and aurora-speaker-upgrade can reuse the collected bundle.
+# Safe to run any number of times. Exit status is always 0.
+set -u
+# Fedora (upstream and distro layouts), Arch Linux ARM
+for helper in /usr/libexec/speakerguardd/speakerguardd-provision /usr/libexec/speakerguardd-v2/speakerguardd-provision \
+              /usr/lib/speakerguardd-v2/speakerguardd-provision; do
+    [ -e "$helper" ] && exit 0
+done
+command -v speakerguardd-provision >/dev/null 2>&1 && exit 0
+getent passwd 2>/dev/null | while IFS=: read -r _ _ _ _ _ home _; do
+    case "$home" in /|""|/nonexistent|/dev/null) continue ;; esac
+    [ -d "$home" ] && [ ! -L "$home" ] || continue
+    for sub in pipewire/pipewire.conf.d wireplumber/wireplumber.conf.d; do
+        dir="$home/.config/$sub"
+        [ -d "$dir" ] && [ ! -L "$dir" ] && [ ! -L "$home/.config" ] && [ ! -L "${dir%/*}" ] || continue
+        for link in "$dir"/*; do
+            [ -L "$link" ] || continue
+            case "$(readlink "$link")" in
+                /run/speakerguardd-graph/*)
+                    rm -f -- "$link" && echo "aurora-audio: removed the v2 preview link $link"
+                    ;;
+            esac
+        done
+    done
+done
+exit 0
