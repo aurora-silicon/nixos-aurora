@@ -65,6 +65,26 @@ class NoSepTest(unittest.TestCase):
         self.assertNotIn('enabled no SEP', done.stderr)
         self.assertIn('did not seal and unseal', done.stderr)
 
+    def test_a_keybag_the_driver_gave_up_on_stops_the_wait(self):
+        # An unfinished create the driver can't clear: no key seals this boot.
+        diag = self.sysfs / '2c3800000.sep' / 'diag'
+        diag.mkdir(parents=True)
+        (diag / 'keybag').write_text('failed\n')
+        done, took = self.run_load_driver()
+        self.assertEqual(done.returncode, 1)
+        self.assertLess(took, 5)
+        self.assertIn("run 'aurora-xart status'", done.stderr)
+        self.assertNotIn('did not seal and unseal', done.stderr)
+
+    def test_a_keybag_still_being_created_is_waited_for(self):
+        diag = self.sysfs / '2c3800000.sep' / 'diag'
+        diag.mkdir(parents=True)
+        (diag / 'keybag').write_text('unknown\n')
+        self.env['AURORA_SEP_READY_TIMEOUT'] = '1'
+        done, _ = self.run_load_driver()
+        self.assertEqual(done.returncode, 1)
+        self.assertIn('did not seal and unseal', done.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()
