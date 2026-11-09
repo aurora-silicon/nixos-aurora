@@ -659,6 +659,19 @@ This validates contents, not which boards are included by the kernel.
 
 **Declared in:** [installed.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/installed.nix)
 
+## `aurora.systemFixes.drkonqiOrdering`
+
+Break the ordering cycle that drkonqi's coredump cleanup timer and sentry
+path units create, which makes systemd delete a stop job every time a
+Plasma session stops (KDE bug 528003). Used only with Plasma; false
+retains the packaged units unchanged.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [system-fixes.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/system-fixes.nix)
+
 ## `aurora.systemFixes.malcontentSignal`
 
 Add the signal-handling and exit-status drop-ins for malcontent's optional

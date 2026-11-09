@@ -72,6 +72,11 @@ let
           config.systemd.services.aurora-flatpak-gl.unitConfig.DefaultDependencies == false;
         "FEX carries both guest architectures" = config.aurora.fexMesa.enable
           && lib.elem config.aurora.fexMesa.package config.environment.systemPackages;
+        "drkonqi's user units do not deadlock a Plasma session stop" = config.aurora.desktop != "kde"
+          || lib.all (name: let unit = config.systemd.user.units.${name}; in
+            unit.overrideStrategy == "asDropin" && lib.hasInfix "DefaultDependencies=no" unit.text
+            && lib.hasInfix "Before=shutdown.target" unit.text)
+            [ "drkonqi-coredump-cleanup.timer" "drkonqi-sentry-postman.path" ];
         "all four malcontent overrides name their retirement fix" = lib.all (name:
           let unit = config.systemd.units."${name}.service"; in
           unit.overrideStrategy == "asDropin" && lib.hasInfix "af8226a7d3c3" unit.text
