@@ -57,6 +57,19 @@ let
     skip=software;timezone;
   '';
   pins = builtins.fromJSON (builtins.readFile ./sources.json);
+  # A pin may name the oldest version of another pin it works with (requires). The halves of
+  # the boot chain are pinned apart, and a mismatched pair can leave a Mac without storage.
+  checkedPin =
+    name:
+    let
+      pin = pins.${name};
+      check =
+        dep:
+        final.lib.assertMsg (final.lib.versionAtLeast pins.${dep}.version pin.requires.${dep})
+          "${name} ${pin.version} needs ${dep} >= ${pin.requires.${dep}}, but ${dep} is pinned at ${pins.${dep}.version}";
+    in
+    assert final.lib.all check (builtins.attrNames (pin.requires or { }));
+    pin;
   source = name: final.fetchurl {
     name = "${name}-${pins.${name}.commit}.tar.gz";
     url = pins.${name}.source_url;
@@ -463,7 +476,7 @@ in {
     "aura without the monitor needs a kernel built with CONFIG_ARM64_CTXR_EXECMEM=y";
     (prev.m1n1.override { customLogo = null; }).overrideAttrs (old: {
     pname = "aura";
-    version = pins.aura.version;
+    version = (checkedPin "aura").version;
     # modules/installed.nix checks this against the kernel the system boots.
     passthru = (old.passthru or { }) // { auroraMonitorFree = auraMonitorFree; };
     src = source "aura";
@@ -506,7 +519,7 @@ in {
   });
   uboot-asahi = prev.uboot-asahi.overrideAttrs (old: {
     src = source "uboot-aurora";
-    version = pins.uboot-aurora.version;
+    version = (checkedPin "uboot-aurora").version;
     patches = [ ];
   });
   mesa = (final.callPackage ./mesa.nix {
