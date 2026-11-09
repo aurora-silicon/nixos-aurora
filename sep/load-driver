@@ -41,6 +41,19 @@ fi
 # the packaged defaults. Options given here would override both.
 modprobe apple_sep
 
+# On a SoC or board without a SEP profile the module loads but enables and
+# probes nothing ("no platform profile for this SoC; the SEP stays disabled"),
+# so no SEP device exists and no key will ever be sealed. Say so and stop,
+# instead of holding the boot for the whole ready timeout.
+sep_device=false
+for d in "${AURORA_SEP_SYSFS:-/sys/bus/platform/devices}"/*.sep; do
+    [ -e "$d" ] && sep_device=true && break
+done
+if [ "$sep_device" != true ]; then
+    log "the kernel enabled no SEP on this Mac; nothing to wait for"
+    exit 0
+fi
+
 work=$(mktemp -d /run/aurora-sep-load.XXXXXX)
 cleanup() {
     case "$work" in
