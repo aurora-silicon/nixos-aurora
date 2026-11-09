@@ -44,6 +44,11 @@ in {
     # with a headphone jack drops the built-in card to "off" while nothing is
     # plugged in. Fedora and ALARM carry the same hard requirement.
     assertions = [{
+      # The kernel serves both speaker interfaces (linux#1279); a v2 that does
+      # not know it refuses and leaves the speakers silent.
+      assertion = cfg.package.passthru.dualInterface or false;
+      message = "aurora.speakerguardd.v2 needs speakerguardd-v2 RC8.2 or later (dual-interface kernel, speakerguardd#117/#131/#134); this package predates it.";
+    } {
       assertion = pkgs.asahi-audio.keepsBuiltinProfile or false;
       message = "aurora.speakerguardd.v2 needs Aurora's asahi-audio (aurora-audio >= 4.1-11, asahi-audio#24) with asahi-keep-profile.lua.";
     }];

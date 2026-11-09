@@ -703,6 +703,15 @@ in {
   in rustPackage "speakerguardd-v2" ./locks/speakerguardd-v2.Cargo.lock {
     cargoBuildFlags = crates;
     cargoTestFlags = crates;
+    # RC8.2+ knows the dual-interface kernel (linux#1279: "Speaker Volume
+    # Unlock" by default, v2's lease only after the root-only switch). A v2
+    # older than speakerguardd#117/#131/#134 (e.g. 0.31) refuses on that kernel
+    # and leaves the speakers silent (safe, at the kernel lock): the module
+    # asserts this flag, and postPatch proves it from the sources.
+    passthru.dualInterface = true;
+    postPatch = ''
+      grep -q "def interface" packaging/session/speakerguardd-gate || { echo "speakerguardd-v2: these sources do not know the dual-interface kernel (speakerguardd#117)"; exit 1; }
+    '';
     # Provisioning, the gate, the self-check and the session helper are
     # Python; their shebangs are patched to this interpreter. The tools they
     # call come from the units' path (modules/speakerguardd-v2.nix), except
