@@ -423,6 +423,10 @@ in {
         # kernel (kernel/config, see kernel/provenance.json), so every
         # distribution builds the same options, and add only NixOS's own
         # requirements on top.
+        # TODO: kernel/config carries CONFIG_APPLE_SOC_SLEEP=y
+        # (aurora-silicon/linux#1334) and CONFIG_RTC_DRV_APPLE_PMU=y
+        # (aurora-silicon/linux#1333). The validation below passes only with a
+        # kernel pin that has both, as its asahi.config asks for them.
         configurePhase = ''
           runHook preConfigure
           # nixpkgs installs this tree beside source/ in the dev output.
