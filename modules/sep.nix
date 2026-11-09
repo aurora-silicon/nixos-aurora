@@ -41,7 +41,11 @@ in {
       # nixos.conf, so a read-only setting in either comes later and wins.
       environment.etc."modprobe.d/aurora-sep-defaults.conf".source = ../sep/aurora-sep-modprobe.conf;
       # aurora-xart reset-touchid starts Touch ID over when its keybag is stuck.
-      environment.systemPackages = [ pkgs.aurora-sep pkgs.aurora-xart pkgs.libfprint ];
+      # aurora-sep-sk: OpenSSH ecdsa-sk keys in the Secure Enclave for members
+      # of sep-key (its udev rule gives that group /dev/sep-key).
+      environment.systemPackages = [ pkgs.aurora-sep pkgs.aurora-xart pkgs.libfprint pkgs.aurora-sep-sk ];
+      services.udev.packages = [ pkgs.aurora-sep-sk ];
+      users.groups.sep-key = { };
       services.fprintd.enable = true;
       # Touch ID: a fingerprint or the password at sudo, polkit and the lock
       # screens (gdm-fingerprint, and kde-fingerprint from the Plasma module);
