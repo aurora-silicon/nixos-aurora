@@ -693,6 +693,18 @@ Keep a Wake-on-LAN/WLAN device that is still activated after wake instead of rec
 
 **Declared in:** [system-fixes.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/system-fixes.nix)
 
+## `aurora.systemFixes.wakeForNetwork`
+
+Wake for network access (magic packet on wired interfaces that support
+it and on Wi-Fi phys with magic-packet WoWLAN). The default follows the
+power adapter, as macOS laptops do: armed on AC, disarmed on battery.
+
+**Type:** one of "power-adapter", "always", "never"
+
+**Default:** `"power-adapter"`
+
+**Declared in:** [system-fixes.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/system-fixes.nix)
+
 ## `aurora.update.flake`
 
 Consumer flake updated by `aurora-update`, optionally followed by its
