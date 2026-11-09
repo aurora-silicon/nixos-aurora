@@ -1,0 +1,83 @@
+From efb5aa065e4aa12206360d08f27a162d95ed862a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Tom=C3=A1=C5=A1=20Hnyk?= <tomashnyk@gmail.com>
+Date: Thu, 24 Sep 2026 19:28:24 +0200
+Subject: [PATCH] alsa: put the ELD product name on HDMI/DP nodes
+
+Nodes get alsa.name from ALSA (which in turn takes it from the ELD) only
+when a card is set up. If an HDMI device is plugged in later, its node
+gets only a generic alsa.name like "HDMI 1".
+
+Set hdmi.product.name from the port's ELD whenever a node with a single
+port is created. In such a case, we can be sure the ELD name applies.
+This property then can be used for displaying the name to the user with
+fallback to alsa.name.
+---
+ spa/plugins/alsa/acp/acp.h         | 9 +++++++--
+ spa/plugins/alsa/alsa-acp-device.c | 8 ++++++--
+ 2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/spa/plugins/alsa/acp/acp.h b/spa/plugins/alsa/acp/acp.h
+index 9c75cd634..e637e6d14 100644
+--- a/spa/plugins/alsa/acp/acp.h
++++ b/spa/plugins/alsa/acp/acp.h
+@@ -154,17 +154,22 @@ const char *acp_available_str(enum acp_available status);
+ 		 * as receivers are powered on or off.
+ 		 */
+ #define ACP_KEY_AUDIO_CHANNELS_DETECTED "audio.channels.detected"
+-		/**< The number of channels detected detected via EDID-like data read from a device
++		/**< The number of channels detected via EDID-like data read from a device
+ 		 * connected via HDMI/DisplayPort. This only serves as a hint, as the auto-detected
+ 		 * values may be incorrect and/or might change, e.g. when external devices such
+ 		 * as receivers are powered on or off.
+ 		 */
+ #define ACP_KEY_AUDIO_POSITION_DETECTED "audio.position.detected"
+-		/**< The channel positions detected detected via EDID-like data read from a device
++		/**< The channel positions detected via EDID-like data read from a device
+ 		 * connected via HDMI/DisplayPort. This only serves as a hint, as the auto-detected
+ 		 * values may be incorrect and/or might change, e.g. when external devices such
+ 		 * as receivers are powered on or off.
+ 		 */
++#define ACP_KEY_HDMI_PRODUCT_NAME "hdmi.product.name"
++		/**< The product name of the device connected via HDMI/DisplayPort, e.g. a monitor,
++		 * TV or receiver, read via EDID-like data. Set on nodes with a single port
++		 * since then it is not ambiguous.
++		 */
+ 
+ struct acp_device;
+ 
+diff --git a/spa/plugins/alsa/alsa-acp-device.c b/spa/plugins/alsa/alsa-acp-device.c
+index a38cfa040..e4e1ffc78 100644
+--- a/spa/plugins/alsa/alsa-acp-device.c
++++ b/spa/plugins/alsa/alsa-acp-device.c
+@@ -178,7 +178,7 @@ static int emit_node(struct impl *this, struct acp_device *dev)
+ 	char codecs[512];
+ 	struct spa_device_object_info info;
+ 	struct acp_card *card = this->card;
+-	const char *stream, *card_id, *bus;
++	const char *stream, *card_id, *bus, *product;
+ 	struct spa_strbuf b;
+ 
+ 	info = SPA_DEVICE_OBJECT_INFO_INIT();
+@@ -194,7 +194,7 @@ static int emit_node(struct impl *this, struct acp_device *dev)
+ 
+ 	info.change_mask = SPA_DEVICE_OBJECT_CHANGE_MASK_PROPS;
+ 
+-	items = alloca((dev->props.n_items + 12) * sizeof(*items));
++	items = alloca((dev->props.n_items + 13) * sizeof(*items));
+ 	n_items = 0;
+ 
+ 	snprintf(card_index, sizeof(card_index), "%d", card->index);
+@@ -235,6 +235,10 @@ static int emit_node(struct impl *this, struct acp_device *dev)
+ 	snprintf(routes, sizeof(routes), "%d", dev->n_ports);
+ 	items[n_items++] = SPA_DICT_ITEM_INIT("device.routes", routes);
+ 
++	if (dev->n_ports == 1 &&
++	    (product = acp_dict_lookup(&dev->ports[0]->props, SPA_KEY_DEVICE_PRODUCT_NAME)))
++		items[n_items++] = SPA_DICT_ITEM_INIT(ACP_KEY_HDMI_PRODUCT_NAME, product);
++
+ 	acp_dict_for_each(it, &dev->props)
+ 		items[n_items++] = SPA_DICT_ITEM_INIT(it->key, it->value);
+ 
+-- 
+GitLab
+

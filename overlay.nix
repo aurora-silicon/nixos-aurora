@@ -280,7 +280,9 @@ in {
   # applies the speaker volume twice (-31 dB at a 30 % slider). 1005: it
   # follows its plugins' latency after activation. 1007: spa-alsa waits a
   # period after a refused start and reports refusals at most once per 5 s;
-  # 1008: a retry on a PCM that a system sleep suspended is an info line. 1000-1004: AirPlay (RAOP)
+  # 1008: a retry on a PCM that a system sleep suspended is an info line.
+  # 1009: display audio nodes carry the ELD product name (upstream efb5aa06).
+  # 1000-1004: AirPlay (RAOP)
   # sender fixes. nixpkgs runs the meson suite, with both new tests.
   aurora-pipewire = prev.pipewire.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ map stableFile [
@@ -293,6 +295,7 @@ in {
       ./patches/pipewire/1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch
       ./patches/pipewire/1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch
       ./patches/pipewire/1008-alsa-a-start-on-a-suspended-PCM-is-expected-not-an-error.patch
+      ./patches/pipewire/1009-alsa-put-the-ELD-product-name-on-HDMI-DP-nodes.patch
     ];
     doCheck = true;
   });
