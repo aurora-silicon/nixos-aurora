@@ -628,6 +628,13 @@ in {
   # rule that starts the daemon for its card. The daemon reads its models from
   # its own share directory, so they go into the package.
   speakersafetyd = prev.speakersafetyd.overrideAttrs (old: {
+    # Downstream: a sense period read after a startup probe closed the speakers
+    # is skipped instead of panicking the daemon (every boot and PipeWire restart
+    # on an M2 Air). Any other invalid rate still fails safe. Same change as
+    # fedora-aurora/alarm-aurora speakersafetyd 2.0.1, on nixpkgs' 3.0.0.
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./speakersafetyd/0001-skip-a-sense-period-read-after-a-probe-closed-the-speakers.patch)
+    ];
     postInstall = (old.postInstall or "") + ''
       install -Dm644 ${stableFile ./speakersafetyd/j616.conf} $out/share/speakersafetyd/apple/j616.conf
       install -Dm644 ${stableFile ./speakersafetyd/96-speakersafetyd-aurora.rules} \
