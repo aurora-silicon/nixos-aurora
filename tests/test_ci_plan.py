@@ -32,6 +32,7 @@ class PlanTests(unittest.TestCase):
         outputs = {'mesa': 'same-mesa', 'graphics': 'same-graphics'}
         self.assertEqual(plan.select(outputs, outputs,
                                      changed_paths=['scripts/test-graphics-generation']), ['graphics'])
+        self.assertEqual(plan.select(outputs, outputs, changed_paths=['scripts/testlib.sh']), ['graphics'])
 
     def test_manual_dispatch_with_empty_package_input_builds_every_output(self):
         with tempfile.TemporaryDirectory() as temporary:
