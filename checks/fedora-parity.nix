@@ -54,6 +54,8 @@ let
         "the keyboard backlight follows the light sensor from boot" = config.aurora.kbdLight.enable
           && lib.elem value.pkgs.aurora-kbd-light config.systemd.packages
           && lib.elem "multi-user.target" config.systemd.services.aurora-kbd-light.wantedBy;
+        "aurora-sep status is on the PATH, as on Fedora and ALARM" =
+          lib.elem value.pkgs.aurora-sep config.environment.systemPackages;
         "the sep-key group gets /dev/sep-key for Secure Enclave SSH keys" = config.users.groups ? sep-key
           && lib.elem value.pkgs.aurora-sep-sk config.services.udev.packages
           && lib.elem value.pkgs.aurora-sep-sk config.environment.systemPackages;
