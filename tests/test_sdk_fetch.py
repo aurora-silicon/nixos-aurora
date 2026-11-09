@@ -1,9 +1,15 @@
 import importlib.util
+from contextlib import nullcontext
+import json
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 import urllib.error
 import urllib.request
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('sdk_fetch',
     Path(__file__).resolve().parents[1] / 'flatpak-gl/fetch-sdk.py')
@@ -42,6 +48,31 @@ class SdkTransportTests(unittest.TestCase):
                          {'runtime/org.freedesktop.Sdk/aarch64/25.08': 'short'}):
                 with self.subTest(refs=refs), self.assertRaises(ValueError):
                     module.fetch_sdk(temporary, refs, None)
+
+    def test_runtime_refs_follow_the_supplied_lock(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lock = Path(temporary) / 'runtimes.json'
+            refs = {'runtime/org.freedesktop.Sdk/aarch64/27.08': '1' * 64}
+            lock.write_text(json.dumps({'27.08': {'refs': refs}}))
+            with patch.object(module, 'object_server', return_value=nullcontext('http://fixture')), \
+                    patch.object(module.subprocess, 'run') as run:
+                module.fetch_sdk(temporary, refs, None, sdk_lock=lock)
+            self.assertIn(['ostree', f'--repo={temporary}', 'pull', '--depth=0', 'source', '1' * 64],
+                          [call.args[0] for call in run.call_args_list])
+
+    def test_standalone_script_accepts_an_explicit_lock_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = root / 'fetch.py'
+            shutil.copyfile(module.__file__, script)
+            refs, lock = root / 'refs.json', root / 'lock.json'
+            refs.write_text('{}')
+            lock.write_text('{}')
+            result = subprocess.run([sys.executable, str(script), '--repo', temporary,
+                                     '--refs', str(refs), '--ca-file', 'unused', '--sdk-lock', str(lock)],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Expected pinned Freedesktop SDK refs', result.stderr)
 
 
 if __name__ == '__main__':

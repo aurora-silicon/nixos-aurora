@@ -7,6 +7,12 @@ from pathlib import Path
 import re
 import shutil
 import tarfile
+import subprocess
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from cache_inputs import expected_outputs, require_coverage, store_paths
 
 BASE = r'https://github\.com/aurora-silicon/nixos-aurora/releases/download/cache-[A-Za-z0-9._-]+'
 SIGNED_FIELDS = ('StorePath', 'NarHash', 'NarSize', 'References')
@@ -31,11 +37,13 @@ def identity(values):
     return tuple(values[name] for name in SIGNED_FIELDS)
 
 
-def prepare(source, destination, asset_base, previous_metadata=None):
+def prepare(source, destination, asset_base, previous_metadata=None, *, commit=None, expected=None):
     if destination.exists():
         raise ValueError('output exists; use a new snapshot directory')
     if not re.fullmatch(BASE, asset_base):
         raise ValueError('expected an immutable Aurora NixOS release asset base')
+    if source is None and previous_metadata is None:
+        raise ValueError('metadata reuse requires a previous cache snapshot')
     previous_entries = {}
     if previous_metadata is not None:
         for previous in sorted(previous_metadata.glob('*.narinfo')):
@@ -46,7 +54,7 @@ def prepare(source, destination, asset_base, previous_metadata=None):
     site.mkdir(parents=True)
     assets.mkdir()
     records = []
-    for info in sorted(source.glob('*.narinfo')):
+    for info in sorted(source.glob('*.narinfo')) if source is not None else []:
         if info.is_symlink() or not re.fullmatch(r'[a-z0-9]{32}\.narinfo', info.name):
             raise ValueError('unsafe cache metadata path')
         text = info.read_text()
@@ -84,11 +92,11 @@ def prepare(source, destination, asset_base, previous_metadata=None):
         if reused is not None:
             record['reused_from'] = reused
         records.append(record)
-    if not records:
+    if not records and source is not None:
         raise ValueError('no signed cache entries')
-    shutil.copyfile(source / 'nix-cache-info', site / 'nix-cache-info')
+    origin = source if source is not None else previous_metadata
+    shutil.copyfile(origin / 'nix-cache-info', site / 'nix-cache-info')
     (destination / 'site/index.html').write_text('Aurora NixOS development binary cache\n')
-    (assets / 'manifest.json').write_text(json.dumps({'schema': 1, 'asset_base': asset_base, 'paths': records}, indent=2) + '\n')
     if previous_metadata is not None:
         for previous, previous_fields in previous_entries.values():
             target = site / previous.name
@@ -99,6 +107,22 @@ def prepare(source, destination, asset_base, previous_metadata=None):
                 # Keep each older immutable transport URL. Deployment verifies
                 # all signatures and NAR contents again before publishing.
                 shutil.copyfile(previous, target)
+                if source is None:
+                    if not re.fullmatch(BASE + r'/[a-z0-9]+\.nar\.(zst|xz)', previous_fields['URL']):
+                        raise ValueError('unexpected reused NAR transport')
+                    records.append({'store_path': previous_fields['StorePath'],
+                                    'asset': previous_fields['URL'].rsplit('/', 1)[-1],
+                                    'bytes': int(previous_fields['FileSize']),
+                                    'transport_hash': previous_fields['FileHash'],
+                                    'reused_from': previous_fields['URL']})
+    if not records:
+        raise ValueError('no signed cache entries')
+    if expected is not None:
+        require_coverage(expected, store_paths(site))
+    manifest = {'schema': 1, 'asset_base': asset_base, 'paths': records}
+    if commit is not None:
+        manifest['commit'] = commit
+    (assets / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     with tarfile.open(assets / 'cache-metadata.tar.gz', 'w:gz') as archive:
         for path in sorted((destination / 'site').rglob('*')):
             if path.is_file():
@@ -108,9 +132,28 @@ def prepare(source, destination, asset_base, previous_metadata=None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--cache', type=Path, required=True)
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument('--cache', type=Path)
+    inputs.add_argument('--reuse-metadata', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--asset-base', required=True)
     parser.add_argument('--previous-metadata', type=Path)
+    parser.add_argument('--base-release')
     args = parser.parse_args()
-    print(f'Prepared {len(prepare(args.cache, args.output, args.asset_base, args.previous_metadata))} Nix cache paths')
+    if args.reuse_metadata:
+        if args.previous_metadata:
+            parser.error('--reuse-metadata cannot be combined with --previous-metadata')
+        if not args.base_release or not re.fullmatch(r'cache-[A-Za-z0-9._-]+', args.base_release):
+            parser.error('--reuse-metadata requires --base-release naming a cache-* release')
+    elif args.base_release:
+        parser.error('--base-release is only used with --reuse-metadata')
+    commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+    expected = expected_outputs(commit)
+    previous = args.reuse_metadata or args.previous_metadata
+    records = prepare(args.cache, args.output, args.asset_base, previous, commit=commit, expected=expected)
+    if args.reuse_metadata:
+        (args.output / 'assets/native-input-proof.json').write_text(json.dumps({
+            'schema': 1, 'commit': commit, 'expected': expected, 'native_inputs': [],
+            'reused_signed_metadata': True, 'base_release': args.base_release,
+        }, indent=2) + '\n')
+    print(f'Prepared {len(records)} Nix cache paths')

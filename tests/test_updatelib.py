@@ -130,7 +130,8 @@ class HashAndArchiveTests(unittest.TestCase):
             (repo / 'sub' / 'table.csv').write_text('a,b\n1,2\n')
             (repo / '.gitattributes').write_text('* text=auto\n*.csv eol=crlf\n')
             (repo / 'link').symlink_to('README')
-            git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@example.org']
+            git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@example.org',
+                   '-c', 'commit.gpgsign=false']
             subprocess.run(['git', 'init', '-q', str(repo)], check=True)
             subprocess.run(git + ['add', '.'], check=True)
             subprocess.run(git + ['commit', '-qm', 'fixture'], check=True)

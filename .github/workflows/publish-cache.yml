@@ -44,6 +44,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      attestations: read
     outputs:
       action: ${{ steps.resolve.outputs.action }}
       runs: ${{ steps.resolve.outputs.runs }}
@@ -83,6 +84,9 @@ jobs:
           fi
           [[ $BASE_RELEASE =~ ^cache-[A-Za-z0-9._-]+$ ]]
           echo "tag=$BASE_RELEASE" >> "$GITHUB_OUTPUT"
+          echo "commit=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$BASE_RELEASE" --jq .target_commitish)" >> "$GITHUB_OUTPUT"
+          served=$(gh api "repos/$GITHUB_REPOSITORY/commits/channel-testing" --jq .sha 2>/dev/null || true)
+          echo "served=$served" >> "$GITHUB_OUTPUT"
           gh release download "$BASE_RELEASE" --repo "$GITHUB_REPOSITORY" --pattern cache-metadata.tar.gz --dir previous
           python3 scripts/extract-cache-metadata.py previous/cache-metadata.tar.gz previous/site
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
@@ -90,15 +94,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_RUN: ${{ inputs.build-run }}
+          BASE_COMMIT: ${{ steps.base.outputs.commit }}
+          SERVED_COMMIT: ${{ steps.base.outputs.served }}
         run: |
           set -euo pipefail
+          runs=()
+          if [[ -n $BUILD_RUN ]]; then read -r -a runs <<< "$BUILD_RUN"; fi
           python3 scripts/resolve-cache-inputs.py --repository "$GITHUB_REPOSITORY" \
-            --previous-metadata previous/site/cache --output cache-plan.json | tee -a "$GITHUB_STEP_SUMMARY"
-          if [[ -n $BUILD_RUN ]]; then
-            for run in $BUILD_RUN; do [[ $run =~ ^[0-9]+$ ]]; done
-            echo "runs=$BUILD_RUN" >> "$GITHUB_OUTPUT"
-          fi
+            --previous-metadata previous/site/cache --previous-commit "$BASE_COMMIT" \
+            --served-commit "$SERVED_COMMIT" --output cache-plan.json --build-runs "${runs[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Authenticate the existing cache on a dry run
+        if: >-
+          steps.mode.outputs.dry-run == 'true' &&
+          (steps.resolve.outputs.action == 'deploy' || steps.resolve.outputs.action == 'up-to-date')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_RELEASE: ${{ steps.base.outputs.tag }}
+        run: |
+          python3 scripts/cache-channels.py authenticate --tag "$BASE_RELEASE" \
+            --site "$RUNNER_TEMP/existing-cache/site" --work "$RUNNER_TEMP/existing-cache/work"
       - id: tag
+        if: steps.resolve.outputs.action == 'publish' || steps.resolve.outputs.action == 'reuse'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release-tag }}
@@ -109,7 +125,10 @@ jobs:
             RELEASE_TAG=$(python3 scripts/next-tag.py cache-testing- < existing-tags)
           fi
           [[ $RELEASE_TAG =~ ^cache-[A-Za-z0-9._-]+$ ]]
-          ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release tag already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
   collect:
@@ -161,7 +180,8 @@ jobs:
           cp candidate-cache/*.narinfo candidate-cache/nix-cache-info metadata/
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -cf metadata.tar -C metadata .
           echo "digest=$(sha256sum metadata.tar | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "$(ls metadata/*.narinfo | wc -l) narinfo files to sign" >> "$GITHUB_STEP_SUMMARY"
+          entries=(metadata/*.narinfo)
+          echo "${#entries[@]} narinfo files to sign" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: steps.collect.outputs.status == 'complete'
         with:
@@ -272,7 +292,9 @@ jobs:
 
   release:
     needs: [plan, sign, sign-dry-run]
-    if: always() && (needs.sign.result == 'success' || needs.sign-dry-run.result == 'success')
+    if: >-
+      always() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.action == 'reuse' || needs.sign.result == 'success' || needs.sign-dry-run.result == 'success')
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     permissions:
@@ -284,17 +306,20 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.plan.outputs.action != 'reuse'
         with:
           name: candidate-cache
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.plan.outputs.action != 'reuse'
         with:
           name: signed-cache-metadata
           path: signed
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        if: needs.plan.outputs.dry-run == 'true'
+        if: needs.plan.outputs.dry-run == 'true' && needs.plan.outputs.action != 'reuse'
         with:
           name: dry-run-cache-key
           path: dry-run-key
@@ -304,22 +329,33 @@ jobs:
           BASE_RELEASE: ${{ needs.plan.outputs.base-release }}
           RELEASE_TAG: ${{ needs.plan.outputs.release-tag }}
           DRY_RUN: ${{ needs.plan.outputs.dry-run }}
+          ACTION: ${{ needs.plan.outputs.action }}
         run: |
           set -euo pipefail
-          cp signed/*.narinfo signed/nix-cache-info candidate-cache/
-          key=keys/cache.pub
-          [[ $DRY_RUN != true ]] || key=dry-run-key/dry-run.pub
-          nix store verify --store "file://$PWD/candidate-cache" --all --sigs-needed 1 \
-            --trusted-public-keys "$(cat "$key")"
-          gh release download "$BASE_RELEASE" --repo "$GITHUB_REPOSITORY" --pattern cache-metadata.tar.gz --dir previous
-          python3 scripts/extract-cache-metadata.py previous/cache-metadata.tar.gz previous/site
-          python3 scripts/prepare-cache-publication.py --cache candidate-cache --output publication \
-            --previous-metadata previous/site/cache \
-            --asset-base "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
-          cp candidate-cache.json publication/assets/native-input-proof.json
+          if [[ $ACTION == reuse ]]; then
+            # Existing signatures and immutable transports remain intact. No
+            # signing credential is needed for a module-only channel update.
+            python3 scripts/cache-channels.py authenticate --tag "$BASE_RELEASE" \
+              --site previous/site --work "$RUNNER_TEMP/reused-cache"
+            python3 scripts/prepare-cache-publication.py --reuse-metadata previous/site/cache \
+              --base-release "$BASE_RELEASE" --output publication \
+              --asset-base "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
+          else
+            cp signed/*.narinfo signed/nix-cache-info candidate-cache/
+            key=keys/cache.pub
+            [[ $DRY_RUN != true ]] || key=dry-run-key/dry-run.pub
+            nix store verify --store "file://$PWD/candidate-cache" --all --sigs-needed 1 \
+              --trusted-public-keys "$(cat "$key")"
+            gh release download "$BASE_RELEASE" --repo "$GITHUB_REPOSITORY" --pattern cache-metadata.tar.gz --dir previous
+            python3 scripts/extract-cache-metadata.py previous/cache-metadata.tar.gz previous/site
+            python3 scripts/prepare-cache-publication.py --cache candidate-cache --output publication \
+              --previous-metadata previous/site/cache \
+              --asset-base "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
+            cp candidate-cache.json publication/assets/native-input-proof.json
+          fi
           (cd publication/assets && sha256sum -- * > ../SHA256SUMS) && mv publication/SHA256SUMS publication/assets/
           {
-            echo "### Cache ${RELEASE_TAG}$([[ $DRY_RUN == true ]] && echo ' (dry run, throwaway key)')"
+            echo "### Cache ${RELEASE_TAG}$([[ $DRY_RUN == true ]] && echo ' (dry run)')"
             echo
             echo "Nix verified every NAR and signature; $(jq '.paths | length' publication/assets/manifest.json) paths, $(find publication/assets -name '*.nar.*' | wc -l) new NARs."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -339,7 +375,9 @@ jobs:
 
   deploy:
     needs: [plan, release]
-    if: needs.plan.outputs.deploy == 'true' && needs.release.result == 'success'
+    if: >-
+      always() && needs.plan.result == 'success' && needs.plan.outputs.deploy == 'true' &&
+      (needs.release.result == 'success' || needs.plan.outputs.action == 'deploy')
     permissions:
       contents: write
       pages: write
@@ -348,4 +386,4 @@ jobs:
       actions: write
     uses: ./.github/workflows/deploy-cache.yml
     with:
-      release-tag: ${{ needs.release.outputs.tag }}
+      release-tag: ${{ needs.release.outputs.tag || needs.plan.outputs.base-release }}

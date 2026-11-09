@@ -38,7 +38,12 @@ class PipeWireTests(unittest.TestCase):
         self.assertRegex(audio, re.compile(r'pipewireFixes = lib\.mkOption \{\n\s+type = lib\.types\.bool;\n\s+default = true;'))
         flake = (ROOT / 'flake.nix').read_text()
         self.assertIn('pipewire = pkgs.aurora-pipewire;', flake)
-        self.assertIn('-1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch', flake)
+        registry = (ROOT / 'checks/default.nix').read_text()
+        self.assertIn('fedora-parity = import ./fedora-parity.nix', registry)
+        parity = (ROOT / 'checks/fedora-parity.nix').read_text()
+        self.assertIn('-1006-filter-graph-keep-the-software-volume-at-unity-on-ev.patch', parity)
+        workflow = (ROOT / '.github/workflows/checks.yml').read_text()
+        self.assertIn('.#checks.aarch64-linux.fedora-parity', workflow)
 
 
 if __name__ == '__main__':

@@ -2,7 +2,17 @@
 stdenvNoCC.mkDerivation {
   pname = "aurora-sep";
   version = "1.15";
-  src = ./.;
+  # The libfprint patches and their tests belong to separate derivations.
+  # Changing them must not rebuild the unchanged SEP runtime helpers.
+  src = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./load-driver ./aurora-sep-ready ./aurora-sep-greeter-fingerprint
+      ./extract-mesa-calibration ./sensor-present ./touchid-setup-needed
+      ./touchid-publish ./aurora-touchid-setup
+      ./README.md ./XART-SAFETY.md ./OS-IDENTITY.md ./logind-aurora-sep.conf
+    ];
+  };
   nativeBuildInputs = [ makeWrapper python3 bash ];
   dontBuild = true;
   installPhase = ''
