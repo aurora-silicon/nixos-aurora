@@ -1,7 +1,7 @@
 { stdenvNoCC, lib, makeWrapper, bash, coreutils, keyutils, kmod, python3, util-linux, gnugrep, systemd }:
 stdenvNoCC.mkDerivation {
   pname = "aurora-sep";
-  version = "1.17";
+  version = "1.18";
   # The libfprint patches and their tests belong to separate derivations.
   # Changing them must not rebuild the unchanged SEP runtime helpers.
   src = lib.fileset.toSource {
