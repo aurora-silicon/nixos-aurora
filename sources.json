@@ -46,12 +46,12 @@
   },
   "speakerguardd-v2": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "f5f379371814dca88265d7b96e3496af3531c166",
+    "commit": "f4bb2fdb44066fc081669b4b43c9db4d766a45e1",
     "version": "1.0.0-alpha.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/f5f379371814dca88265d7b96e3496af3531c166",
-    "archive_root": "speakerguardd-f5f379371814dca88265d7b96e3496af3531c166",
-    "sha256": "f213bd6a2f66d7451a50dcbaa641822ff294641f972756b8d913f9c17c6593bf",
-    "nix_hash": "sha256-8hO9ai9m10UaUNy6pkGCL/KUZB+XJ1a42RP5wXxlk78="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/f4bb2fdb44066fc081669b4b43c9db4d766a45e1",
+    "archive_root": "speakerguardd-f4bb2fdb44066fc081669b4b43c9db4d766a45e1",
+    "sha256": "26111dc541af8bcb4c435b91cd6ac12b440a7790de8f576c99edc0870cfd37f4",
+    "nix_hash": "sha256-JhEdxUGvi8tMQ1uRzWrBK0QKd5Dej1dsme3Ahwz9N/Q="
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",
@@ -332,11 +332,11 @@
   },
   "aurora-speaker-upgrade": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "cee39338464889517d57396422f62427d07a9380",
+    "commit": "f4bb2fdb44066fc081669b4b43c9db4d766a45e1",
     "version": "0.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/cee39338464889517d57396422f62427d07a9380",
-    "archive_root": "speakerguardd-cee39338464889517d57396422f62427d07a9380",
-    "sha256": "a3d3c338517bad1c1285f1cf3305e909462237c9b08f34b9963c3c6a7026a281",
-    "nix_hash": "sha256-o9PDOFF7rRwShfHPMwXpCUYiN8mwjzS5ljw8anAmooE="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/f4bb2fdb44066fc081669b4b43c9db4d766a45e1",
+    "archive_root": "speakerguardd-f4bb2fdb44066fc081669b4b43c9db4d766a45e1",
+    "sha256": "26111dc541af8bcb4c435b91cd6ac12b440a7790de8f576c99edc0870cfd37f4",
+    "nix_hash": "sha256-JhEdxUGvi8tMQ1uRzWrBK0QKd5Dej1dsme3Ahwz9N/Q="
   }
 }
