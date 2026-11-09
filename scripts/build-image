@@ -2,6 +2,7 @@
 # Build a native installer image from a previously built NixOS system closure.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+source "$root/scripts/testlib.sh"
 desktop=${1:?kde, gnome or minimal required}
 system=${2:?built NixOS system path required}
 installer=${3:?built nixos-install path required}
@@ -66,7 +67,7 @@ grep -qF 'Aurora: look for this installation only on the disk GRUB started from.
 grep -qF "probe --set=aurora_uuid" "$target/boot/efi/EFI/BOOT/grub.cfg"
 grep -qF "\"$boot_uuid\"" "$target/boot/efi/EFI/BOOT/grub.cfg"
 grep -aqF '/EFI/BOOT' "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI"
-! grep -aqE '\(,gpt[0-9]+\)/grub' "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI"
+nomatch -aE '\(,gpt[0-9]+\)/grub' "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI"
 # Every image ships the basics (locale, terminal, wallpapers, network, lid
 # policy, GRUB finding /boot by UUID on the startup disk); a build that lacks
 # one fails here instead of on a Mac.

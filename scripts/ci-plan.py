@@ -17,7 +17,8 @@ def select(current, previous=None, requested=(), changed_paths=()):
     if previous is None:
         return sorted(current)
     selected = {name for name, path in current.items() if previous.get(name) != path}
-    if 'scripts/test-graphics-generation' in changed_paths:
+    # The generation proof sources the shared checks.
+    if {'scripts/test-graphics-generation', 'scripts/testlib.sh'}.intersection(changed_paths):
         selected.add('graphics')
     return sorted(selected)
 
