@@ -46,12 +46,12 @@
   },
   "speakerguardd-v2": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "416b1f513b9d9e924d7e4de16385ba19f7364a92",
+    "commit": "65064d88a20150a36d5c670c9d01f49cf9d250a3",
     "version": "1.0.0-alpha.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/416b1f513b9d9e924d7e4de16385ba19f7364a92",
-    "archive_root": "speakerguardd-416b1f513b9d9e924d7e4de16385ba19f7364a92",
-    "sha256": "f1e542a63b0a6bf68ea275ba08565d876a990f82658df950a5ecba13bdf8f175",
-    "nix_hash": "sha256-8eVCpjsKa/aOonW6CFZdh2qZD4JljflQpey6E7348XU="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/65064d88a20150a36d5c670c9d01f49cf9d250a3",
+    "archive_root": "speakerguardd-65064d88a20150a36d5c670c9d01f49cf9d250a3",
+    "sha256": "9b9ab1d1698a5e1a54f48176abbb179a1fdd3f49081a25ca7c00bfe45791497f",
+    "nix_hash": "sha256-m5qx0WmKXhpU9IF2q7sXmh/dP0kIGiXKfAC/5FeRSX8="
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",
@@ -332,11 +332,11 @@
   },
   "aurora-speaker-upgrade": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "416b1f513b9d9e924d7e4de16385ba19f7364a92",
+    "commit": "65064d88a20150a36d5c670c9d01f49cf9d250a3",
     "version": "0.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/416b1f513b9d9e924d7e4de16385ba19f7364a92",
-    "archive_root": "speakerguardd-416b1f513b9d9e924d7e4de16385ba19f7364a92",
-    "sha256": "f1e542a63b0a6bf68ea275ba08565d876a990f82658df950a5ecba13bdf8f175",
-    "nix_hash": "sha256-8eVCpjsKa/aOonW6CFZdh2qZD4JljflQpey6E7348XU="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/65064d88a20150a36d5c670c9d01f49cf9d250a3",
+    "archive_root": "speakerguardd-65064d88a20150a36d5c670c9d01f49cf9d250a3",
+    "sha256": "9b9ab1d1698a5e1a54f48176abbb179a1fdd3f49081a25ca7c00bfe45791497f",
+    "nix_hash": "sha256-m5qx0WmKXhpU9IF2q7sXmh/dP0kIGiXKfAC/5FeRSX8="
   }
 }
