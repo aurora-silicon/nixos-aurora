@@ -191,5 +191,5 @@ class PeripheralAdmissionTests(unittest.TestCase):
             (root / "fallback/owner-marker").write_text("preserve")
             result, calls = self.load(root, "runtime", 0)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(calls[-2:], ["module:dockchannel-hid", "module:aop"])
+            self.assertEqual(calls[-3:], ["module:dockchannel-hid", "module:aop", "module:aop_als"])
             self.assertEqual((root / "fallback/owner-marker").read_text(), "preserve")
