@@ -479,8 +479,8 @@ in {
       kernelLLVM.clang-unwrapped kernelLLVM.lld kernelLLVM.llvm final.buildPackages.python3
     ];
     makeFlags = [ "RELEASE=1" "CHAINLOADING=1" "BUILTIN_LOGO=aurora" "USE_CLANG=1" ];
-    # This pin carries the v1.0.0b8 release label in archive builds.
-    env = (old.env or { }) // { AURA_VERSION_TAG = "1.0.0b8"; };
+    # This pin carries the v1.0.0b10 release label in archive builds.
+    env = (old.env or { }) // { AURA_VERSION_TAG = "1.0.0b10"; };
     postBuild = ''
       mkdir -p stage1
       cp build/aura.bin stage1/aura-raw.bin
