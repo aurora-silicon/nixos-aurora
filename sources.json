@@ -46,12 +46,12 @@
   },
   "speakerguardd-v2": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "ff88f9f98070e64e6df36b87cf622dd4d53b9dca",
+    "commit": "49b1c107a78b422ab404836fe8da8fbb3c04a857",
     "version": "1.0.0-alpha.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/ff88f9f98070e64e6df36b87cf622dd4d53b9dca",
-    "archive_root": "speakerguardd-ff88f9f98070e64e6df36b87cf622dd4d53b9dca",
-    "sha256": "596e29ee69857d6419237c068ca0cc1aa05ad82e2d72a5eb28e3ab385142f474",
-    "nix_hash": "sha256-WW4p7mmFfWQZI3wGjKDMGqBa2C4tcqXrKOOrOFFC9HQ="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/49b1c107a78b422ab404836fe8da8fbb3c04a857",
+    "archive_root": "speakerguardd-49b1c107a78b422ab404836fe8da8fbb3c04a857",
+    "sha256": "401b603630c0c6669b4154607dfca1f0b3deb18ed54e3eedc709dd90038239b4",
+    "nix_hash": "sha256-QBtgNjDAxmabQVRgffyh8LPesY7VTj7txwndkAOCObQ="
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",
@@ -332,11 +332,11 @@
   },
   "aurora-speaker-upgrade": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "ff88f9f98070e64e6df36b87cf622dd4d53b9dca",
+    "commit": "49b1c107a78b422ab404836fe8da8fbb3c04a857",
     "version": "0.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/ff88f9f98070e64e6df36b87cf622dd4d53b9dca",
-    "archive_root": "speakerguardd-ff88f9f98070e64e6df36b87cf622dd4d53b9dca",
-    "sha256": "596e29ee69857d6419237c068ca0cc1aa05ad82e2d72a5eb28e3ab385142f474",
-    "nix_hash": "sha256-WW4p7mmFfWQZI3wGjKDMGqBa2C4tcqXrKOOrOFFC9HQ="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/49b1c107a78b422ab404836fe8da8fbb3c04a857",
+    "archive_root": "speakerguardd-49b1c107a78b422ab404836fe8da8fbb3c04a857",
+    "sha256": "401b603630c0c6669b4154607dfca1f0b3deb18ed54e3eedc709dd90038239b4",
+    "nix_hash": "sha256-QBtgNjDAxmabQVRgffyh8LPesY7VTj7txwndkAOCObQ="
   }
 }
