@@ -1,11 +1,11 @@
 {
   "repository": "https://github.com/aurora-silicon/fedora-aurora",
-  "commit": "9c2a9341026dd0576c413610dfe84a42823d9a46",
-  "pull_request": "https://github.com/aurora-silicon/fedora-aurora/pull/226",
+  "commit": "87e24ce1437dac8cdf930fe3ca8aafa17a4b0a6a",
+  "pull_request": "https://github.com/aurora-silicon/fedora-aurora/pull/232",
   "source_directory": "packages/update-m1n1",
   "upstream_files_sha256": {
-    "bootchain.py": "69b37d1909eddecddae667023b082cd163d547e989b8d4c30e116504ac02383c",
-    "test_bootchain.py": "d7232c6c90b938141fcfa4a68dc6f5f46328a5005a79e9561d9a73ba7c61ab47"
+    "bootchain.py": "0f756f417a9e6379656ca50faaa69f47c881a27671aa98b76d68a560562a897c",
+    "test_bootchain.py": "c566a7c4f892ba391384366df20bff76ea76a207835f335b90c42e85287e5761"
   },
   "dtb_abi": {
     "source": "packages/kernel-aurora/dtb-abi",
