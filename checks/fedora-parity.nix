@@ -9,6 +9,9 @@ let
       (lib.filterAttrs (_: passed: !passed) {
         "ALSA restore skips controls owned by another process" = hasPatch value.pkgs.alsa-utils
           && lib.elem value.pkgs.alsa-utils config.environment.systemPackages;
+        "the Touch Bar runs tiny-dfr, as on Fedora and ALARM" = config.hardware.apple.touchBar.enable
+          && lib.elem config.hardware.apple.touchBar.package config.services.udev.packages
+          && lib.elem config.hardware.apple.touchBar.package config.systemd.packages;
         "Aurora artwork is installed on every profile" =
           lib.elem value.pkgs.aurora-logos config.environment.systemPackages;
         "Plasma About uses the immutable Aurora logo" = config.aurora.desktop != "kde"
