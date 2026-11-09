@@ -315,7 +315,7 @@ in {
     final.lib.recurseIntoAttrs (final.linuxPackagesFor (import ./pkgs/kernel.nix {
       # Preserve buildLinux's .override API (features, extraMakeFlags, ...).
       inherit (final) lib callPackage path writeText openssl binutils aurora-bindgen;
-      src = source "kernel-aurora";
+      src = source "kernel-aurora" // { rev = pins.kernel-aurora.commit; };
       pin = pins.kernel-aurora;
       llvmPackages = kernelLLVM;
       inherit kernelCtxrExecmem kernelDtbAbi;

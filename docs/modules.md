@@ -72,6 +72,27 @@ to `aurora`. Updates do not run unattended. Stage 2 uses trial-then-commit updat
 when Stage 1 supports them, with CTXR selection and retained-generation DT ABI checks.
 Stage 1 stays unchanged. See [updates and recovery](updates.md#stage-2-on-rebuild).
 
+## Kernel source overrides
+
+When overriding the kernel source, retain its revision in `src.rev`, as
+`fetchFromGitHub` and `fetchgit` do. For a fixed-output archive, add that metadata
+explicitly:
+
+```nix
+kernel.override {
+  src = (pkgs.fetchurl {
+    url = "https://example.org/linux-COMMIT.tar.gz";
+    hash = "sha256-...";
+  }) // { rev = "COMMIT"; };
+}
+```
+
+The kernel exposes `auroraSourceCommit` and writes the revision to
+`aurora-source-commit`; the parity manifest follows the selected kernel.
+An archive without `rev` records `unknown` and a null manifest revision, which
+the installer parity check rejects. Source metadata does not establish hardware
+compatibility or replace a matching kernel configuration.
+
 ## First boot and everyday services
 
 The image first-boot services run only when `aurora.imageLayout` is set.

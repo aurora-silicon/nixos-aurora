@@ -45,6 +45,8 @@ let
         auroraCtxrExecmem = kernelCtxrExecmem;
         auroraDtbAbi = kernelDtbAbi;
         auroraLegacySpeakerProtection = true;
+        # Source overrides must not keep advertising the packaged revision.
+        auroraSourceCommit = finalAttrs.src.rev or null;
       };
       env = old.env // { RUSTC_BOOTSTRAP = "1"; };
       nativeBuildInputs = old.nativeBuildInputs ++ [ binutils llvmPackages.lld ];
@@ -97,7 +99,7 @@ let
         "$buildRoot/certs/extract-cert" "" "$TMPDIR/aurora-empty-cert"
       '';
       postInstall = (old.postInstall or "") + ''
-        echo ${pin.commit} > "$out/aurora-source-commit"
+        printf '%s\n' ${lib.escapeShellArg (finalAttrs.src.rev or "unknown")} > "$out/aurora-source-commit"
       '';
     });
 in lib.makeOverridable buildKernel {

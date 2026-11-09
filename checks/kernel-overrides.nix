@@ -2,6 +2,20 @@
 let
   inherit (pkgs) lib;
   base = pkgs.linux-asahi.kernel;
+  revision = "1111111111111111111111111111111111111111";
+  sourceOverride = base.override { src = base.src // { rev = revision; }; };
+  attrsSourceOverride = base.overrideAttrs { src = base.src // { rev = revision; }; };
+  unknownSource = base.override { src = builtins.removeAttrs base.src [ "rev" ]; };
+  manifest = kernel: builtins.fromJSON (builtins.unsafeDiscardStringContext (import ../modules/parity.nix {
+    inherit pkgs;
+    config = {
+      boot.kernelPackages = { inherit kernel; };
+      aurora.audio = { skipLockedControls = true; initrdSequencer = true; };
+      aurora.fexMesa.enable = false;
+      aurora.flatpak.enable = false;
+      aurora.systemFixes.malcontentSignal = true;
+    };
+  }).environment.etc."aurora/parity.json".text);
   withPatch = patch: (pkgs.linux-asahi.override {
     _kernelPatches = [ ({ name = "aurora-config-override-test"; patch = null; } // patch) ];
   }).kernel;
@@ -107,6 +121,9 @@ let
     test "$buildRoot" = "$NIX_BUILD_TOP/build"
     test ! -e "$sourceDirectory/build"
     ${kernel.postInstall}
+    test "$(cat "$out/aurora-source-commit")" = ${lib.escapeShellArg (
+      if kernel.auroraSourceCommit == null then "unknown" else kernel.auroraSourceCommit
+    )}
     test ! -e "$NIX_BUILD_TOP/build"
     test -s "$dev/lib/modules/${base.modDirVersion}/build/.config"
     test -f "$dev/lib/modules/${base.modDirVersion}/source/Makefile"
@@ -149,6 +166,17 @@ let
   '';
 
 in
+assert lib.assertMsg (base.auroraSourceCommit == base.src.rev
+  && (manifest base).kernelCommit == base.src.rev)
+  "The default kernel and parity manifest must identify their source";
+assert lib.assertMsg (sourceOverride.auroraSourceCommit == revision
+  && attrsSourceOverride.auroraSourceCommit == revision
+  && (manifest sourceOverride).kernelCommit == revision
+  && (manifest attrsSourceOverride).kernelCommit == revision)
+  "Source overrides must update installed and manifest provenance";
+assert lib.assertMsg (unknownSource.auroraSourceCommit == null
+  && (manifest unknownSource).kernelCommit == null)
+  "An unidentified source must not inherit the packaged commit";
 assert lib.assertMsg (base.config.isEnabled "DUMMY") "Kernel override test requires the baseline dummy driver";
 assert lib.assertMsg (!structured.config.isEnabled "DUMMY" && structured.drvPath != base.drvPath)
   "Kernel structuredExtraConfig must affect both build inputs and option metadata";
@@ -178,6 +206,9 @@ assert lib.assertMsg (afterAttrs.auroraOverrideAttrs && afterAttrs.features.auro
   "Kernel override callbacks and overrideAttrs must remain composable";
 pkgs.runCommand "aurora-kernel-overrides" { nativeBuildInputs = [ pkgs.python3 ]; } ''
   ${exercise "base" base "" null}
+  ${exercise "source-override" sourceOverride "" null}
+  ${exercise "attrs-source-override" attrsSourceOverride "" null}
+  ${exercise "unknown-source" unknownSource "" null}
   ${exercise "structured" structured "" null}
   ${exercise "inner-structured" inner "" null}
   ${exercise "inner-after-attrs" afterAttrs "" null}
