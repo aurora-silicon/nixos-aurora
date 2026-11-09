@@ -14,7 +14,8 @@ let
   # the ALSA tools, pw-link and pw-dump, loginctl and systemctl, and the
   # tuning reader.
   tools = [ pkgs.alsa-utils pkgs.pipewire pkgs.systemd cfg.package ];
-  legacyGate = { serviceConfig.ExecCondition = [ "${lx}/speakerguardd-gate legacy" ]; };
+  # "+": the gate runs privileged even in a DynamicUser unit (speakersafetyd), speakerguardd#131.
+  legacyGate = { serviceConfig.ExecCondition = [ "+${lx}/speakerguardd-gate legacy" ]; };
 in {
   options.aurora.speakerguardd.v2 = {
     enable = lib.mkOption {

@@ -46,12 +46,12 @@
   },
   "speakerguardd-v2": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "f4bb2fdb44066fc081669b4b43c9db4d766a45e1",
+    "commit": "416b1f513b9d9e924d7e4de16385ba19f7364a92",
     "version": "1.0.0-alpha.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/f4bb2fdb44066fc081669b4b43c9db4d766a45e1",
-    "archive_root": "speakerguardd-f4bb2fdb44066fc081669b4b43c9db4d766a45e1",
-    "sha256": "26111dc541af8bcb4c435b91cd6ac12b440a7790de8f576c99edc0870cfd37f4",
-    "nix_hash": "sha256-JhEdxUGvi8tMQ1uRzWrBK0QKd5Dej1dsme3Ahwz9N/Q="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/416b1f513b9d9e924d7e4de16385ba19f7364a92",
+    "archive_root": "speakerguardd-416b1f513b9d9e924d7e4de16385ba19f7364a92",
+    "sha256": "f1e542a63b0a6bf68ea275ba08565d876a990f82658df950a5ecba13bdf8f175",
+    "nix_hash": "sha256-8eVCpjsKa/aOonW6CFZdh2qZD4JljflQpey6E7348XU="
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",
@@ -332,11 +332,11 @@
   },
   "aurora-speaker-upgrade": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "f4bb2fdb44066fc081669b4b43c9db4d766a45e1",
+    "commit": "416b1f513b9d9e924d7e4de16385ba19f7364a92",
     "version": "0.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/f4bb2fdb44066fc081669b4b43c9db4d766a45e1",
-    "archive_root": "speakerguardd-f4bb2fdb44066fc081669b4b43c9db4d766a45e1",
-    "sha256": "26111dc541af8bcb4c435b91cd6ac12b440a7790de8f576c99edc0870cfd37f4",
-    "nix_hash": "sha256-JhEdxUGvi8tMQ1uRzWrBK0QKd5Dej1dsme3Ahwz9N/Q="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/416b1f513b9d9e924d7e4de16385ba19f7364a92",
+    "archive_root": "speakerguardd-416b1f513b9d9e924d7e4de16385ba19f7364a92",
+    "sha256": "f1e542a63b0a6bf68ea275ba08565d876a990f82658df950a5ecba13bdf8f175",
+    "nix_hash": "sha256-8eVCpjsKa/aOonW6CFZdh2qZD4JljflQpey6E7348XU="
   }
 }
