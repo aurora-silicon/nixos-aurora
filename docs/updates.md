@@ -162,7 +162,8 @@ them. Nothing is removed automatically: keep a configuration you know boots. An 
 refused, as the listed configurations already boot with it.
 
 So the first kernel update after this lands is refused while a listed configuration from before it has a
-different kernel: those count as generation 0, as Fedora counts kernels without the file.
+different kernel and a later DT ABI generation: those count as generation 1, as Fedora counts kernels
+without the file.
 
 ### What differs from Fedora
 
