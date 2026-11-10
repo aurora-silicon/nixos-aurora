@@ -28,6 +28,9 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import updatelib as lib  # noqa: E402
 from cache_inputs import expected_outputs, require_coverage, store_paths  # noqa: E402
 
+# gh with retries of transient GitHub API failures (HTTP 5xx/429, timeouts): scripts/gh-retry
+GH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gh-retry')
+
 TAG = re.compile(r'cache-[A-Za-z0-9._-]+')
 REFS = {'testing': 'channel-testing', 'stable': 'channel-stable'}
 CACHE_URL = 'https://aurorasilicon.org/nixos-aurora/cache'
@@ -49,7 +52,7 @@ def verify_attestation(directory, repository):
     for name in ('cache-metadata.tar.gz', 'manifest.json'):
         if listed.get(name) != lib.sha256_file(directory / name):
             raise ValueError('SHA256SUMS does not match ' + name)
-    result = subprocess.run(['gh', 'attestation', 'verify', str(archive), '--repo', repository,
+    result = subprocess.run([GH, 'attestation', 'verify', str(archive), '--repo', repository,
                              '--signer-workflow', f'{repository}/.github/workflows/publish-cache.yml',
                              '--deny-self-hosted-runners', '--format', 'json'],
                             check=True, capture_output=True, text=True)
