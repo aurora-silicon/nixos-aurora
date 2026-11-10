@@ -594,11 +594,63 @@ by aurora-touchid-boot.service at every boot.
 
 ## `aurora.sepLuks.enable`
 
-Install aurora-sep-cryptenroll and its libcryptsetup token plugin, which
-unlock LUKS2 volumes with this Mac's Secure Enclave the way
-systemd-cryptenroll --tpm2-device=auto does with a TPM. Nothing is
-enrolled by this option: run aurora-sep-cryptenroll for each volume.
-The root volume is not supported yet.
+Install aurora-sep-cryptenroll, aurora-sep-fde and the libcryptsetup
+token plugin, which unlock LUKS2 volumes with this Mac's Secure Enclave.
+aurora-sep-cryptenroll seals a volume to the Mac, the way
+systemd-cryptenroll --tpm2-device=auto does with a TPM. aurora-sep-fde
+seals it to users' passwords, checked by the Secure Enclave (the
+FileVault model): each user gets their own keyslot, and volume owners
+add, remove and reset users. Nothing is enrolled by this option: run
+either tool for each volume. /etc/aurora-sep/fde.conf comes from the
+package unless environment.etc."aurora-sep/fde.conf" is set.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.initrd.enable`
+
+Open Secure Enclave volumes in the initrd too, the root volume included.
+Needs a kernel whose apple_sep has the
+key-store-only attach phase (the keystore_only parameter); with an
+older kernel the initrd leaves the driver alone and those volumes ask
+for their passphrase. For volumes sealed by aurora-sep-cryptenroll the
+SEP key store files from /var/lib go into the initrd through
+boot.initrd.secrets (never the Nix store), so they must exist when the
+boot loader is installed: enable Touch ID or run the SEP once first.
+Rebuild after the key store changes. Every volume keeps its passphrase
+or recovery key.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.initrd.keyStore`
+
+Copy the SEP key store (/var/lib/aurora-sep-keybag.bin and
+/var/lib/aurora-sep-refkey.bin) into the initrd as boot.initrd.secrets,
+for volumes sealed by aurora-sep-cryptenroll. Turn it off on a system
+whose initrd volumes are all sealed to passwords
+(initrd.passwordUnlock) and that has no key store yet.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.initrd.passwordUnlock`
+
+Also open volumes sealed to a user's password by aurora-sep-fde in the
+initrd: apple_sep loads there with keystore_only=2, which unlocks the
+user's key bag with the password typed at the prompt. Needs a kernel
+whose keystore_only parameter offers per-user key bags. Those tokens
+carry their wrapped key bag in the LUKS2 header, so this mode needs no
+key store copies.
 
 **Type:** boolean
 
@@ -613,6 +665,54 @@ The aurora-sep-luks package to use.
 **Type:** package
 
 **Default:** `pkgs.aurora-sep-luks`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.passwordSync.enable`
+
+Keep a user's disk password equal to their login password: after
+pam_unix changed a password (passwd, GNOME Settings), the
+pam_aurora_sep_fde module re-wraps the user's key bag in the Secure
+Enclave and writes it to every volume listed in
+/etc/aurora-sep/fde-volumes. The password stacks of
+passwordSync.services run it after pam_unix, which becomes
+authoritative there: a failed pam_unix change fails the stack
+instead of falling through to later password modules. A change
+without the old password (root running passwd for another user,
+chpasswd) leaves the disk password as it was and says how a volume
+owner resets it.
+
+**Type:** boolean
+
+**Default:** `config.aurora.sepLuks.enable`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.passwordSync.services`
+
+PAM services whose password changes also change the disk password.
+passwd covers passwd and GNOME Settings; add the login services to
+follow a change of an expired password at login.
+
+**Type:** list of string
+
+**Default:**
+
+```nix
+[
+  "passwd"
+]
+```
+
+**Example:**
+
+```nix
+[
+  "passwd"
+  "login"
+  "gdm-password"
+]
+```
 
 **Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
 

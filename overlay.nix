@@ -649,16 +649,28 @@ in {
       platforms = [ "aarch64-linux" ];
     };
   };
-  # Secure Enclave LUKS2 unlock (aurora-sep-userspace luks/): aurora-sep-cryptenroll
-  # and the cryptsetup token plugin. modules/sep-luks.nix installs it when asked.
+  # Secure Enclave LUKS2 unlock (aurora-sep-userspace luks/): aurora-sep-cryptenroll,
+  # aurora-sep-fde (password-sealed volumes with owners), the cryptsetup token
+  # plugin, pam_aurora_sep_fde and the initrd loader. modules/sep-luks.nix
+  # installs it when asked.
   aurora-sep-luks = final.stdenv.mkDerivation {
     pname = "aurora-sep-luks";
     version = pins.aurora-sep-luks.version;
     src = source "aurora-sep-luks";
     sourceRoot = "${pins.aurora-sep-luks.archive_root}/luks";
     nativeBuildInputs = [ final.pkg-config ];
-    buildInputs = [ final.cryptsetup final.json_c ];
-    makeFlags = [ "PREFIX=${placeholder "out"}" "TOKENDIR=${placeholder "out"}/lib/cryptsetup" ];
+    buildInputs = [ final.cryptsetup final.json_c final.pam ];
+    makeFlags = [
+      "PREFIX=${placeholder "out"}"
+      "TOKENDIR=${placeholder "out"}/lib/cryptsetup"
+      "LIBEXECDIR=${placeholder "out"}/libexec"
+      "PAMDIR=${placeholder "out"}/lib/security"
+      # The default fde.conf; modules/sep-luks.nix links it to /etc/aurora-sep.
+      "SYSCONFDIR=${placeholder "out"}/etc"
+    ];
+    # install-initrd adds the initrd loader and units that
+    # aurora.sepLuks.initrd uses; the dracut/mkinitcpio parts are not needed.
+    installTargets = [ "install" "install-initrd" ];
     # Kernel "user" keys stand in for the SEP. The test exits 77 when the
     # sandbox blocks the keyring. Kernels with af_alg_restrict refuse an
     # unprivileged ccm(aes) bind with ENOENT, which stops the test at its seal
@@ -681,7 +693,11 @@ in {
       runHook postCheck
     '';
     postInstall = ''
-      install -Dm644 ../docs/luks-sep.md $out/share/doc/aurora-sep-luks/luks-sep.md
+      for doc in luks-sep.md luks-sep-initrd.md luks-sep-owners.md; do
+        install -Dm644 ../docs/$doc $out/share/doc/aurora-sep-luks/$doc
+      done
+      # pam_aurora_sep_fde is built only when pkg-config finds pam.
+      test -e $out/lib/security/pam_aurora_sep_fde.so
     '';
     passthru.commit = pins.aurora-sep-luks.commit;
     meta = {
