@@ -46,6 +46,7 @@
           plymouth-theme-aurora omdrop-awdl speakerguardd-v2;
         logos = pkgs.aurora-logos;
         firstboot = pkgs.aurora-firstboot;
+        power-budget = pkgs.aurora-power-budget;
         sep = pkgs.aurora-sep;
         avd-fw = pkgs.aurora-avd-firmware;
         speaker-upgrade = pkgs.aurora-speaker-upgrade;

@@ -214,6 +214,7 @@ in {
     };
   };
   aurora-firstboot = final.callPackage ./firstboot.nix { };
+  aurora-power-budget = final.callPackage ./power-budget.nix { };
   # The legacy-to-speakerguardd-v2 upgrade tool (modules/speaker-upgrade.nix).
   aurora-speaker-upgrade = final.callPackage ./aurora-speaker-upgrade.nix {
     src = source "aurora-speaker-upgrade";

@@ -550,6 +550,19 @@ integration without disabling KDE or removing existing accounts.
 
 **Declared in:** [plasma-setup.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/plasma-setup.nix)
 
+## `aurora.powerBudget.enable`
+
+Give the Power Saver profile a CPU power budget, as macOS Low Power Mode
+does: every 100 ms the budget is split across the CPU clusters from the
+device tree energy model and each cluster is capped to its share.
+Balanced and Performance are untouched.
+
+**Type:** boolean
+
+**Default:** `config.services.power-profiles-daemon.enable`
+
+**Declared in:** [power-budget.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/power-budget.nix)
+
 ## `aurora.sep.greeterFingerprint.enable`
 
 Patch GNOME Shell's greeter to offer fingerprint sign-in as well as
