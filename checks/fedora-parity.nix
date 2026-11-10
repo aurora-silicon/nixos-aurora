@@ -23,6 +23,9 @@ let
         "the display chain and its PMP come up before the root is unlocked" =
           lib.all (m: lib.elem m config.boot.initrd.availableKernelModules)
             [ "apple-pmp" "mux-apple-display-crossbar" "appledrm" ];
+        "the external displays' Type-C chain comes up with the display" =
+          lib.all (m: lib.elem m config.boot.initrd.availableKernelModules)
+            [ "i2c-pasemi-platform" "phy-apple-atc" "phy-ti-cd2e22" "tps6598x" ];
         "the PipeWire daemon carries the filter-graph volume and latency fixes" = let
           package = config.services.pipewire.package;
           patched = suffix: lib.any (patch: lib.hasSuffix suffix (toString patch)) (package.patches or [ ]);
