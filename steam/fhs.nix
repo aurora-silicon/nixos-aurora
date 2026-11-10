@@ -8,8 +8,13 @@
   steam-unwrapped,
   buildFHSEnv,
   writeShellScript,
-  extraPkgs ? pkgs: [ ], # extra packages to add to targetPkgs
-  extraLibraries ? pkgs: [ ], # extra packages to add to multiPkgs
+  writeShellApplication,
+  makeWrapper,
+  coreutils,
+  aurora-proton,
+  proton ? aurora-proton,
+  extraPkgs ? _pkgs: [ ], # extra packages to add to targetPkgs
+  extraLibraries ? _pkgs: [ ], # extra packages to add to multiPkgs
   extraProfile ? "", # string to append to profile
   extraPreBwrapCmds ? "", # extra commands to run before calling bubblewrap
   extraBwrapArgs ? [ ], # extra arguments to pass to bubblewrap (real default is at usage site)
@@ -18,10 +23,22 @@
   privateTmp ? true, # if the steam bubblewrap should isolate /tmp
 }:
 let
+  prepareProton = if proton == null then null else writeShellApplication {
+    name = "aurora-prepare-proton";
+    runtimeInputs = [ coreutils ];
+    text = builtins.replaceStrings [ "@PROTON@" ] [ (lib.escapeShellArg (toString proton)) ]
+      (builtins.readFile ./prepare-proton);
+  };
+  prepareDefaultProton = lib.optionalString (proton != null && !(extraEnv ? STEAM_EXTRA_COMPAT_TOOLS_PATHS)) ''
+    if [ -z "''${STEAM_EXTRA_COMPAT_TOOLS_PATHS:-}" ]; then
+      defaultProtonPath="$(${prepareProton}/bin/aurora-prepare-proton)" || exit 1
+      export STEAM_EXTRA_COMPAT_TOOLS_PATHS="$defaultProtonPath"
+    fi
+  '';
   buildRuntimeEnv =
     {
-      extraPkgs ? pkgs: [ ],
-      extraLibraries ? pkgs: [ ],
+      extraPkgs ? _pkgs: [ ],
+      extraLibraries ? _pkgs: [ ],
       extraProfile ? "",
       extraPreBwrapCmds ? "",
       extraBwrapArgs ? [ ],
@@ -57,6 +74,7 @@ let
             pciutils # not documented, complains about lspci on startup
             glibc.bin
             lsof # Steam checks the owner of its local webhelper connections.
+            mangohud # Native Vulkan layer selected by Play's per-tool Stats setting.
             python3
             usbutils # not documented, complains about lsusb on startup (needed for the 'Enter VR Mode' button to appear)
             xdg-utils # calls xdg-open occasionally
@@ -159,17 +177,19 @@ let
 in
 buildRuntimeEnv {
   pname = "steam";
+  nativeBuildInputs = [ makeWrapper ];
   inherit (steam-unwrapped) version meta;
 
   extraPkgs = pkgs: [ steam-unwrapped ] ++ extraPkgs pkgs;
   inherit
     extraLibraries
     extraProfile
-    extraPreBwrapCmds
     extraBwrapArgs
     extraEnv
     privateTmp
     ;
+
+  extraPreBwrapCmds = prepareDefaultProton + extraPreBwrapCmds;
 
   runScript = writeShellScript "steam-wrapped" ''
     exec steam ${extraArgs} "$@"
@@ -177,6 +197,16 @@ buildRuntimeEnv {
 
   extraInstallCommands = ''
     ln -s ${steam-unwrapped}/share $out/share
+    makeWrapper ${steam-unwrapped}/bin/aurora-play $out/bin/aurora-play \
+      --set AURORA_STEAM_LAUNCHER "$out/bin/steam" \
+      ${lib.optionalString (extraEnv ? STEAM_EXTRA_COMPAT_TOOLS_PATHS)
+        "--set STEAM_EXTRA_COMPAT_TOOLS_PATHS ${lib.escapeShellArg extraEnv.STEAM_EXTRA_COMPAT_TOOLS_PATHS}"} \
+      --run ${lib.escapeShellArg ''
+        case "''${1-}" in
+          --help*) ;;
+          *) ${prepareDefaultProton} ;;
+        esac
+      ''}
   '';
 
   passthru =
@@ -216,7 +246,7 @@ buildRuntimeEnv {
         };
     in
     {
-      inherit buildRuntimeEnv;
+      inherit buildRuntimeEnv proton prepareProton;
 
       run = makeSteamRun [ steam-unwrapped ];
       run-free = makeSteamRun [ ];

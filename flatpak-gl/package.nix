@@ -4,8 +4,9 @@
 { lib, stdenvNoCC, fetchurl, flatpak, flatpak-builder, ostree, python3, callPackage
 , mesaSrc, mesaPin }:
 let
-  branches = [ "25.08" "26.08" ];
   locks = builtins.fromJSON (builtins.readFile ./sdk-lock.json);
+  branches = assert lib.assertMsg (locks != { }) "The Flatpak SDK lock must name at least one runtime";
+    builtins.attrNames locks;
   template = builtins.fromJSON (builtins.readFile ./manifest.json.in);
   sdkFor = branch: callPackage ./sdk.nix { inherit branch; lock = locks.${branch}; };
   buildBranch = branch: let
@@ -17,7 +18,7 @@ let
         sources = map (source: let
           archive = if module.name == "mesa" then mesaSrc else fetchurl {
             inherit (source) url;
-            sha256 = source.sha256;
+            inherit (source) sha256;
           };
         in (builtins.removeAttrs source [ "url" "dest-filename" ]) // {
           path = toString archive;
@@ -91,7 +92,8 @@ in stdenvNoCC.mkDerivation {
       cp ${buildBranch branch}/aurora-mesa-commit.${branch} "$out/"
     '') branches}
     flatpak build-update-repo "$out"
-    python3 ${./validate-repository.py} --repo "$out" --commit ${mesaPin.commit}
+    python3 ${./validate-repository.py} --repo "$out" --commit ${mesaPin.commit} \
+      --sdk-lock ${./sdk-lock.json}
   '';
   passthru = {
     inherit branches;
@@ -99,7 +101,7 @@ in stdenvNoCC.mkDerivation {
     sdks = lib.genAttrs branches sdkFor;
   };
   meta = {
-    description = "Aurora Mesa for the 25.08 and 26.08 Flatpak runtimes";
+    description = "Aurora Mesa for the ${lib.concatStringsSep " and " branches} Flatpak runtimes";
     homepage = "https://github.com/aurora-silicon/nixos-aurora";
     license = lib.licenses.mit;
     platforms = [ "aarch64-linux" ];

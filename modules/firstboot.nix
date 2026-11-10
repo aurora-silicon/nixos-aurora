@@ -27,20 +27,44 @@ in {
     type = lib.types.bool;
     default = true;
     description = ''
-      Declare the first-boot PAM hooks that let the owner's first password
-      sign-in become the disk password. aurora-firstboot sets this to false in
-      /etc/nixos/owner.nix once the password unlocks the disk, so the next
-      rebuild removes the hooks; until then they do nothing.
+      Declare PAM hooks that make the owner's first password sign-in unlock
+      the encrypted disk. Used only with `aurora.imageLayout`. After rekeying,
+      the hooks become inert and the generated `owner.nix` disables them for
+      the next rebuild; hand-edited files receive instructions in the journal.
+      False omits these hooks, not the rest of first-boot setup.
     '';
   };
   options.aurora.imageLayout = lib.mkOption {
     default = null;
-    description = "Filesystem identities sealed into an Aurora installer image.";
+    description = ''
+      Filesystem identities of an Aurora installer layout. Non-null enables
+      its root-unlock, first-boot and GRUB filesystem-lookup adapters and selects
+      these devices for `/`, `/home`, `/boot` and `/boot/efi`. Identities must
+      match an installer-prepared layout; this does not create that layout.
+      Null omits those adapters. The image module
+      supplies profile defaults; generated `machine.nix` preserves installed
+      identities.
+    '';
     type = lib.types.nullOr (lib.types.submodule {
       options = {
-        rootUUID = lib.mkOption { type = lib.types.strMatching "[a-f0-9-]{36}"; };
-        bootUUID = lib.mkOption { type = lib.types.strMatching "[a-f0-9-]{36}"; };
-        efiUUID = lib.mkOption { type = lib.types.strMatching "[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}"; };
+        rootUUID = lib.mkOption {
+          type = lib.types.strMatching "[a-f0-9-]{36}";
+          example = "eb688499-cc41-4c4c-b00b-dbf33e05427c";
+          description = ''
+            Lowercase Btrfs filesystem UUID shared by the `root` and `home`
+            subvolumes. Use the filesystem UUID, not the GPT partition or LUKS UUID.
+          '';
+        };
+        bootUUID = lib.mkOption {
+          type = lib.types.strMatching "[a-f0-9-]{36}";
+          example = "3429647d-29a2-411c-8924-2545fda1ec34";
+          description = "Lowercase ext4 filesystem UUID for the separate `/boot` filesystem.";
+        };
+        efiUUID = lib.mkOption {
+          type = lib.types.strMatching "[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}";
+          example = "1E08-14ED";
+          description = "FAT filesystem UUID for `/boot/efi`, in `XXXX-XXXX` form; not its GPT PARTUUID.";
+        };
       };
     });
   };
@@ -135,9 +159,8 @@ in {
         RemainAfterExit = true;
         TimeoutStartSec = "infinity";
         ExecStart = "${pkgs.aurora-firstboot}/lib/aurora/aurora-firstboot";
-        # The unit never takes tty1: Plymouth reads the splash password
-        # prompt's keystrokes from it. The text wizard opens tty1 itself once
-        # the splash is gone.
+        # Keep tty1 available to Plymouth. The text wizard opens tty1 itself
+        # after releasing the splash; the default desktop path uses PAM hooks.
         StandardInput = "null"; StandardOutput = "journal"; StandardError = "journal";
       };
     };
@@ -218,9 +241,8 @@ in {
     systemd.services.plymouth-quit = lib.mkIf config.boot.plymouth.enable {
       after = [ "aurora-firstboot.service" ];
     };
-    # The shared plasma-setup.service drop-in: Plasma Setup waits until the
-    # disk is protected, and is skipped, never failed, while setup is pending
-    # and when the text wizard created the owner.
+    # Plasma Setup waits for the desktop handoff, and is skipped, never failed,
+    # while first boot is pending or when the text wizard created the owner.
     systemd.services.plasma-setup = lib.mkIf config.aurora.plasmaSetup.enable {
       after = [ "aurora-firstboot.service" ];
       unitConfig.ConditionPathExists = [ "!/var/lib/aurora/firstboot/pending" "!/var/lib/aurora/firstboot/complete" ];

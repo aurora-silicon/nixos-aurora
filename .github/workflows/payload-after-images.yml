@@ -35,7 +35,7 @@ jobs:
       actions: read
       id-token: write
       attestations: write
-    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@d399935111d6c037294a2ef2d1c682f9ded2dc62
+    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@69178da4caa503e69a44bda5dd4fe91f12c50cb8
     with:
       profile: ${{ needs.profile.outputs.profile }}
       image-run: ${{ github.event.workflow_run.id }}

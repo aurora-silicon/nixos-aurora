@@ -4,7 +4,10 @@
     skipLockedControls = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Leave ALSA controls locked by another process to their owner during restore.";
+      description = ''
+        Select and install Aurora's ALSA utilities, whose restore skips controls
+        locked by another process. False leaves ALSA utility selection unchanged.
+      '';
     };
     pipewireFixes = lib.mkOption {
       type = lib.types.bool;
@@ -19,7 +22,11 @@
     initrdSequencer = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Carry the ALSA sequencer alongside early display audio in the initrd.";
+      description = ''
+        Add `snd-seq` to the modules available in the initrd for early display
+        audio. This includes the module without forcing an early load; false
+        omits Aurora's additional entry.
+      '';
     };
   };
   config = lib.mkMerge [

@@ -2,19 +2,25 @@
 {
   imports = [ ./ane.nix ./firmware.nix ./platform.nix ./audio.nix ./system-fixes.nix
     ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix ./dbus.nix
-    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix
-    ./userpages.nix ./boot-splash.nix ./speakerguardd-v2.nix ./power-budget.nix ];
+    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix ./fido.nix ./awdl.nix
+    ./userpages.nix ./boot-splash.nix ./speakerguardd-v2.nix ./speaker-upgrade.nix ./steam.nix
+    ./power-budget.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";
-    description = "Desktop selected by the Aurora native installer profile.";
+    description = ''
+      Desktop profile: KDE with Plasma Login Manager, GNOME with GDM, or
+      `minimal` without a desktop or greeter. Shared hardware services remain
+      enabled in all three profiles.
+    '';
   };
   options.aurora.openssh.startAtBoot = lib.mkOption {
     type = lib.types.bool;
     default = false;
     description = ''
-      Start the OpenSSH server (and its host key generation) at boot. Off by
-      default: the server is installed but starts only on request.
+      Start the OpenSSH server and generate its host keys at boot. When false,
+      manual or socket activation remains available. This does not open port
+      22; configure `services.openssh.openFirewall` separately.
     '';
   };
   config = {
@@ -33,6 +39,13 @@
     boot.loader.grub.efiSupport = true;
     boot.loader.grub.efiInstallAsRemovable = true;
     boot.loader.grub.device = "nodev";
+    # Every generation, the image's included, records its kernel's DT ABI
+    # generation (kernel/dtb-abi), so Stage 2 updates know which device trees
+    # each configuration GRUB lists can boot (modules/installed.nix). A kernel
+    # that declares none is generation 0.
+    system.systemBuilderCommands = ''
+      echo ${toString (config.boot.kernelPackages.kernel.auroraDtbAbi or 0)} > $out/aurora-dtb-abi
+    '';
     boot.loader.efi.canTouchEfiVariables = false;
     # Keep the Apple/USB/NVMe initrd set explicit. Native module additions
     # (including audio, sensors and systemd) still merge into this list.
@@ -67,32 +80,6 @@
     # status only when a unit fails or stalls.
     boot.consoleLogLevel = lib.mkDefault 3;
     boot.kernelParams = [ "quiet" "rd.udev.log_level=3" "udev.log_level=3" "systemd.show_status=auto" ];
-    # Desktop images boot to a splash; first boot asks for the disk password
-    # on it, as every later boot does. The Aurora theme draws the logo aura
-    # shows, at the same size and place, with the spinner below it and
-    # boot.plymouth.logo (the NixOS logo) at the bottom, so the logo stays
-    # still from power-on to the greeter. Plymouth runs in the systemd initrd.
-    boot.plymouth.enable = lib.mkDefault (config.aurora.desktop != "minimal");
-    boot.plymouth.package = lib.mkDefault pkgs.plymouth;
-    boot.plymouth.themePackages = [ pkgs.plymouth-theme-aurora ];
-    boot.plymouth.theme = lib.mkDefault "aurora";
-    # The theme draws in device pixels, so the logo matches aura's to the
-    # pixel; Plymouth's own 2x scale on Retina panels would double it.
-    boot.plymouth.extraConfig = lib.mkIf (config.boot.plymouth.theme == "aurora") "DeviceScale=1";
-    # Each boot supplies the live DT geometry, including image builds and
-    # rebuilds done on another machine. Keep the store and /etc immutable.
-    boot.initrd.systemd.services.plymouth-start.preStart = lib.mkIf
-      (config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora") (lib.mkAfter ''
-        PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
-          ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
-          ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
-      '');
-    systemd.services.plymouth-start.preStart = lib.mkIf
-      (config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora") ''
-        PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
-          ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
-          ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
-      '';
     hardware.graphics.enable = true;
     hardware.graphics.extraPackages = [
       pkgs.aurora-rusticl
@@ -120,26 +107,6 @@
       && !config.aurora.openssh.startAtBoot) { wantedBy = lib.mkForce [ ]; };
     systemd.services.sshd-keygen = lib.mkIf (config.services.openssh.enable && config.services.openssh.generateHostKeys
       && !config.aurora.openssh.startAtBoot) { wantedBy = lib.mkForce [ ]; };
-    # GDM keeps the splash until its greeter starts and replaces
-    # plymouth-quit.service; give Plasma Login the same role, so the splash is
-    # still up when first boot asks for the disk password. If Plasma Login
-    # fails, plymouth-quit.service still removes the splash. Its unit is
-    # plasmalogin.service; display-manager.service is only an alias of it, so
-    # a display-manager definition here would be a second, empty unit.
-    systemd.services.plasmalogin = lib.mkIf (config.services.displayManager.plasma-login-manager.enable && config.boot.plymouth.enable) {
-      conflicts = [ "plymouth-quit.service" ];
-      after = [ "plymouth-start.service" ];
-      onFailure = [ "plymouth-quit.service" ];
-      serviceConfig.ExecStartPre = [
-        "-${pkgs.coreutils}/bin/timeout --kill-after=2 20 ${lib.getExe' config.boot.plymouth.package "plymouth"} quit"
-      ];
-    };
-    # As with GDM: if multi-user.target wanted plymouth-quit.service, a
-    # nixos-rebuild switch would stop the display manager to start it.
-    systemd.services.plymouth-quit = lib.mkIf (config.services.displayManager.plasma-login-manager.enable && config.boot.plymouth.enable) {
-      wantedBy = lib.mkForce [ ];
-    };
     environment.systemPackages = [ pkgs.aurora-bless pkgs.git pkgs.cryptsetup pkgs.btrfs-progs ];
-    system.stateVersion = "26.05";
   };
 }
