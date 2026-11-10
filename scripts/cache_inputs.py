@@ -13,11 +13,6 @@ import subprocess
 import tempfile
 import zipfile
 
-import os
-
-# gh with retries of transient GitHub API failures (HTTP 5xx/429, timeouts): scripts/gh-retry
-GH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gh-retry')
-
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = 'aurora-silicon/nixos-aurora'
 STORE_PATH = re.compile(r'/nix/store/[a-z0-9]{32}-[^/\s]+')
@@ -29,7 +24,7 @@ def digest(path):
 
 
 def gh_json(route):
-    return json.loads(subprocess.check_output([GH, 'api', route]))
+    return json.loads(subprocess.check_output(['gh', 'api', route]))
 
 
 def validate_build(metadata, ancestor):
@@ -160,7 +155,7 @@ def attests(commit):
 
 
 def verify_attestation(archive, commit):
-    subprocess.run([GH, 'attestation', 'verify', str(archive), '--repo', REPOSITORY,
+    subprocess.run(['gh', 'attestation', 'verify', str(archive), '--repo', REPOSITORY,
                     '--signer-workflow', f'{REPOSITORY}/.github/workflows/checks.yml',
                     '--source-digest', commit, '--deny-self-hosted-runners'],
                    check=True, stdout=subprocess.DEVNULL)
@@ -177,7 +172,7 @@ def authenticated_artifact(artifact, commit, *, require_attestation=True, parent
             raise ValueError('Insufficient space for a bounded cache import')
         archive = staging / 'artifact.zip'
         with archive.open('xb') as stream:
-            subprocess.run([GH, 'api', f'repos/{REPOSITORY}/actions/artifacts/{artifact["id"]}/zip'],
+            subprocess.run(['gh', 'api', f'repos/{REPOSITORY}/actions/artifacts/{artifact["id"]}/zip'],
                            stdout=stream, check=True)
         if 'sha256:' + digest(archive) != artifact['digest']:
             raise ValueError('Native artifact digest mismatch')
