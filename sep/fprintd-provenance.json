@@ -1,11 +1,11 @@
 {
   "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
-  "commit": "0b561dd77db67fb23b642517ee07d13a390e9875",
+  "commit": "12f26f61b562d40048a9e7e47129d8341175b5c8",
   "files": {
     "0001-preserve-print-on-device-delete-failure.patch": "ea41766b42cfd259e32ce37cf84c5557b2f31eb9db4b63160c54ddb5c6a11e7a",
     "test_account_gate.py": "9d09fd49cb988b4b70784151d9d6757a40fa60b19c85048067598decd480bb83",
     "0002-report-lockout-and-fall-back-to-the-password.patch": "b29df6766dafadbdc2dac34b5fc0396ac24a7628e822018285189cf30f52c34e",
     "0003-say-why-the-reader-needs-the-password.patch": "1db338603ce2bbf15688c909d4c24120c7933755ca390358b940ac4579cb82d3",
-    "0004-dont-ask-for-a-finger-the-reader-will-not-take.patch": "110f51f4469a49b44e0e6b72c53c78c76b75f314968484c8ab45d2b672ad9869"
+    "0004-dont-ask-for-a-finger-the-reader-will-not-take.patch": "ca498a36e63e39450e8bd7bb090134093942e4ffc7919bd8748a579e1669db1a"
   }
 }
