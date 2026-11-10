@@ -70,6 +70,16 @@ in {
     version = pins.libva-v4l2-request-avd.version;
     portabilityPatch = stableFile ./patches/libva-v4l2-request-offline-test-portability.patch;
   };
+  # VA-API encoder for the Apple AVE (apple-ave V4L2 driver), and the VA
+  # driver that serves AVD decode and AVE encode through one VADisplay.
+  aurora-ave-vaapi = final.callPackage ./pkgs/aurora-ave-vaapi.nix {
+    src = source "aurora-ave-vaapi";
+    version = pins.aurora-ave-vaapi.version;
+  };
+  aurora-va-dispatch = final.callPackage ./pkgs/aurora-va-dispatch.nix {
+    src = source "aurora-ave-vaapi";
+    version = pins.aurora-ave-vaapi.version;
+  };
   plymouth = prev.plymouth.overrideAttrs (old: {
     version = "${old.version}-aurora3";
     # Keep the upstream archive tag when only changing the carry release.
