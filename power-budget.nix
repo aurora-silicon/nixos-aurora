@@ -4,7 +4,7 @@ let
   pin = (builtins.fromJSON (builtins.readFile ./sources.json)).aurora-firstboot;
 in stdenvNoCC.mkDerivation {
   pname = "aurora-power-budget";
-  version = pin.version;
+  inherit (pin) version;
   src = fetchurl { name = "aurora-firstboot-${pin.commit}.tar.gz"; url = pin.source_url; hash = pin.nix_hash; };
   buildInputs = [ python3 ];
   dontBuild = true;
