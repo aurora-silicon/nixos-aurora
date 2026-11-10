@@ -162,6 +162,7 @@ in {
       ./sep/0007-aurora-name-retry-causes-and-keep-waiting.patch
       ./sep/0008-aurora-report-the-touch-id-lockout-as-locked-out.patch
       ./sep/0009-aurora-say-why-touch-id-needs-the-password.patch
+      ./sep/0010-let-a-front-end-ask-whether-the-reader-needs-the-password.patch
     ];
     postPatch = (old.postPatch or "") + ''
       install -Dm644 ${stableFile ./sep/apple-sep.h} aurora-uapi/linux/apple-sep.h
@@ -179,6 +180,8 @@ in {
       ./sep/0002-report-lockout-and-fall-back-to-the-password.patch
       # Needs FP_DEVICE_ERROR_PASSWORD_REQUIRED{,_AFTER_BOOT} from libfprint 0009.
       ./sep/0003-say-why-the-reader-needs-the-password.patch
+      # Looks up fp_device_get_password_required() from libfprint 0010 at run time.
+      ./sep/0004-dont-ask-for-a-finger-the-reader-will-not-take.patch
     ];
     postPatch = (old.postPatch or "") + ''
       ${final.python3.interpreter} ${stableFile ./sep/test_account_gate.py} src/device.c
