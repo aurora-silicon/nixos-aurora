@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Compile the driver's lockout-reason path with a fake ioctl and check that
-each kernel reason becomes its own libfprint error."""
+each kernel reason becomes its own libfprint error, and that the driver says
+before a prompt whether Touch ID needs the password."""
 import re
 import subprocess
 import sys
@@ -37,6 +38,16 @@ typedef uint32_t guint32;
 typedef char gchar;
 typedef struct { int domain; int code; char message[256]; } GError;
 typedef struct { int fd; } FpiDeviceAurora;
+typedef FpiDeviceAurora FpDevice;
+typedef int gboolean;
+#define TRUE 1
+#define FALSE 0
+#define FPI_DEVICE_AURORA(device) (device)
+static void g_propagate_error (GError **dest, GError *src)
+{
+  if (dest)
+    *dest = src;
+}
 enum {
   FP_DEVICE_ERROR_LOCKED_OUT = 0x102,
   FP_DEVICE_ERROR_PASSWORD_REQUIRED,
@@ -74,6 +85,8 @@ static int fake_ioctl (int fd, unsigned long req, void *arg)
 }
 static GError *
 @LOCKOUT@
+static gboolean
+@REQUIRED@
 #undef ioctl
 static int reason (int err, guint32 locked, guint32 flags)
 {
@@ -82,6 +95,23 @@ static int reason (int err, guint32 locked, guint32 flags)
   answer = (struct aurora_lockout_state) { locked, 5, 0, flags };
   asked = 0;
   return aurora_lockout_new (&self, "verification")->code;
+}
+/* -1: not required; otherwise the reason's code */
+static int required (int fd, int err, guint32 locked, guint32 flags)
+{
+  FpiDeviceAurora self = { fd };
+  GError *why = NULL;
+  answer_errno = err;
+  answer = (struct aurora_lockout_state) { locked, 5, 0, flags };
+  asked = 0;
+  if (!aurora_password_required (&self, &why))
+    {
+      assert (why == NULL);
+      return -1;
+    }
+  assert (why != NULL);
+  assert (asked == AURORA_LOCKOUT_STATE);
+  return why->code;
 }
 int main (void)
 {
@@ -106,6 +136,21 @@ int main (void)
   /* Locked for another reason, or re-armed meanwhile: the password, no blame. */
   assert (reason (0, 1, 1) == FP_DEVICE_ERROR_PASSWORD_REQUIRED);
   assert (reason (0, 0, 1) == FP_DEVICE_ERROR_PASSWORD_REQUIRED);
+
+  /* Before a prompt: after boot the prompt goes straight to the password. */
+  assert (required (3, 0, 1, 1 | AURORA_LOCKOUT_FLAG_AFTER_BOOT) ==
+          FP_DEVICE_ERROR_PASSWORD_REQUIRED_AFTER_BOOT);
+  assert (required (3, 0, 1, 1 | AURORA_LOCKOUT_FLAG_FAILED_ATTEMPTS) ==
+          FP_DEVICE_ERROR_LOCKED_OUT);
+  assert (required (3, 0, 1, 1) == FP_DEVICE_ERROR_PASSWORD_REQUIRED);
+  /* Armed: the prompt asks for a finger. */
+  assert (required (3, 0, 0, 1) == -1);
+  assert (asked == AURORA_LOCKOUT_STATE);
+  /* A kernel that cannot say: a finger, as before. */
+  assert (required (3, ENOTTY, 0, 0) == -1);
+  /* Not open: nothing asked. */
+  assert (required (-1, 0, 1, 1 | AURORA_LOCKOUT_FLAG_AFTER_BOOT) == -1);
+  assert (asked == 0);
   return 0;
 }
 '''
@@ -116,7 +161,8 @@ def main():
     state = block(source, 'struct aurora_lockout_state\n',
                   '#define AURORA_LOCKOUT_FLAG_FAILED_ATTEMPTS 4\n')
     code = (HARNESS.replace('@STATE@', state)
-            .replace('@LOCKOUT@', function(source, 'aurora_lockout_new')))
+            .replace('@LOCKOUT@', function(source, 'aurora_lockout_new'))
+            .replace('@REQUIRED@', function(source, 'aurora_password_required')))
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory)
         (path / 'test.c').write_text(code)

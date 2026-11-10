@@ -47,6 +47,7 @@ NEEDS = {
     'audio': ['aurora-audio'],
     'ucm': ['alsa-ucm-conf-aurora'],
     'firstboot': ['aurora-firstboot'],
+    'power-budget': ['aurora-firstboot'],  # same aurora-platform archive
     'libfprint': ['libfprint'],
     'fprintd': [],  # nixpkgs' pinned release, with the local companion patch
     'avd-fw': ['avd-fw'],
@@ -67,6 +68,7 @@ NEEDS = {
     'kbd-light': ['kbd-light'],
     'fido': ['aurora-fido'],
     'sep-sk': ['aurora-sep-sk'],
+    'sep-luks': ['aurora-sep-luks'],
     'omdrop-awdl': ['omdrop-awdl', 'omdrop-awdl/omdrop-plugin'],
     'xart': ['aurora-xart'],
 }

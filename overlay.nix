@@ -162,6 +162,7 @@ in {
       ./sep/0007-aurora-name-retry-causes-and-keep-waiting.patch
       ./sep/0008-aurora-report-the-touch-id-lockout-as-locked-out.patch
       ./sep/0009-aurora-say-why-touch-id-needs-the-password.patch
+      ./sep/0010-let-a-front-end-ask-whether-the-reader-needs-the-password.patch
     ];
     postPatch = (old.postPatch or "") + ''
       install -Dm644 ${stableFile ./sep/apple-sep.h} aurora-uapi/linux/apple-sep.h
@@ -179,6 +180,8 @@ in {
       ./sep/0002-report-lockout-and-fall-back-to-the-password.patch
       # Needs FP_DEVICE_ERROR_PASSWORD_REQUIRED{,_AFTER_BOOT} from libfprint 0009.
       ./sep/0003-say-why-the-reader-needs-the-password.patch
+      # Looks up fp_device_get_password_required() from libfprint 0010 at run time.
+      ./sep/0004-dont-ask-for-a-finger-the-reader-will-not-take.patch
     ];
     postPatch = (old.postPatch or "") + ''
       ${final.python3.interpreter} ${stableFile ./sep/test_account_gate.py} src/device.c
@@ -211,6 +214,7 @@ in {
     };
   };
   aurora-firstboot = final.callPackage ./firstboot.nix { };
+  aurora-power-budget = final.callPackage ./power-budget.nix { };
   # The legacy-to-speakerguardd-v2 upgrade tool (modules/speaker-upgrade.nix).
   aurora-speaker-upgrade = final.callPackage ./aurora-speaker-upgrade.nix {
     src = source "aurora-speaker-upgrade";
@@ -642,6 +646,49 @@ in {
       description = "OpenSSH security-key provider for Secure Enclave keys";
       homepage = "https://github.com/aurora-silicon/aurora-sep-userspace";
       license = final.lib.licenses.mit;
+      platforms = [ "aarch64-linux" ];
+    };
+  };
+  # Secure Enclave LUKS2 unlock (aurora-sep-userspace luks/): aurora-sep-cryptenroll
+  # and the cryptsetup token plugin. modules/sep-luks.nix installs it when asked.
+  aurora-sep-luks = final.stdenv.mkDerivation {
+    pname = "aurora-sep-luks";
+    version = pins.aurora-sep-luks.version;
+    src = source "aurora-sep-luks";
+    sourceRoot = "${pins.aurora-sep-luks.archive_root}/luks";
+    nativeBuildInputs = [ final.pkg-config ];
+    buildInputs = [ final.cryptsetup final.json_c ];
+    makeFlags = [ "PREFIX=${placeholder "out"}" "TOKENDIR=${placeholder "out"}/lib/cryptsetup" ];
+    # Kernel "user" keys stand in for the SEP. The test exits 77 when the
+    # sandbox blocks the keyring. Kernels with af_alg_restrict refuse an
+    # unprivileged ccm(aes) bind with ENOENT, which stops the test at its seal
+    # step after the encoding checks have passed; that alone is not a failure
+    # here. The LUKS2 file-image tests need root and run in
+    # aurora-sep-userspace's CI. Any other failure fails the build.
+    doCheck = true;
+    checkPhase = ''
+      runHook preCheck
+      make test/test-seal
+      status=0
+      ./test/test-seal > test-seal.log 2>&1 || status=$?
+      cat test-seal.log
+      if [ "$status" = 1 ] && [ "$(grep -c '^FAIL' test-seal.log)" = 1 ] &&
+         grep -qx 'seal failed: No such file or directory' test-seal.log; then
+        echo "AF_ALG ccm(aes) is restricted in this build root; seal round trip not run"
+      elif [ "$status" != 0 ] && [ "$status" != 77 ]; then
+        exit 1
+      fi
+      runHook postCheck
+    '';
+    postInstall = ''
+      install -Dm644 ../docs/luks-sep.md $out/share/doc/aurora-sep-luks/luks-sep.md
+    '';
+    passthru.commit = pins.aurora-sep-luks.commit;
+    meta = {
+      description = "Unlock LUKS2 volumes with the Apple Secure Enclave";
+      homepage = "https://github.com/aurora-silicon/aurora-sep-userspace";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-sep-cryptenroll";
       platforms = [ "aarch64-linux" ];
     };
   };

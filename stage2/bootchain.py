@@ -124,12 +124,31 @@ class Update:
             version = fields.get('version')
             if version:
                 self.validate_version(version)
+                if version not in images and self.entry_image_gone(fields):
+                    # GRUB cannot load this entry's kernel, so no tree has to
+                    # suit it. Such entries outlive a kernel removed without
+                    # kernel-install, as Asahi kernels were on migration.
+                    print(f'update-m1n1: ignoring boot entry {p.name}: its kernel '
+                          f'{fields["linux"].strip()} does not exist', file=sys.stderr)
+                    continue
                 images.setdefault(version, self.path('/boot/vmlinuz-' + version))
         if self.action == 'add':
             images.setdefault(self.version, self.path(f'/usr/lib/modules/{self.version}/vmlinuz'))
         if self.action == 'remove':
             images.pop(self.version, None)
         return images
+
+    def entry_image_gone(self, fields):
+        """True when a BLS entry names a kernel that exists nowhere GRUB looks.
+
+        Its `linux` path is relative to the file system holding the entries:
+        a separate /boot, or the root with /boot in the path.
+        """
+        image = fields.get('linux', '').strip()
+        if not image:
+            return False
+        relative = image.lstrip('/')
+        return not any(self.path(base + relative).exists() for base in ('/boot/', '/'))
 
     def dtb_dir(self, version):
         self.validate_version(version)
@@ -144,7 +163,9 @@ class Update:
         try:
             value = marker.read_text(encoding='ascii')
         except FileNotFoundError:
-            return 0
+            # Kernels from before the marker share generation 1: declaring it
+            # changed no device tree, and they booted the trees that followed.
+            return 1
         if not re.fullmatch(r'(0|[1-9][0-9]*)\n?', value):
             raise Refused(f'invalid DT ABI generation for kernel {version} in {marker}')
         return int(value)
