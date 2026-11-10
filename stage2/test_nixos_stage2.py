@@ -339,9 +339,15 @@ class NixosTrialTests(unittest.TestCase):
         self.assertFalse(self.attempts.exists())
         self.assertTrue((self.root / 'nix/var/nix/profiles/system-2-link').exists())
 
-    def test_an_undeclared_generation_with_another_kernel_is_generation_zero(self):
+    def test_an_undeclared_generation_with_another_kernel_is_generation_one(self):
         self.generation(2, 'kernel-7.2')
-        with self.assertRaisesRegex(Refused, r'system-2 \(generation 0\)'):
+        self.install()
+
+    def test_an_undeclared_generation_still_refuses_a_later_generation(self):
+        self.stage2(image(dtb('j413', cells=5)), abi=2)
+        self.generation(2, 'kernel-7.2')
+        self.generation(3, 'kernel-7.3', abi=2)
+        with self.assertRaisesRegex(Refused, r'system-2 \(generation 1\)'):
             self.install()
         self.unchanged()
 

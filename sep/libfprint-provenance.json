@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
-  "commit": "b2bd710c46d94e58026d886020e82c8895156735",
+  "commit": "12f26f61b562d40048a9e7e47129d8341175b5c8",
   "files": {
     "0004-aurora-refuse-unbound-enrollment.patch": "55793f885982b140beb5fc1b2ade65190a5bc73762369935327155eb7190c6b8",
     "0005-aurora-support-v4-and-v5.patch": "8024015e227ad9172dd5eec2fbe128e6c32f7621571c49f869386123cc08585d",
@@ -13,7 +13,8 @@
     "0007-aurora-name-retry-causes-and-keep-waiting.patch": "e14bc4fb3a63ee28d3418d7c7e4823d3bd86e9da784f6e34fd2bef8b11a5f510",
     "0008-aurora-report-the-touch-id-lockout-as-locked-out.patch": "0c75bf129d7416ac534caec4a780dc25a50c478180747213f71c1148e279796b",
     "0009-aurora-say-why-touch-id-needs-the-password.patch": "d3f31fb55bf9c55173123c48192f85b9dd1e8f0db1157d7bb77a785d90490253",
-    "test_lockout_reason.py": "a0bf00b31fe6a3fc999a1f2838aed2143ae0da591469a859e713597033afedbf"
+    "test_lockout_reason.py": "3f56ce86f1c39027cd39f5d3aff6a760d751c2ffcf5e81e78819cb9ba898bb1e",
+    "0010-let-a-front-end-ask-whether-the-reader-needs-the-password.patch": "9aa370942c571cfe1e3ea7cd851b7056477c0b9d29c6a72f02c6ca28431b0ffb"
   },
-  "adaptations": "Local 0010 reports ENOSPC as FP_DEVICE_ERROR_DATA_FULL; modules/sep.nix refuses an fprintd without auroraNoEnrollGc, so the driver never runs beside a daemon that would delete a SEP print to make room. The file hashes above remain the original provenance."
+  "adaptations": "Local 0011 reports ENOSPC as FP_DEVICE_ERROR_DATA_FULL; modules/sep.nix refuses an fprintd without auroraNoEnrollGc, so the driver never runs beside a daemon that would delete a SEP print to make room. The file hashes above remain the original provenance."
 }

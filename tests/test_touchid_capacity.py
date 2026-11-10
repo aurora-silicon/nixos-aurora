@@ -28,14 +28,14 @@ class TouchIdCapacityTests(unittest.TestCase):
             # Only these unchanged upstream functions are needed. Apply the
             # overlay's patch, not a reimplementation of the fixed callback.
             shutil.copytree(ROOT / 'tests/fixtures/fprintd-1.94.5', source, dirs_exist_ok=True)
-            subprocess.run(['git', 'apply', str(SEP / '0004-aurora-report-data-full-without-garbage-collection.patch')],
+            subprocess.run(['git', 'apply', str(SEP / '0005-aurora-report-data-full-without-garbage-collection.patch')],
                            cwd=source, check=True)
             # The first patch creates the whole driver. The include filter
             # avoids needing unrelated libfprint files while applying the
             # driver's patch stack in the overlay's order.
             _, patches = overlay_patches('libfprint')
             self.assertEqual(patches[0], 'libfprint-1.94.100-apple-sep.patch')
-            self.assertEqual(patches[-1], '0010-aurora-report-fingerprint-storage-full.patch')
+            self.assertEqual(patches[-1], '0011-aurora-report-fingerprint-storage-full.patch')
             for patch in patches:
                 subprocess.run(['git', 'apply', '--include=libfprint/drivers/aurora/aurora.c',
                                 str(SEP / patch)], cwd=source, check=True)
@@ -48,7 +48,7 @@ class TouchIdCapacityTests(unittest.TestCase):
 
     def test_data_full_driver_requires_the_guarded_daemon(self):
         block, patches = overlay_patches('fprintd')
-        self.assertEqual(patches[-1], '0004-aurora-report-data-full-without-garbage-collection.patch')
+        self.assertEqual(patches[-1], '0005-aurora-report-data-full-without-garbage-collection.patch')
         self.assertIn('auroraNoEnrollGc = 1;', block)
         self.assertIn('${stableFile ./sep/test_enroll_capacity.py} src/device.c --enroll-utils utils/enroll.c', block)
         module = (ROOT / 'modules/sep.nix').read_text()

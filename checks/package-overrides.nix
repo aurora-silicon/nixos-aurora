@@ -22,8 +22,8 @@ assert pkgs.lib.assertMsg
     && builtins.any (patch: pkgs.lib.hasSuffix "-nqptp-1.2.9-idle-wakeups.patch" (toString patch)) pkgs.nqptp.patches)
   "nqptp must carry Fedora's idle-wakeup patch, which is made for 1.2.9";
 assert pkgs.lib.assertMsg
-  (hasPatch "-0010-aurora-report-fingerprint-storage-full.patch" pkgs.libfprint
-    && hasPatch "-0004-aurora-report-data-full-without-garbage-collection.patch" pkgs.fprintd
+  (hasPatch "-0011-aurora-report-fingerprint-storage-full.patch" pkgs.libfprint
+    && hasPatch "-0005-aurora-report-data-full-without-garbage-collection.patch" pkgs.fprintd
     && (pkgs.fprintd.auroraNoEnrollGc or 0) >= 1)
   "libfprint reports DATA_FULL only beside an fprintd that never deletes a SEP print to make room";
 assert pkgs.lib.assertMsg compilerSelected

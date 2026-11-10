@@ -28,6 +28,9 @@ let
       read -r alias < "$dev/modalias" || continue
       case "$alias" in
         *Capple,display-subsystem*|*Capple,dcp*) ;;
+        # appledrm waits for every DCP; an external one binds only after its
+        # Type-C PHY, whose retimer or PD controller sits on an I2C bus.
+        *Capple,*atcphy*|*Capple,*-i2cC*|*Capple,i2c) ;;
         *) continue ;;
       esac
       devices+=("$(${readlink} -f "$dev")")
@@ -95,7 +98,10 @@ in {
 
   boot.kernelParams = lib.mkIf config.boot.plymouth.enable [ "plymouth.ignore-serial-consoles" ];
 
-  boot.initrd.availableKernelModules = [ "appledrm" "mux-apple-display-crossbar" ];
+  # The external DCPs' Type-C chain comes up with the display: appledrm
+  # registers only once every DCP has bound.
+  boot.initrd.availableKernelModules = [ "appledrm" "mux-apple-display-crossbar"
+    "i2c-pasemi-platform" "phy-apple-atc" "phy-ti-cd2e22" "tps6598x" ];
   boot.initrd.systemd.services.aurora-early-kms = lib.mkIf config.boot.plymouth.enable {
     description = "Coldplug the Apple display before the other devices";
     unitConfig.DefaultDependencies = false;

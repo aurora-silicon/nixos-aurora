@@ -17,12 +17,18 @@ let
         "Plasma About uses the immutable Aurora logo" = config.aurora.desktop != "kde"
           || lib.elem "LogoPath=${value.pkgs.aurora-logos}/share/pixmaps/system-logo-white.png"
             (lib.splitString "\n" config.environment.etc."xdg/kcm-about-distrorc".text);
+        "a stalled reboot or kexec is reset by the hardware watchdog within its 178 s range" =
+          config.systemd.settings.Manager.RebootWatchdogSec == "2min"
+          && config.systemd.settings.Manager.KExecWatchdogSec == "2min";
         "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
         "the Type-C port controllers find their USB4 router in the initrd" =
           lib.all (m: lib.elem m config.boot.initrd.availableKernelModules) [ "tps6598x" "thunderbolt_apple" ];
         "the display chain and its PMP come up before the root is unlocked" =
           lib.all (m: lib.elem m config.boot.initrd.availableKernelModules)
             [ "apple-pmp" "mux-apple-display-crossbar" "appledrm" ];
+        "the external displays' Type-C chain comes up with the display" =
+          lib.all (m: lib.elem m config.boot.initrd.availableKernelModules)
+            [ "i2c-pasemi-platform" "phy-apple-atc" "phy-ti-cd2e22" "tps6598x" ];
         "the PipeWire daemon carries the filter-graph volume and latency fixes" = let
           package = config.services.pipewire.package;
           patched = suffix: lib.any (patch: lib.hasSuffix suffix (toString patch)) (package.patches or [ ]);
@@ -51,6 +57,11 @@ let
           && config.services.pipewire.enable
           && lib.elem value.pkgs.aurora-camera-denoise config.systemd.packages
           && lib.elem "pipewire.service" config.systemd.user.services.aurora-camera-denoise.wantedBy;
+        "the camera denoise unit skips root and system users, as on Fedora and ALARM" =
+          lib.any (p: lib.hasSuffix "camera-denoise-user-unit-guard.patch" (toString p))
+            value.pkgs.aurora-camera-denoise.patches
+          && lib.hasInfix "+ConditionUser=!root\n+ConditionUser=!@system\n"
+            (builtins.readFile ../patches/camera-denoise-user-unit-guard.patch);
         "the keyboard backlight follows the light sensor from boot" = config.aurora.kbdLight.enable
           && lib.elem value.pkgs.aurora-kbd-light config.systemd.packages
           && lib.elem "multi-user.target" config.systemd.services.aurora-kbd-light.wantedBy;
