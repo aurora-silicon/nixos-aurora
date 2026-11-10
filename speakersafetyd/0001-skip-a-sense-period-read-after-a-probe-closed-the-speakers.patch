@@ -1,0 +1,116 @@
+From: Ryan Murray <ryan@aurorasilicon.org>
+Subject: [PATCH] Skip a sense period read after a probe closed the speakers
+
+When an audio server probes the speaker PCM at startup (open, set the
+hardware parameters, close), the sense PCM can deliver a period that
+speakersafetyd reads only after the kernel has already reported the
+speakers closed ("Speaker Sample Rate" back to 0). If no rate was ever
+known since the sense PCM was opened, speakersafetyd panicked with
+"Invalid sample rate" and systemd restarted it. On an M2 MacBook Air
+that happened on every boot and on every PipeWire restart, and repeated
+restarts can reach the unit's start limit, which leaves the speakers
+muted at the kernel's floor.
+
+Skip such a period: it cannot be modelled without a rate, and it belongs
+to an open that has already closed. The skipped time is not credited as
+cooling. Every other invalid rate (negative values) still panics, so the
+daemon fails safe as before. A known rate is kept after the speakers
+close, as before.
+
+Downstream (Aurora Silicon) patch on speakersafetyd 3.0.0 (nixpkgs); the 2.0.1 form ships in fedora-aurora and alarm-aurora.
+---
+diff --git a/src/main.rs b/src/main.rs
+index d4a3859..d0cfda7 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -48,6 +48,57 @@ struct Options {
+     max_reduction: Option<f32>,
+ }
+ 
++/// The rate to model one sense period with.
++#[derive(Debug, PartialEq)]
++enum PeriodRate {
++    /// Model the period at this rate.
++    Known(i32),
++    /// No rate was ever known since open and the speakers are closed again:
++    /// a probe open that closed before its period was read.
++    ProbeClosed,
++    /// Anything else is not a rate: fail safe (the kernel holds the floor).
++    Invalid,
++}
++
++/// `known` is the last rate seen since the PCM was opened (0: none yet),
++/// `cur` what "Speaker Sample Rate" reads now (0: speakers closed).
++fn period_rate(known: i32, cur: i32) -> PeriodRate {
++    if cur < 0 || known < 0 {
++        PeriodRate::Invalid
++    } else if cur > 0 {
++        PeriodRate::Known(cur)
++    } else if known > 0 {
++        PeriodRate::Known(known)
++    } else {
++        PeriodRate::ProbeClosed
++    }
++}
++
++#[cfg(test)]
++mod period_rate_tests {
++    use super::{period_rate, PeriodRate};
++
++    #[test]
++    fn a_probe_period_before_any_rate_is_skipped() {
++        assert_eq!(period_rate(0, 0), PeriodRate::ProbeClosed);
++    }
++
++    #[test]
++    fn a_known_rate_is_kept_after_the_speakers_close() {
++        assert_eq!(period_rate(48000, 0), PeriodRate::Known(48000));
++        assert_eq!(period_rate(48000, 48000), PeriodRate::Known(48000));
++        assert_eq!(period_rate(0, 48000), PeriodRate::Known(48000));
++        assert_eq!(period_rate(44100, 48000), PeriodRate::Known(48000));
++    }
++
++    #[test]
++    fn any_other_invalid_rate_still_fails() {
++        assert_eq!(period_rate(0, -1), PeriodRate::Invalid);
++        assert_eq!(period_rate(48000, -48000), PeriodRate::Invalid);
++        assert_eq!(period_rate(-1, 0), PeriodRate::Invalid);
++    }
++}
++
+ fn get_machine() -> String {
+     fs::read_to_string("/proc/device-tree/compatible")
+         .expect("Could not read device tree compatible")
+@@ -288,13 +339,25 @@ fn main() {
+ 
+             let cur_sample_rate = sample_rate_elem.read_int(&ctl);
+ 
+-            if cur_sample_rate != 0 && cur_sample_rate != sample_rate {
+-                sample_rate = cur_sample_rate;
+-                info!("Sample rate: {}", sample_rate);
+-            }
+-
+-            if sample_rate == 0 {
+-                panic!("Invalid sample rate");
++            match period_rate(sample_rate, cur_sample_rate) {
++                PeriodRate::Known(rate) => {
++                    if rate != sample_rate {
++                        sample_rate = rate;
++                        info!("Sample rate: {}", sample_rate);
++                    }
++                }
++                PeriodRate::ProbeClosed => {
++                    // No rate has been known since the PCM was opened, and the
++                    // kernel already reports the speakers closed: this period
++                    // came from a speaker open that closed before it was read
++                    // (an audio server probing the device at startup). It
++                    // cannot be modelled without a rate. Skip it, and do not
++                    // credit the skipped time as cooling.
++                    warn!("Sense period read after the speakers closed, before any rate was known; skipping it");
++                    last_update = Instant::now();
++                    continue;
++                }
++                PeriodRate::Invalid => panic!("Invalid sample rate"),
+             }
+ 
+             let now = Instant::now();

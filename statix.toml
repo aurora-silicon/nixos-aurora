@@ -1,0 +1,3 @@
+# Dotted NixOS option paths keep related feature settings together. Grouping
+# every repeated prefix is a style preference, not a correctness check.
+disabled = ["repeated_keys"]

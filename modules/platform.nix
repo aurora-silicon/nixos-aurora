@@ -6,6 +6,11 @@
     assertion = lib.versionAtLeast pkgs.bluez.version "5.87";
     message = "Aurora requires BlueZ >= 5.87 (empty default system config fix).";
   } ];
+  # The Touch Bar of the 13-inch M1 and M2 MacBook Pros (J293, J493), as Fedora
+  # (aurora-platform requires tiny-dfr) and ALARM (in every image) ship it.
+  # tiny-dfr's udev rule starts it only when a Touch Bar display appears, so
+  # it stays inert on every other Mac.
+  hardware.apple.touchBar.enable = lib.mkDefault true;
   hardware.enableRedistributableFirmware = true;
   hardware.firmware = [ pkgs.aurora-avd-firmware ];
   services.upower.enable = true;
@@ -37,8 +42,7 @@
   ];
   # The sense-PCM udev rule starts the feed-forward guardian only on J700.
   systemd.services.speakersafetyd.serviceConfig = {
-    # A list, so speakerguardd-v2's fleet gate (modules/speakerguardd-v2.nix)
-    # adds its own condition beside this one.
+    # Preserve the board-specific legacy daemon selector.
     ExecCondition = [ "${pkgs.speakerguardd}/libexec/speakerguardd/use-feedback-guard" ];
     # speakersafetyd writes /run/speakersafetyd/speakersafetyd.flag on its
     # first start after boot, and a start that finds it assumes the speakers

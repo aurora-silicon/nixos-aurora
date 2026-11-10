@@ -9,6 +9,10 @@ on:
       image-run:
         description: Successful Native image workflow run ID
         required: true
+      delivery-revision:
+        description: Optional models58 refresh of the verified legacy-audio delivery
+        type: string
+        default: ''
 permissions:
   contents: write
   actions: read
@@ -16,10 +20,11 @@ permissions:
   attestations: write
 jobs:
   delivery:
-    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@3b5f0cc8ac0255324510813b42c8e712702beac1
+    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@69178da4caa503e69a44bda5dd4fe91f12c50cb8
     with:
       profile: ${{ inputs.profile }}
       image-run: ${{ inputs.image-run }}
+      delivery-revision: ${{ inputs.delivery-revision || '' }}
     # The catalog key comes from this repository's catalog-signing
     # environment, which the reusable workflow's signing job runs in.
     secrets:

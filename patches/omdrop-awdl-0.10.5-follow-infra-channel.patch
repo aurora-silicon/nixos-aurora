@@ -1,0 +1,79 @@
+--- a/userspace/awdl-up
++++ b/userspace/awdl-up
+@@ -58,6 +58,35 @@
+ MCH=$(cat "$CONF/master-chan" 2>/dev/null || echo 6)
+ PCH=$(cat "$CONF/peer-chan"   2>/dev/null || echo 44)
+ SHAPE=$(cat "$CONF/chan-shape" 2>/dev/null || echo dense)
++
++# Aurora: with no $CONF/peer-chan, put the availability windows on the
++# channel the Wi-Fi link already uses, as macOS does: its idle schedule is
++# '149 0 149 0 0 0 0 0 6 0 149 0 0 0 0 0' with the infra link on 149, so it
++# never leaves the infra channel except for the master channel in slot 8.
++# Measured on an M2 with the infra link on 149: peer channel 44 cost the
++# infra link 17 % (171 -> 142 Mbit/s) and carried 1.5-7 Mbit/s between two
++# Linux Macs; peer channel 149 with the full shape carried 188 Mbit/s and
++# left the infra link at full speed. Only the 5 GHz AWDL channels the
++# schedule encoder knows qualify; anything else (2.4 GHz, DFS) keeps 44.
++AUTO=${AWDL_AUTO_DIR:-/run/awdl-up.auto}
++follow_infra(){
++  # The choice is published in $AUTO, where awdl_identity.knob() finds it, so
++  # the channel sequence we advertise (mkpsf.py) is the one we dwell on.
++  rm -rf "$AUTO"
++  [[ -s $CONF/peer-chan ]] && return 0
++  local sta=${STA:-$(find_sta)} f c
++  [[ -n $sta ]] || return 0
++  f=$(iw dev "$sta" link 2>/dev/null | awk '/freq:/{print int($2); exit}')
++  case $f in
++    5180) c=36 ;; 5200) c=40 ;; 5220) c=44 ;; 5240) c=48 ;;
++    5745) c=149 ;; 5765) c=153 ;; 5785) c=157 ;; 5805) c=161 ;;
++    *) return 0 ;;
++  esac
++  PCH=$c
++  [[ -s $CONF/chan-shape ]] || SHAPE=full
++  mkdir -p "$AUTO" && printf '%s\n' "$PCH" > "$AUTO/peer-chan" && printf '%s\n' "$SHAPE" > "$AUTO/chan-shape"
++  log "peer channel follows the Wi-Fi link: $c ($SHAPE)"
++}
+ 
+ log(){ printf '%s %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
+ # Every timeout here is `timeout --foreground`, for the reason given at
+@@ -89,6 +118,7 @@
+ # re-apply path so the two can never drift.
+ apply_schedule(){
+   local SEQ SYNC
++  follow_infra
+   SEQ=$(python3 -c "
+ import sys
+ peer, mch, shape = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+--- a/userspace/awdl_identity.py
++++ b/userspace/awdl_identity.py
+@@ -32,14 +32,23 @@
+ _LABEL_OK = set('abcdefghijklmnopqrstuvwxyz0123456789-')
+ 
+ 
++# Aurora: values awdl-up derived itself (the peer channel that follows the
++# Wi-Fi link) live here; an explicit $OMDROP_CONF file always wins.
++AUTO = os.environ.get('AWDL_AUTO_DIR', '/run/awdl-up.auto')
++
++
+ def knob(name, default):
+-    """One line of configuration from $OMDROP_CONF/<name>, or `default`."""
+-    try:
+-        with open(os.path.join(CONF, name)) as f:
+-            value = f.read().strip()
+-    except OSError:
+-        return default
+-    return value or default
++    """One line of configuration from $OMDROP_CONF/<name>, then awdl-up's
++    derived value in AUTO/<name>, or `default`."""
++    for base in (CONF, AUTO):
++        try:
++            with open(os.path.join(base, name)) as f:
++                value = f.read().strip()
++        except OSError:
++            continue
++        if value:
++            return value
++    return default
+ 
+ 
+ def switch(name):

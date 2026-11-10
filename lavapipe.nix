@@ -1,8 +1,7 @@
 # CPU Vulkan uses LLVM separately from the native GL/Honeykrisp closure.
-{ callPackage, lib, mesa, src, commit, vulkan-tools }:
-(callPackage ./mesa.nix { inherit mesa src commit; }).overrideAttrs (old: {
+{ callPackage, lib, mesa, src, version, commit, vulkan-tools }:
+(callPackage ./pkgs/mesa-common.nix { inherit mesa src version commit; }).overrideAttrs (old: {
   pname = "mesa-aurora-lavapipe";
-  outputs = [ "out" ];
   mesonFlags = (lib.filter (flag:
     !(lib.hasPrefix "-Dvulkan-drivers=" flag || lib.hasPrefix "-Dgallium-drivers=" flag)) old.mesonFlags)
     ++ [ "-Dvulkan-drivers=swrast" "-Dgallium-drivers=softpipe" ];
@@ -34,5 +33,4 @@
       ${vulkan-tools}/bin/vulkaninfo --summary > lavapipe-summary.txt
     grep -i llvmpipe lavapipe-summary.txt
   '';
-  disallowedRequisites = [ ];
 })

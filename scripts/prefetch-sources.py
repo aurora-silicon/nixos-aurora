@@ -24,9 +24,16 @@ import updatelib as lib  # noqa: E402
 MIRROR = 'https://github.com/aurora-silicon/nixos-aurora/releases/download/source-cache'
 # Flake package -> sources it fetches with fetchurl.
 NEEDS = {
+    'sep': [],  # helpers vendored in this Git source
+    'plymouth': [],  # nixpkgs release with local patches
+    'plymouth-theme-aurora': [],  # theme and artwork are vendored in this Git source
     'logos': [],  # licensed artwork is vendored in this Git source
     'kernel': ['kernel-aurora', 'bindgen'],
     'bindgen': ['bindgen'],
+    'userpages': ['kernel-aurora'],
+    'fex': ['fex-emu'],
+    'steam': ['aurora-steam-native'],
+    'proton': ['proton'],
     'aura': ['aura'],
     'uboot': ['uboot-aurora'],
     'mesa': ['mesa-aurora'],
@@ -45,9 +52,11 @@ NEEDS = {
     'avd-fw': ['avd-fw'],
     'libva-v4l2-request-avd': ['libva-v4l2-request-avd'],
     'omarchy-ane-tools': ['omarchy-ane-tools'],
-    'mil-hwx-compiler': ['mil-hwx-compiler', 'mil-hwx-compiler/gnustep-base'],
+    'mil-hwx-compiler': ['mil-hwx-compiler'],
     'upower': ['upower-aurora'],
     'speakerguardd': ['speakerguardd'],
+    'speakerguardd-v2': ['speakerguardd-v2'],
+    'speaker-upgrade': ['aurora-speaker-upgrade', 'speakerguardd-v2'],
     'mutter': [],
     'docker': [],  # nixpkgs' pinned release, with the local engine patch
     'speakersafetyd': [],
@@ -56,7 +65,11 @@ NEEDS = {
     'aurora-bless': ['aurora-bless'],
     'camera-denoise': ['camera-denoise'],
     'kbd-light': ['kbd-light'],
-    'sep-luks': ['aurora-sep-userspace'],
+    'fido': ['aurora-fido'],
+    'sep-sk': ['aurora-sep-sk'],
+    'sep-luks': ['aurora-sep-luks'],
+    'omdrop-awdl': ['omdrop-awdl', 'omdrop-awdl/omdrop-plugin'],
+    'xart': ['aurora-xart'],
 }
 
 
@@ -66,8 +79,11 @@ def archives():
     mirror = os.environ.get('AURORA_SOURCE_MIRROR', MIRROR).rstrip('/')
     result = {}
     for key, pin in pins.items():
-        name = f'{key}-{pin["commit"]}.tar.gz'
-        result[key] = (name, ([f'{mirror}/{name}'] if mirror and pin.get('redistribute_source', True) else []) + [pin['source_url']], pin['sha256'])
+        # FEX's recipe calls its main fetchurl archive fex, while the shared
+        # mirror tracks the source key fex-emu. Both names must stay exact.
+        name = f'{"fex" if key == "fex-emu" else key}-{pin["commit"]}.tar.gz'
+        mirror_name = pin.get('archive_file', f'{key}-{pin["commit"]}.tar.gz')
+        result[key] = (name, ([f'{mirror}/{mirror_name}'] if mirror and pin.get('redistribute_source', True) else []) + [pin['source_url']], pin['sha256'])
     for key, record in pins.items():
         for dependency, pin in record.get('extra_sources', {}).items():
             name = f'{dependency}-{pin["commit"]}.tar.gz'
@@ -76,7 +92,22 @@ def archives():
     name = f'rust-bindgen-{bindgen["version"]}.tar.gz'
     result['bindgen'] = (name, ([f'{mirror}/{name}'] if mirror else []) + [bindgen['source_url']],
                          bindgen['source_sha256'])
+    proton = json.loads((ROOT / 'pkgs/proton/sources.json').read_text())
+    for key, record in proton['archives'].items():
+        result[f'proton/{key}'] = (record['name'], [record['url']], lib.hex_from_sri(record['hash']))
     return result
+
+
+def select_sources(packages, known):
+    if not packages:
+        return sorted(known)
+    unknown = set(packages) - NEEDS.keys()
+    if unknown:
+        raise ValueError('Unknown flake packages: ' + ', '.join(sorted(unknown)))
+    selected = {key for package in packages for key in NEEDS[package]}
+    # Submodules and companion archives are pinned under their parent source.
+    selected.update(key for key in known if key.partition('/')[0] in selected)
+    return sorted(key for key in selected if key in known)
 
 
 def main():
@@ -84,8 +115,10 @@ def main():
     parser.add_argument('packages', nargs='*', help='flake packages about to be built (default: every source)')
     args = parser.parse_args()
     known = archives()
-    wanted = sorted({key for package in args.packages for key in NEEDS.get(package, known)} if args.packages
-                    else known)
+    try:
+        wanted = select_sources(args.packages, known)
+    except ValueError as error:
+        parser.error(str(error))
     with tempfile.TemporaryDirectory(prefix='aurora-prefetch-') as temporary:
         for key in wanted:
             name, urls, digest = known[key]
