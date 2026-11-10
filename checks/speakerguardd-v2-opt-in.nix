@@ -1,9 +1,10 @@
 { pkgs, nixpkgs, makeSystem }:
 let
   inherit (nixpkgs) lib;
-  enabled = (makeSystem "minimal").extendModules {
-    modules = [ { aurora.speakerguardd.v2.enable = true; } ];
-  };
+  # speakerguardd v2 is on by default: it installs beside the legacy daemons
+  # behind its gate, which keeps speakersafetyd in charge until
+  # aurora-speaker-upgrade (run at boot) switches the Mac.
+  enabled = makeSystem "minimal";
   on = enabled.config;
   incompatible = (enabled.extendModules {
     modules = [ {
@@ -27,8 +28,9 @@ in assert lib.assertMsg (lib.all (entry: entry.assertion) on.assertions
    assert lib.assertMsg (gated "speakersafetyd" && gated "speakerguardd"
      && lib.hasInfix "use-feedback-guard" (unit "speakersafetyd.service").text)
      "the legacy daemons stay enabled behind the gate, beside their own ExecCondition";
-   assert lib.assertMsg (!on.aurora.speakerguardd.upgrade.enable)
-     "aurora-speaker-upgrade stays off unless asked for";
+   assert lib.assertMsg (on.aurora.speakerguardd.upgrade.enable
+     && builtins.elem "multi-user.target" (unit "aurora-speaker-upgrade.service").wantedBy)
+     "aurora-speaker-upgrade must run at boot on the image";
    pkgs.runCommand "speakerguardd-v2-package-check" { } ''
      p=${pkgs.speakerguardd-v2}
      lx=$p/libexec/speakerguardd-v2

@@ -16,6 +16,12 @@
   services.upower.enable = true;
   hardware.wirelessRegulatoryDatabase = true;
   systemd.packages = [ pkgs.speakerguardd ];
+  # Speakers on speakerguardd v2: v2 installs beside the legacy
+  # daemons behind its gate, and aurora-speaker-upgrade switches a Mac at boot
+  # only when its own tuning passes the silent self-check. A refused Mac keeps
+  # speakersafetyd. Both stay user options (set them to false to opt out).
+  aurora.speakerguardd.v2.enable = lib.mkDefault true;
+  aurora.speakerguardd.upgrade.enable = lib.mkDefault true;
   services.udev.packages = [
     pkgs.speakerguardd
     # Keep the firmware's product name unchanged in ID_MODEL (hostnamed's

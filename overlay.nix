@@ -577,7 +577,7 @@ in {
       install -Dm644 -t $out/share/licenses/speakerguardd-v2 LICENSE crates/aurora-speaker-tuning/LICENSE-aurora-audio-dsp
     '';
     meta = {
-      description = "In-graph speaker protection for Apple Silicon Macs (speakerguardd 1.0, preview)";
+      description = "In-graph speaker protection for Apple Silicon Macs (speakerguardd 1.0)";
       homepage = "https://github.com/aurora-silicon/speakerguardd/tree/v2";
       # aurora-speaker-tuning is based on aurora-audio-dsp by saku, also MIT.
       license = final.lib.licenses.mit;

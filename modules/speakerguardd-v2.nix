@@ -22,7 +22,7 @@ in {
       type = lib.types.bool;
       default = false;
       description = ''
-        Install speakerguardd 1.0 (preview) beside the 0.1 speakerguardd and
+        Install speakerguardd 1.0 beside the 0.1 speakerguardd and
         speakersafetyd, with its gate on both stacks. Nothing changes for the
         speakers by itself: the gate keeps speakersafetyd in charge until
         aurora-speaker-upgrade (aurora.speakerguardd.upgrade.enable) has
