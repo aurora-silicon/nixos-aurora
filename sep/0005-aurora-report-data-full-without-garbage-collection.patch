@@ -1,0 +1,40 @@
+Subject: [PATCH] fprintd: report full SEP storage without collecting prints
+
+The SEP is shared with other operating systems. A print absent from the
+host database must not be assumed stale. Do not list, delete or retry on
+DATA_FULL from apple-sep, even though the driver supports storage listing
+and deletion. Leave other drivers' garbage collection unchanged.
+
+Keep the standard enroll-data-full status for GNOME's translated no-space
+message, and give command-line users an explicit removal instruction.
+
+diff --git a/src/device.c b/src/device.c
+index 9b4cc8b..f5fe9e9 100644
+--- a/src/device.c
++++ b/src/device.c
+@@ -2030,7 +2030,11 @@ enroll_cb (FpDevice *dev, GAsyncResult *res, void *user_data)
+   if (g_error_matches (error, FP_DEVICE_ERROR, FP_DEVICE_ERROR_DATA_FULL))
+     {
+       g_debug ("Device storage is full");
+-      if (fp_device_has_feature (priv->dev, FP_DEVICE_FEATURE_STORAGE_LIST) &&
++      /* The SEP is shared with other operating systems. An unknown print
++       * is not evidence of an obsolete installation and must never be deleted
++       * to make room. Keep DATA_FULL for the client to explain the limit. */
++      if (g_strcmp0 (fp_device_get_driver (priv->dev), "apple-sep") != 0 &&
++          fp_device_has_feature (priv->dev, FP_DEVICE_FEATURE_STORAGE_LIST) &&
+           try_delete_print (rdev))
+         {
+           /* Success? Then restart the operation */
+diff --git a/utils/enroll.c b/utils/enroll.c
+index 9b438d4..9e2a47a 100644
+--- a/utils/enroll.c
++++ b/utils/enroll.c
+@@ -107,6 +107,8 @@ enroll_result (GObject *object, const char *result, gboolean done, void *user_da
+   FprintEnrollStatus *enroll_status = user_data;
+ 
+   g_print ("Enroll result: %s\n", result);
++  if (g_str_equal (result, "enroll-data-full"))
++    g_print ("Fingerprint storage is full. Remove an enrolled fingerprint before trying again.\n");
+   if (done != FALSE)
+     {
+       if (g_str_equal (result, "enroll-completed"))
