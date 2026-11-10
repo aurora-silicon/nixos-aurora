@@ -14,7 +14,7 @@ a package upgrade hook which silently rewrites that file.
 
 ## Qualification prerequisite
 
-Use the [Mesa native GL qualification kit](https://github.com/aurora-silicon/mesa/tree/fu-native-gl-default-t3627/src/asahi/tools/native-gl-qualification)
+Use the [Mesa native GL qualification kit](https://github.com/aurora-silicon/mesa/tree/aurora-wip/src/asahi/tools/native-gl-qualification)
 with the final reviewed source commit and matching distribution build. Mesa
 [PR 116](https://github.com/aurora-silicon/mesa/pull/116) is a prerequisite;
 stacking a new candidate does not qualify or merge it. Record the following
