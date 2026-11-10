@@ -648,6 +648,49 @@ in {
       platforms = [ "aarch64-linux" ];
     };
   };
+  # Secure Enclave LUKS2 unlock (aurora-sep-userspace luks/): aurora-sep-cryptenroll
+  # and the cryptsetup token plugin. modules/sep-luks.nix installs it when asked.
+  aurora-sep-luks = final.stdenv.mkDerivation {
+    pname = "aurora-sep-luks";
+    version = pins.aurora-sep-luks.version;
+    src = source "aurora-sep-luks";
+    sourceRoot = "${pins.aurora-sep-luks.archive_root}/luks";
+    nativeBuildInputs = [ final.pkg-config ];
+    buildInputs = [ final.cryptsetup final.json_c ];
+    makeFlags = [ "PREFIX=${placeholder "out"}" "TOKENDIR=${placeholder "out"}/lib/cryptsetup" ];
+    # Kernel "user" keys stand in for the SEP. The test exits 77 when the
+    # sandbox blocks the keyring. Kernels with af_alg_restrict refuse an
+    # unprivileged ccm(aes) bind with ENOENT, which stops the test at its seal
+    # step after the encoding checks have passed; that alone is not a failure
+    # here. The LUKS2 file-image tests need root and run in
+    # aurora-sep-userspace's CI. Any other failure fails the build.
+    doCheck = true;
+    checkPhase = ''
+      runHook preCheck
+      make test/test-seal
+      status=0
+      ./test/test-seal > test-seal.log 2>&1 || status=$?
+      cat test-seal.log
+      if [ "$status" = 1 ] && [ "$(grep -c '^FAIL' test-seal.log)" = 1 ] &&
+         grep -qx 'seal failed: No such file or directory' test-seal.log; then
+        echo "AF_ALG ccm(aes) is restricted in this build root; seal round trip not run"
+      elif [ "$status" != 0 ] && [ "$status" != 77 ]; then
+        exit 1
+      fi
+      runHook postCheck
+    '';
+    postInstall = ''
+      install -Dm644 ../docs/luks-sep.md $out/share/doc/aurora-sep-luks/luks-sep.md
+    '';
+    passthru.commit = pins.aurora-sep-luks.commit;
+    meta = {
+      description = "Unlock LUKS2 volumes with the Apple Secure Enclave";
+      homepage = "https://github.com/aurora-silicon/aurora-sep-userspace";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-sep-cryptenroll";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
   # Touch ID as a FIDO2/U2F security key (aurora-sep-userspace fido/).
   # modules/fido.nix runs it with aurora.fido.enable; off by default.
   aurora-fido = let

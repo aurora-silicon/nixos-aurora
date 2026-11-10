@@ -357,5 +357,14 @@
     "archive_root": "speakerguardd-f3ceaa2d768a999a8243d4e2c9cc0f3f15ceb226",
     "sha256": "11474272925838cae07333bbdcf649d5270ee943e47ca58d05dda0df90a1b363",
     "nix_hash": "sha256-EUdCcpJYOMrgczO73PZJ1ScO6UPkfKWNBd2g35Chs2M="
+  },
+  "aurora-sep-luks": {
+    "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
+    "commit": "63a51a73377dafc1aafdbe86d398d505fa939ff7",
+    "version": "0.1.0",
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-sep-userspace/tar.gz/63a51a73377dafc1aafdbe86d398d505fa939ff7",
+    "archive_root": "aurora-sep-userspace-63a51a73377dafc1aafdbe86d398d505fa939ff7",
+    "sha256": "426152b4504a4f98c141344387c3ddbabf6beac0c129d3cb7d482af057d1ecef",
+    "nix_hash": "sha256-QmFStFBKT5jBQTRDh8Pdur9r6sDBKdPLfUgq8FfR7O8="
   }
 }
