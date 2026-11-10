@@ -14,5 +14,6 @@
     "0008-aurora-report-the-touch-id-lockout-as-locked-out.patch": "0c75bf129d7416ac534caec4a780dc25a50c478180747213f71c1148e279796b",
     "0009-aurora-say-why-touch-id-needs-the-password.patch": "d3f31fb55bf9c55173123c48192f85b9dd1e8f0db1157d7bb77a785d90490253",
     "test_lockout_reason.py": "a0bf00b31fe6a3fc999a1f2838aed2143ae0da591469a859e713597033afedbf"
-  }
+  },
+  "adaptations": "Local 0010 reports ENOSPC as FP_DEVICE_ERROR_DATA_FULL; modules/sep.nix refuses an fprintd without auroraNoEnrollGc, so the driver never runs beside a daemon that would delete a SEP print to make room. The file hashes above remain the original provenance."
 }

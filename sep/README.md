@@ -63,6 +63,13 @@ are not checked again; SEP trusted keys start either way. After the files are
 in place, enrol with `fprintd-enroll -f right-index-finger USER` (the last word
 is the user name) or the desktop's fingerprint settings.
 
+The SEP holds three fingerprints. When it is full, or the host store is, the
+enrolment ends with `enroll-data-full` (GNOME Settings: "Fingerprint device
+storage is full"; `fprintd-enroll` also says to remove a fingerprint first).
+No fingerprint is deleted to make room, including one enrolled by another OS
+on this Mac: remove one yourself with `fprintd-delete USER -f FINGER` or the
+settings.
+
 The factory-record reader and the sealed-record rebuild are Erik Bourget's
 work. Read XART-SAFETY.md for persistent identity ownership constraints and
 OS-IDENTITY.md for running Linux beside macOS.

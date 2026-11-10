@@ -162,6 +162,9 @@ in {
       ./sep/0007-aurora-name-retry-causes-and-keep-waiting.patch
       ./sep/0008-aurora-report-the-touch-id-lockout-as-locked-out.patch
       ./sep/0009-aurora-say-why-touch-id-needs-the-password.patch
+      # Full storage as FP_DEVICE_ERROR_DATA_FULL. Only safe with fprintd's
+      # apple-sep no-collection guard (0004 below); modules/sep.nix asserts it.
+      ./sep/0010-aurora-report-fingerprint-storage-full.patch
     ];
     postPatch = (old.postPatch or "") + ''
       install -Dm644 ${stableFile ./sep/apple-sep.h} aurora-uapi/linux/apple-sep.h
@@ -179,10 +182,15 @@ in {
       ./sep/0002-report-lockout-and-fall-back-to-the-password.patch
       # Needs FP_DEVICE_ERROR_PASSWORD_REQUIRED{,_AFTER_BOOT} from libfprint 0009.
       ./sep/0003-say-why-the-reader-needs-the-password.patch
+      # DATA_FULL from apple-sep reports enroll-data-full instead of deleting
+      # a SEP print fprintd does not know (it may belong to another OS).
+      ./sep/0004-aurora-report-data-full-without-garbage-collection.patch
     ];
     postPatch = (old.postPatch or "") + ''
       ${final.python3.interpreter} ${stableFile ./sep/test_account_gate.py} src/device.c
+      ${final.python3.interpreter} ${stableFile ./sep/test_enroll_capacity.py} src/device.c --enroll-utils utils/enroll.c
     '';
+    passthru = (old.passthru or { }) // { auroraNoEnrollGc = 1; };
   });
   # Re-arms Touch ID with the password after a lockout: the PAM module that
   # modules/sep.nix puts after pam_unix, and the root service it asks.

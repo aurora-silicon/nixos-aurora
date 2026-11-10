@@ -48,6 +48,13 @@ in {
       services.udev.packages = [ pkgs.aurora-sep-sk ];
       users.groups.sep-key = { };
       services.fprintd.enable = true;
+      # libfprint's Aurora driver reports full storage as DATA_FULL, which an
+      # unpatched fprintd answers by deleting a SEP print it does not know;
+      # that print may belong to another OS on this Mac.
+      assertions = [{
+        assertion = (config.services.fprintd.package.auroraNoEnrollGc or 0) >= 1;
+        message = "Touch ID needs Aurora's fprintd (pkgs.fprintd from the Aurora overlay), which keeps every SEP print when storage is full.";
+      }];
       # Touch ID: a fingerprint or the password at sudo, polkit and the lock
       # screens (gdm-fingerprint, and kde-fingerprint from the Plasma module);
       # the password at the login screens, the console login, su and ssh.
