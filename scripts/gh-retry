@@ -1,0 +1,40 @@
+#!/bin/bash
+# gh-retry GH-ARGS...: run `gh GH-ARGS...`, retrying transient GitHub API failures (HTTP 5xx or 429, timeouts, reset or
+# cancelled streams) up to GH_RETRY_ATTEMPTS times (default 5) with backoff (GH_RETRY_DELAY seconds, default 5, doubling).
+# Any other failure (a 404 "release not found", bad arguments) returns at once with gh's own exit code, so existence
+# checks like `gh-retry release view TAG` keep their meaning. stdout is passed on only from the attempt that succeeds.
+# `release create TAG FILES... OPTIONS`: when a transient failure left the release created, later attempts upload the
+# files to it (`release upload --clobber`) instead of creating it again; a retried `release download` overwrites the
+# files a failed attempt left (--clobber).
+set -u
+attempts=${GH_RETRY_ATTEMPTS:-5}; delay=${GH_RETRY_DELAY:-5}
+out=$(mktemp); err=$(mktemp); trap 'rm -f "$out" "$err"' EXIT
+transient='HTTP (5[0-9][0-9]|429)|stream error|timed out|timeout|connection reset|connection refused|unexpected EOF|TLS handshake|server error|Bad Gateway|Service Unavailable|Gateway Time-?out|secondary rate limit'
+args=("$@")
+for ((i = 1; i <= attempts; i++)); do
+  gh "${args[@]}" > "$out" 2> "$err"; rc=$?
+  if ((rc == 0)); then
+    cat "$out"; cat "$err" >&2; exit 0
+  fi
+  if ! grep -qiE "$transient" "$err" || ((i == attempts)); then
+    cat "$out"; cat "$err" >&2; exit $rc
+  fi
+  echo "gh-retry: attempt $i/$attempts of 'gh ${args[*]:0:3}' failed ($(head -c 200 "$err" | tr '\n' ' ')); retrying in ${delay}s" >&2
+  sleep "$delay"; delay=$((delay * 2))
+  # a download that failed half way left files behind: the next attempt overwrites them
+  if [[ ${args[0]:-} == release && ${args[1]:-} == download && " ${args[*]} " != *" --clobber "* ]]; then
+    args+=(--clobber)
+  fi
+  if [[ ${args[0]:-} == release && ${args[1]:-} == create ]]; then
+    # release create TAG [FILES...] [OPTIONS]: the files are the arguments between the tag and the first option
+    tag=${args[2]}; repo=(); files=(); j=3
+    while ((j < ${#args[@]})) && [[ ${args[j]} != -* ]]; do files+=("${args[j]}"); j=$((j + 1)); done
+    for ((k = 3; k < ${#args[@]}; k++)); do
+      case ${args[k]} in --repo|-R) repo=(--repo "${args[k+1]}") ;; --repo=*) repo=("${args[k]}") ;; esac
+    done
+    if gh release view "$tag" "${repo[@]}" > /dev/null 2>&1; then
+      echo "gh-retry: release $tag exists after the failed create; uploading its files instead" >&2
+      args=(release upload "$tag" "${files[@]}" "${repo[@]}" --clobber)
+    fi
+  fi
+done
