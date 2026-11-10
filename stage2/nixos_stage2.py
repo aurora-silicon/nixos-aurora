@@ -11,7 +11,8 @@ only what differs on NixOS:
 - The kernels that must keep booting with the shared device trees are those
   of the generations GRUB lists. Each NixOS generation declares its kernel's
   DT ABI generation in `aurora-dtb-abi`; one without the file has the
-  generation of another listed generation with the same kernel, or 0.
+  generation of another listed generation with the same kernel, or 1, as
+  bootchain.py counts kernels from before the marker.
 - The newest bootloader install decides the trial: an armed candidate that
   never booted is withdrawn when a later install selects other bytes.
 - Receipts name the candidate's SHA-256 where Fedora names the kernel.
@@ -118,7 +119,7 @@ class NixosUpdate(bootchain.Update):
         for name, value in declared.items():
             if value is not None:
                 known.setdefault(kernels[name], []).append(value)
-        self._generations = {name: value if value is not None else min(known.get(kernels[name], [0]))
+        self._generations = {name: value if value is not None else min(known.get(kernels[name], [1]))
                              for name, value in declared.items()}
         return self._generations
 

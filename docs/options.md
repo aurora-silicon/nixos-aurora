@@ -592,6 +592,30 @@ by aurora-touchid-boot.service at every boot.
 
 **Declared in:** [sep.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep.nix)
 
+## `aurora.sepLuks.enable`
+
+Install aurora-sep-cryptenroll and its libcryptsetup token plugin, which
+unlock LUKS2 volumes with this Mac's Secure Enclave the way
+systemd-cryptenroll --tpm2-device=auto does with a TPM. Nothing is
+enrolled by this option: run aurora-sep-cryptenroll for each volume.
+The root volume is not supported yet.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.package`
+
+The aurora-sep-luks package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-sep-luks`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
 ## `aurora.speakerguardd.upgrade.enable`
 
 Install aurora-speaker-upgrade (the legacy-to-speakerguardd-v2 upgrade tool); it never runs by itself. speakerguardd v2 is a preview. It does not fully match macOS yet. The legacy protection (speakersafetyd, speakerguardd 0.1) is the supported default and stays installed. To go back at any time: sudo aurora-speaker-upgrade --revert.
