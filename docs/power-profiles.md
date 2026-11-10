@@ -50,4 +50,4 @@ make no claim that a package-power budget or performance boost exists.
 PWR owns hardware qualification and merging. This parity PR changes only
 documentation and is left unmerged. Fedora's design, transaction tests and
 rollback are documented in
-[fedora-aurora power profiles](https://github.com/aurora-silicon/fedora-aurora/blob/fix/apple-power-profiles/docs/power-profiles.md).
+[fedora-aurora power profiles](https://github.com/aurora-silicon/fedora-aurora/blob/main/docs/power-profiles.md).
