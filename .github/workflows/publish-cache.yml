@@ -58,6 +58,15 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Retry transient GitHub API failures of every gh call
+        run: |
+          set -euo pipefail
+          real=$(command -v gh)
+          mkdir -p "$RUNNER_TEMP/gh-retry-bin"
+          printf '#!/bin/sh\nexec "%s/scripts/gh-retry" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/gh-retry-bin/gh"
+          chmod 755 "$RUNNER_TEMP/gh-retry-bin/gh"
+          echo "GH_RETRY_GH=$real" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/gh-retry-bin" >> "$GITHUB_PATH"
       - id: mode
         env:
           DRY_RUN: ${{ inputs.dry-run || false }}
@@ -149,6 +158,15 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Retry transient GitHub API failures of every gh call
+        run: |
+          set -euo pipefail
+          real=$(command -v gh)
+          mkdir -p "$RUNNER_TEMP/gh-retry-bin"
+          printf '#!/bin/sh\nexec "%s/scripts/gh-retry" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/gh-retry-bin/gh"
+          chmod 755 "$RUNNER_TEMP/gh-retry-bin/gh"
+          echo "GH_RETRY_GH=$real" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/gh-retry-bin" >> "$GITHUB_PATH"
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
       - id: collect
         name: Authenticate current outputs from native builds
@@ -210,6 +228,15 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           sparse-checkout: scripts
+      - name: Retry transient GitHub API failures of every gh call
+        run: |
+          set -euo pipefail
+          real=$(command -v gh)
+          mkdir -p "$RUNNER_TEMP/gh-retry-bin"
+          printf '#!/bin/sh\nexec "%s/scripts/gh-retry" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/gh-retry-bin/gh"
+          chmod 755 "$RUNNER_TEMP/gh-retry-bin/gh"
+          echo "GH_RETRY_GH=$real" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/gh-retry-bin" >> "$GITHUB_PATH"
       - env:
           GH_TOKEN: ${{ github.token }}
           REBUILD: ${{ needs.collect.outputs.rebuild || needs.plan.outputs.rebuild }}
@@ -237,6 +264,15 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+      - name: Retry transient GitHub API failures of every gh call
+        run: |
+          set -euo pipefail
+          real=$(command -v gh)
+          mkdir -p "$RUNNER_TEMP/gh-retry-bin"
+          printf '#!/bin/sh\nexec "%s/scripts/gh-retry" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/gh-retry-bin/gh"
+          chmod 755 "$RUNNER_TEMP/gh-retry-bin/gh"
+          echo "GH_RETRY_GH=$real" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/gh-retry-bin" >> "$GITHUB_PATH"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: unsigned-cache-metadata
@@ -266,6 +302,15 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+      - name: Retry transient GitHub API failures of every gh call
+        run: |
+          set -euo pipefail
+          real=$(command -v gh)
+          mkdir -p "$RUNNER_TEMP/gh-retry-bin"
+          printf '#!/bin/sh\nexec "%s/scripts/gh-retry" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/gh-retry-bin/gh"
+          chmod 755 "$RUNNER_TEMP/gh-retry-bin/gh"
+          echo "GH_RETRY_GH=$real" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/gh-retry-bin" >> "$GITHUB_PATH"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: unsigned-cache-metadata
@@ -311,6 +356,15 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Retry transient GitHub API failures of every gh call
+        run: |
+          set -euo pipefail
+          real=$(command -v gh)
+          mkdir -p "$RUNNER_TEMP/gh-retry-bin"
+          printf '#!/bin/sh\nexec "%s/scripts/gh-retry" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/gh-retry-bin/gh"
+          chmod 755 "$RUNNER_TEMP/gh-retry-bin/gh"
+          echo "GH_RETRY_GH=$real" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/gh-retry-bin" >> "$GITHUB_PATH"
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: needs.plan.outputs.action != 'reuse'

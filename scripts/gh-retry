@@ -8,11 +8,13 @@
 # files a failed attempt left (--clobber).
 set -u
 attempts=${GH_RETRY_ATTEMPTS:-5}; delay=${GH_RETRY_DELAY:-5}
+# the real gh (the publish workflows put a gh shim that runs this script first on PATH)
+gh=${GH_RETRY_GH:-gh}
 out=$(mktemp); err=$(mktemp); trap 'rm -f "$out" "$err"' EXIT
 transient='HTTP (5[0-9][0-9]|429)|stream error|timed out|timeout|connection reset|connection refused|unexpected EOF|TLS handshake|server error|Bad Gateway|Service Unavailable|Gateway Time-?out|secondary rate limit'
 args=("$@")
 for ((i = 1; i <= attempts; i++)); do
-  gh "${args[@]}" > "$out" 2> "$err"; rc=$?
+  "$gh" "${args[@]}" > "$out" 2> "$err"; rc=$?
   if ((rc == 0)); then
     cat "$out"; cat "$err" >&2; exit 0
   fi
@@ -32,7 +34,7 @@ for ((i = 1; i <= attempts; i++)); do
     for ((k = 3; k < ${#args[@]}; k++)); do
       case ${args[k]} in --repo|-R) repo=(--repo "${args[k+1]}") ;; --repo=*) repo=("${args[k]}") ;; esac
     done
-    if gh release view "$tag" "${repo[@]}" > /dev/null 2>&1; then
+    if "$gh" release view "$tag" "${repo[@]}" > /dev/null 2>&1; then
       echo "gh-retry: release $tag exists after the failed create; uploading its files instead" >&2
       args=(release upload "$tag" "${files[@]}" "${repo[@]}" --clobber)
     fi
