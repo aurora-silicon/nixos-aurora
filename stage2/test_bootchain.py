@@ -285,9 +285,26 @@ class BootchainTests(unittest.TestCase):
             self.apply()
         self.unchanged()
 
-    def test_orphan_bls_kernel_is_not_ignored(self):
+    def test_bls_entry_whose_kernel_is_gone_is_ignored(self):
+        # As a migrated J493 had: the Asahi kernel was removed, its entry was not.
         self.kernel('7.3')
-        self.put('/boot/loader/entries/old.conf', b'version 7.1\nlinux /vmlinuz-7.1\n')
+        old = 'abc-7.1.6-400.asahi.fc44.aarch64+16k.conf'
+        self.put(f'/boot/loader/entries/{old}',
+                 b'version 7.1.6-400.asahi.fc44.aarch64+16k\nlinux /vmlinuz-7.1.6-400.asahi.fc44.aarch64+16k\n')
+        self.apply()
+        self.assertEqual(os.readlink(self.link), 'dtb-7.3')
+
+    def test_bls_entry_whose_kernel_is_elsewhere_still_refuses(self):
+        self.kernel('7.3')
+        self.put('/boot/images/vmlinuz-7.1', b'7.1')
+        self.put('/boot/loader/entries/old.conf', b'version 7.1\nlinux /images/vmlinuz-7.1\n')
+        with self.assertRaisesRegex(bootchain.Refused, 'image missing'):
+            self.apply()
+        self.unchanged()
+
+    def test_bls_entry_without_a_kernel_line_still_refuses(self):
+        self.kernel('7.3')
+        self.put('/boot/loader/entries/old.conf', b'version 7.1\n')
         with self.assertRaisesRegex(bootchain.Refused, 'image missing'):
             self.apply()
         self.unchanged()
@@ -405,14 +422,21 @@ m.Update(root, env).apply()
             bootchain.Update(self.root, self.env).cleanup_remove()
         self.unchanged()
 
-    def test_missing_marker_is_generation_zero_and_refuses_newer_dtbs(self):
+    def test_missing_marker_is_generation_one(self):
+        # A kernel from before the marker kept every later kernel off a J493.
         self.kernel('7.1', generation=None)
         self.kernel('7.3')
-        with self.assertRaisesRegex(bootchain.Refused, r'7.1 \(generation 0\)'):
+        self.apply()
+        self.assertEqual(os.readlink(self.link), 'dtb-7.3')
+
+    def test_missing_marker_still_refuses_a_later_generation(self):
+        self.kernel('7.1', generation=None)
+        self.kernel('7.3', generation=2)
+        with self.assertRaisesRegex(bootchain.Refused, r'7.1 \(generation 1\)'):
             self.apply()
         self.unchanged()
 
-    def test_missing_markers_allow_generation_zero_even_with_different_bytes(self):
+    def test_missing_markers_allow_one_generation_even_with_different_bytes(self):
         self.kernel('7.1', generation=None)
         self.kernel('7.3', 5, generation=None)
         self.apply()
@@ -486,10 +510,16 @@ m.Update(root, env).apply()
             self.apply()
         self.unchanged()
 
-    def test_rescue_without_marker_is_generation_zero(self):
+    def test_rescue_without_marker_is_generation_one(self):
         self.kernel('7.3')
         self.put('/boot/vmlinuz-0-rescue-test', b'7.3')
-        with self.assertRaisesRegex(bootchain.Refused, r'0-rescue-test \(generation 0\)'):
+        self.apply()
+        self.assertEqual(os.readlink(self.link), 'dtb-7.3')
+
+    def test_rescue_without_marker_refuses_a_later_generation(self):
+        self.kernel('7.3', generation=2)
+        self.put('/boot/vmlinuz-0-rescue-test', b'7.3')
+        with self.assertRaisesRegex(bootchain.Refused, r'0-rescue-test \(generation 1\)'):
             self.apply()
         self.unchanged()
 

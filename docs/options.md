@@ -550,6 +550,19 @@ integration without disabling KDE or removing existing accounts.
 
 **Declared in:** [plasma-setup.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/plasma-setup.nix)
 
+## `aurora.powerBudget.enable`
+
+Give the Power Saver profile a CPU power budget, as macOS Low Power Mode
+does: every 100 ms the budget is split across the CPU clusters from the
+device tree energy model and each cluster is capped to its share.
+Balanced and Performance are untouched.
+
+**Type:** boolean
+
+**Default:** `config.services.power-profiles-daemon.enable`
+
+**Declared in:** [power-budget.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/power-budget.nix)
+
 ## `aurora.sep.greeterFingerprint.enable`
 
 Patch GNOME Shell's greeter to offer fingerprint sign-in as well as
@@ -578,6 +591,30 @@ by aurora-touchid-boot.service at every boot.
 **Default:** `true`
 
 **Declared in:** [sep.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep.nix)
+
+## `aurora.sepLuks.enable`
+
+Install aurora-sep-cryptenroll and its libcryptsetup token plugin, which
+unlock LUKS2 volumes with this Mac's Secure Enclave the way
+systemd-cryptenroll --tpm2-device=auto does with a TPM. Nothing is
+enrolled by this option: run aurora-sep-cryptenroll for each volume.
+The root volume is not supported yet.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.package`
+
+The aurora-sep-luks package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-sep-luks`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
 
 ## `aurora.speakerguardd.upgrade.enable`
 

@@ -46,6 +46,7 @@
           plymouth-theme-aurora omdrop-awdl speakerguardd-v2;
         logos = pkgs.aurora-logos;
         firstboot = pkgs.aurora-firstboot;
+        power-budget = pkgs.aurora-power-budget;
         sep = pkgs.aurora-sep;
         avd-fw = pkgs.aurora-avd-firmware;
         speaker-upgrade = pkgs.aurora-speaker-upgrade;
@@ -81,6 +82,7 @@
         fido = pkgs.aurora-fido;
         sep-sk = pkgs.aurora-sep-sk;
         xart = pkgs.aurora-xart;
+        sep-luks = pkgs.aurora-sep-luks;
       };
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;
