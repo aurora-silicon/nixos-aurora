@@ -17,6 +17,9 @@ let
         "Plasma About uses the immutable Aurora logo" = config.aurora.desktop != "kde"
           || lib.elem "LogoPath=${value.pkgs.aurora-logos}/share/pixmaps/system-logo-white.png"
             (lib.splitString "\n" config.environment.etc."xdg/kcm-about-distrorc".text);
+        "a stalled reboot or kexec is reset by the hardware watchdog within its 178 s range" =
+          config.systemd.settings.Manager.RebootWatchdogSec == "2min"
+          && config.systemd.settings.Manager.KExecWatchdogSec == "2min";
         "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
         "the Type-C port controllers find their USB4 router in the initrd" =
           lib.all (m: lib.elem m config.boot.initrd.availableKernelModules) [ "tps6598x" "thunderbolt_apple" ];
