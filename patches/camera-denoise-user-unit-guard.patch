@@ -1,0 +1,76 @@
+Subject: [PATCH] systemd: skip root and system users, limit restarts
+
+Backport of aurora-silicon/camera-denoise#8 onto the pinned source.
+
+diff --git a/data/aurora-camera-denoise.service.in b/data/aurora-camera-denoise.service.in
+index 5d8a2af..ee0f31c 100644
+--- a/data/aurora-camera-denoise.service.in
++++ b/data/aurora-camera-denoise.service.in
+@@ -3,12 +3,19 @@ Description=Camera denoise filter for built-in cameras
+ Documentation=https://github.com/aurora-silicon/camera-denoise
+ After=pipewire.service wireplumber.service
+ Requires=pipewire.service
++# Only desktop users run a camera session. root's and system users' (greeter)
++# user managers have no PipeWire session to join.
++ConditionUser=!root
++ConditionUser=!@system
++# A PipeWire that is down stays down: give up after 5 tries in a minute.
++StartLimitIntervalSec=60
++StartLimitBurst=5
+ 
+ [Service]
+ ExecStart=@bindir@/aurora-camera-denoise
+ ExecReload=/bin/kill -HUP $MAINPID
+ Restart=on-failure
+-RestartSec=2
++RestartSec=5
+ 
+ [Install]
+ WantedBy=pipewire.service
+diff --git a/meson.build b/meson.build
+index 6540814..7525cb8 100644
+--- a/meson.build
++++ b/meson.build
+@@ -92,10 +92,11 @@ if unitdir == ''
+     get_option('prefix') / 'lib' / 'systemd' / 'user'
+ endif
+ if pipewire.found()
+-  configure_file(input : 'data/aurora-camera-denoise.service.in',
++  user_unit = configure_file(input : 'data/aurora-camera-denoise.service.in',
+     output : 'aurora-camera-denoise.service',
+     configuration : {'bindir' : get_option('prefix') / get_option('bindir')},
+     install_dir : unitdir)
++  test('user-unit', find_program('sh'), args : [files('tests/check-unit.sh'), user_unit])
+ endif
+ 
+ test('cpu', executable('test_cpu', 'tests/test_cpu.c', dependencies : core_dep))
+diff --git a/tests/check-unit.sh b/tests/check-unit.sh
+new file mode 100755
+index 0000000..532486c
+--- /dev/null
++++ b/tests/check-unit.sh
+@@ -0,0 +1,24 @@
++#!/bin/sh
++# SPDX-License-Identifier: MIT
++# The user unit must skip root and system users (greeter) and must not
++# restart forever when PipeWire is down.
++set -eu
++unit=$1
++grep -qx 'ConditionUser=!root' "$unit"
++grep -qx 'ConditionUser=!@system' "$unit"
++grep -qx 'Restart=on-failure' "$unit"
++interval=$(sed -n 's/^StartLimitIntervalSec=//p' "$unit")
++burst=$(sed -n 's/^StartLimitBurst=//p' "$unit")
++delay=$(sed -n 's/^RestartSec=//p' "$unit")
++[ -n "$interval" ] && [ -n "$burst" ] && [ -n "$delay" ]
++# The burst must be reachable inside the interval, or the limit never trips.
++[ $((burst * delay)) -lt "$interval" ]
++# Both settings belong to [Unit]; systemd ignores StartLimit* in [Service].
++awk '/^\[/{s=$0} /^StartLimit/{if (s != "[Unit]") exit 1}' "$unit"
++awk '/^\[/{s=$0} /^ConditionUser/{if (s != "[Unit]") exit 1}' "$unit"
++if command -v systemd-analyze >/dev/null 2>&1; then
++  out=$(systemd-analyze --user verify "$unit" 2>&1 || true)
++  if printf '%s\n' "$out" | grep -E 'Unknown (key|section)|Failed to parse|bad-setting'; then
++    exit 1
++  fi
++fi
