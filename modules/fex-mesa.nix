@@ -2,17 +2,31 @@
 let
   cfg = config.aurora.fexMesa;
   provider = "/var/lib/aurora/fex/mesa-rootfs";
+  # Unit path directives expand percent specifiers. RequiresMountsFor also
+  # splits words, so quote its path separately from the ExecStart arguments.
+  unitRootfs = lib.replaceStrings [ "%" ] [ "%%" ] cfg.rootfs;
 in {
   options.aurora.fexMesa = {
     enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Ship x86_64 and i686 Aurora Mesa and layer them over the configured FEX guest rootfs.";
+      description = ''
+        Mount x86_64 and i686 Aurora Mesa over the guest rootfs at
+        `/var/lib/aurora/fex/mesa-rootfs`. Set `FEX_ROOTFS` only when the provider
+        is mounted and the user has not set it. False removes this integration
+        and unmounts the provider on a switch; guest distribution files remain.
+      '';
     };
     rootfs = lib.mkOption {
       type = lib.types.str;
       default = "/var/lib/aurora/fex/rootfs";
-      description = "Unmodified FEX distribution rootfs directory used as the guest graphics provider's lower layer.";
+      example = "/srv/fex/Fedora";
+      description = ''
+        Absolute path to an unpacked FEX guest distribution containing `usr`.
+        It is neither downloaded nor modified; the service skips a missing
+        `usr` directory. Colons, commas, backslashes and newlines are unsupported
+        because this path is an overlay mount's lower layer.
+      '';
     };
     package = lib.mkPackageOption pkgs "aurora-fex-mesa" { };
   };
@@ -32,8 +46,8 @@ in {
       wantedBy = [ "multi-user.target" ];
       after = [ "systemd-tmpfiles-setup.service" "local-fs.target" ];
       before = [ "display-manager.service" ];
-      unitConfig.RequiresMountsFor = [ cfg.rootfs ];
-      unitConfig.ConditionPathIsDirectory = "${cfg.rootfs}/usr";
+      unitConfig.RequiresMountsFor = [ (builtins.toJSON unitRootfs) ];
+      unitConfig.ConditionPathIsDirectory = "${unitRootfs}/usr";
       # Nix never overwrites the mounted store layer. Stop the old unit before
       # switching, then mount the new immutable path (also on rollback).
       stopIfChanged = true;

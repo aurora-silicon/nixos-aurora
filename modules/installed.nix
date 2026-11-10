@@ -15,8 +15,8 @@
 #   .old. The logic is fedora-aurora's (stage2/, docs/updates.md).
 # - Device trees whose DT ABI generation a configuration GRUB lists cannot boot
 #   are refused before the switch, and again at install and commit time.
-# - aurora-update takes the newest signed update of the channel /etc/nixos
-#   follows, in one command. Nothing upgrades unattended.
+# - aurora-update updates the declared consumer flake's Aurora input, in one
+#   command. Nothing upgrades unattended.
 let
   cfg = config.aurora.stage2;
   esp = config.boot.loader.efi.efiSysMountPoint;
@@ -28,16 +28,18 @@ let
   # that does not declare one is generation 0, as on Fedora.
   dtbAbi = config.boot.kernelPackages.kernel.auroraDtbAbi or 0;
   configurationLimit = toString config.boot.loader.grub.configurationLimit;
+  stage2Parser = pkgs.writeTextDir "stage2.py" (builtins.readFile ../scripts/stage2.py);
   # The Apple Silicon module's combined Stage 2: the same bytes the image ships
   # in m1n1/boot.bin, so an unchanged system never rewrites the ESP.
   stage2 = pkgs.runCommand "aurora-stage2" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+    export PYTHONPATH=${stage2Parser}
     mkdir $out
     cp ${config.system.build.m1n1} $out/boot.bin
     # The trial checks the device trees that follow aura.
     ln -s ${aura}/lib/m1n1/m1n1.bin $out/aura.bin
     echo ${toString dtbAbi} > $out/dtb-abi
     python3 ${../scripts/check-stage2.py} --stage2 $out/boot.bin \
-      --aura ${aura}/lib/m1n1/m1n1.bin ${lib.concatMapStringsSep " " (board: "--require-board ${board}") cfg.requiredBoards} \
+      --aura ${aura}/lib/m1n1/m1n1.bin ${lib.concatMapStringsSep " " (board: "--require-board ${lib.escapeShellArg board}") cfg.requiredBoards} \
       > $out/manifest.json
     sha256sum $out/boot.bin | cut -d' ' -f1 > $out/boot.bin.sha256
     if [[ -e ${aura}/share/aura/monitor-free ]]; then
@@ -77,28 +79,68 @@ let
   };
   update = pkgs.writeShellApplication {
     name = "aurora-update";
-    runtimeInputs = [ config.nix.package pkgs.coreutils ];
+    runtimeInputs = [ config.nix.package pkgs.nixos-rebuild ];
     text = ''
-      # Take the newest signed update of the channel /etc/nixos follows.
-      if [[ $(id -u) != 0 ]]; then
-        echo 'aurora-update: run it with sudo' >&2
-        exit 1
-      fi
-      nix flake update aurora --flake /etc/nixos
-      nixos-rebuild switch --flake /etc/nixos#aurora "$@"
+      exec ${pkgs.python3}/bin/python3 ${../scripts/aurora-update.py} \
+        --configured-input ${lib.escapeShellArg config.aurora.update.inputName} \
+        ${lib.optionalString (config.aurora.update.flake != null)
+          "--configured-flake ${lib.escapeShellArg config.aurora.update.flake}"} \
+        ${lib.optionalString ((config.aurora.imageLayout or null) != null)
+          "--factory-flake /etc/nixos#aurora"} "$@"
     '';
   };
 in {
+  # Remove only the upstream unchecked Stage 2 copy after merging all file
+  # declarations. Other GRUB files remain available to the host. Keep this
+  # exclusion when stage2.enable is false, so opting out leaves the ESP alone.
+  options.boot.loader.grub.extraFiles = lib.mkOption {
+    apply = files: builtins.removeAttrs files [ "m1n1/boot.bin" ];
+  };
   options.aurora.stage2 = {
     enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Refresh the ESP Stage 2 on every bootloader install, as update-m1n1 does, and commit Stage 2 trials.";
+      description = ''
+        Refresh the checked ESP Stage 2 on bootloader installs and commit trials
+        on compatible aura versions. Monitor-free aura uses a board-specific
+        CTXR image on Macs booting Mach-O Stage 1. False disables automatic
+        installs, DT ABI pre-switch checks and trial commit/guard units, including
+        the upstream unchecked copy. Update commands remain installed; Stage 1
+        is never written by this module.
+      '';
     };
     requiredBoards = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ "j700" "j616s" "j614s" ];
-      description = "Boards whose device trees the one shared Stage 2 must carry.";
+      example = [ "j700" "j616s" "j614s" ];
+      description = ''
+        Board identifiers whose device trees must be present in the shared
+        Stage 2; omit the `apple,` prefix. A missing board fails its build.
+        This validates contents, not which boards are included by the kernel.
+      '';
+    };
+  };
+  options.aurora.update = {
+    flake = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "/home/owner/nixos#macbook";
+      description = ''
+        Consumer flake updated by `aurora-update`, optionally followed by its
+        NixOS configuration name. Without a selector the host name is used.
+        Set this for systems maintained with direct `nixos-rebuild` commands:
+        NixOS does not retain their original consumer flake reference.
+        An explicit `aurora-update --flake` overrides this and remembers a
+        successful local activation only for that exact system generation.
+        Factory images fall back to `/etc/nixos#aurora`; other systems require
+        this option or an explicit reference. Updating requires a writable
+        local consumer lockfile.
+      '';
+    };
+    inputName = lib.mkOption {
+      type = lib.types.str;
+      default = "aurora";
+      description = "Name of the Aurora input to update in the consumer flake.";
     };
   };
   config = {
@@ -111,9 +153,6 @@ in {
       message = "This aura has no monitor, so the kernel needs CONFIG_ARM64_CTXR_EXECMEM=y "
         + "(kernelCtxrExecmem in overlay.nix, with a kernel pin that has it).";
     }];
-    # The Apple Silicon module would copy its Stage 2 over the ESP file on
-    # every install without a backup or checks; Aurora installs it below.
-    boot.loader.grub.extraFiles = lib.mkForce { };
     # install-grub.sh passes the configuration it makes the default as $1.
     boot.loader.grub.extraInstallCommands = lib.mkIf cfg.enable ''
       AURORA_CONFIGURATION_LIMIT=${configurationLimit} \

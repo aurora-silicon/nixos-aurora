@@ -41,6 +41,29 @@ fi
 # the packaged defaults. Options given here would override both.
 modprobe apple_sep
 
+# On a SoC or board without a SEP profile the module loads but enables and
+# probes nothing ("no platform profile for this SoC; the SEP stays disabled"),
+# so no SEP device exists and no key will ever be sealed. Say so and stop,
+# instead of holding the boot for the whole ready timeout.
+sep_device=false
+for d in "${AURORA_SEP_SYSFS:-/sys/bus/platform/devices}"/*.sep; do
+    [ -e "$d" ] && sep_device=true && break
+done
+if [ "$sep_device" != true ]; then
+    log "the kernel enabled no SEP on this Mac; nothing to wait for"
+    exit 0
+fi
+
+# The driver gives up creating the identity keybag for the rest of the boot
+# when it can't prove an earlier attempt left nothing (diag/keybag "failed").
+# Trusted keys are sealed under it, so none can be sealed this boot.
+keybag_failed() {
+    for k in "${AURORA_SEP_SYSFS:-/sys/bus/platform/devices}"/*.sep/diag/keybag; do
+        [ "$(cat "$k" 2>/dev/null || true)" = failed ] && return 0
+    done
+    return 1
+}
+
 work=$(mktemp -d /run/aurora-sep-load.XXXXXX)
 cleanup() {
     case "$work" in
@@ -82,6 +105,10 @@ while :; do
         keyctl revoke "$key_id" >/dev/null 2>&1 || true
     fi
     [ "$verified" = true ] && break
+    if keybag_failed; then
+        log "the enclave has no Touch ID keybag this boot, so no trusted key can be sealed; run 'aurora-xart status'"
+        exit 1
+    fi
     [ "$(uptime_s)" -lt "$deadline" ] || break
     sleep 0.1
 done

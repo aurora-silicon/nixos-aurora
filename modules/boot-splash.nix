@@ -28,6 +28,9 @@ let
       read -r alias < "$dev/modalias" || continue
       case "$alias" in
         *Capple,display-subsystem*|*Capple,dcp*) ;;
+        # appledrm waits for every DCP; an external one binds only after its
+        # Type-C PHY, whose retimer or PD controller sits on an I2C bus.
+        *Capple,*atcphy*|*Capple,*-i2cC*|*Capple,i2c) ;;
         *) continue ;;
       esac
       devices+=("$(${readlink} -f "$dev")")
@@ -36,11 +39,55 @@ let
       done
     done
     [ ''${#devices[@]} -gt 0 ] || exit 0
-    ${udevadm} trigger --action=add --settle "''${devices[@]}"
-    ${udevadm} settle --timeout=5
-    ${udevadm} trigger --action=add --subsystem-match=drm --settle
+    # Queue them ahead of the coldplug, then the DRM cards that exist
+    # already, without waiting: the display processors take a second or
+    # more to start and the root file system does not need them. Plymouth
+    # adds appledrm's card from its udev add event.
+    ${udevadm} trigger --action=add "''${devices[@]}"
+    ${udevadm} trigger --action=add --subsystem-match=drm
   '';
 in {
+  # Desktop images boot to a splash. The Aurora theme draws the logo aura
+  # shows, at the same size and place, with the spinner below it and
+  # boot.plymouth.logo (the NixOS logo) at the bottom, so the logo stays
+  # still from power-on to the greeter. Plymouth runs in the systemd initrd.
+  boot.plymouth.enable = lib.mkDefault (config.aurora.desktop != "minimal");
+  boot.plymouth.package = lib.mkDefault pkgs.plymouth;
+  boot.plymouth.themePackages = [ pkgs.plymouth-theme-aurora ];
+  boot.plymouth.theme = lib.mkDefault "aurora";
+  # The theme draws in device pixels, so the logo matches aura's to the
+  # pixel; Plymouth's own 2x scale on Retina panels would double it.
+  boot.plymouth.extraConfig = lib.mkIf (config.boot.plymouth.theme == "aurora") "DeviceScale=1";
+  # Each boot supplies the live DT geometry, including image builds and
+  # rebuilds done on another machine. Keep the store and /etc immutable.
+  boot.initrd.systemd.services.plymouth-start.preStart = lib.mkIf
+    (config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora") (lib.mkAfter ''
+      PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
+        ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
+        ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
+    '');
+  systemd.services.plymouth-start.preStart = lib.mkIf
+    (config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora") ''
+      PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
+        ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
+        ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
+    '';
+
+  # Plasma Login, like GDM, owns the splash until its greeter starts. Its
+  # display-manager.service is an alias, not a second service definition.
+  systemd.services.plasmalogin = lib.mkIf (config.services.displayManager.plasma-login-manager.enable && config.boot.plymouth.enable) {
+    conflicts = [ "plymouth-quit.service" ];
+    after = [ "plymouth-start.service" ];
+    onFailure = [ "plymouth-quit.service" ];
+    serviceConfig.ExecStartPre = [
+      "-${pkgs.coreutils}/bin/timeout --kill-after=2 20 ${lib.getExe' config.boot.plymouth.package "plymouth"} quit"
+    ];
+  };
+  # Starting this unit during a switch would stop the display manager.
+  systemd.services.plymouth-quit = lib.mkIf (config.services.displayManager.plasma-login-manager.enable && config.boot.plymouth.enable) {
+    wantedBy = lib.mkForce [ ];
+  };
+
   boot.loader.grub.font = lib.mkDefault null;
   # grub.nix sets its NixOS wallpaper with mkDefault, so a plain mkDefault
   # null would conflict with it; one step stronger still loses to a
@@ -51,7 +98,10 @@ in {
 
   boot.kernelParams = lib.mkIf config.boot.plymouth.enable [ "plymouth.ignore-serial-consoles" ];
 
-  boot.initrd.availableKernelModules = [ "appledrm" "mux-apple-display-crossbar" ];
+  # The external DCPs' Type-C chain comes up with the display: appledrm
+  # registers only once every DCP has bound.
+  boot.initrd.availableKernelModules = [ "appledrm" "mux-apple-display-crossbar"
+    "i2c-pasemi-platform" "phy-apple-atc" "phy-ti-cd2e22" "tps6598x" ];
   boot.initrd.systemd.services.aurora-early-kms = lib.mkIf config.boot.plymouth.enable {
     description = "Coldplug the Apple display before the other devices";
     unitConfig.DefaultDependencies = false;
@@ -62,5 +112,11 @@ in {
     serviceConfig.Type = "oneshot";
     serviceConfig.ExecStart = earlyKms;
   };
-  boot.initrd.systemd.storePaths = lib.mkIf config.boot.plymouth.enable [ earlyKms ];
+  boot.initrd.systemd.storePaths = lib.mkIf config.boot.plymouth.enable (
+    [ earlyKms ] ++ lib.optionals (config.boot.plymouth.theme == "aurora") [
+      # The initrd copier does not follow store references inside shell scripts.
+      "${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth"
+      "${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora"
+    ]
+  );
 }

@@ -9,7 +9,6 @@ equal HEAD's. Nothing is downloaded here except the base metadata.
 """
 import argparse
 import datetime
-import importlib.util
 import json
 from pathlib import Path
 import re
@@ -20,9 +19,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / 'scripts'))
 import updatelib as lib  # noqa: E402
 
-_spec = importlib.util.spec_from_file_location('collector', ROOT / 'scripts/collect-cache-inputs.py')
-collector = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(collector)
+import cache_inputs as collector  # noqa: E402
 
 RETENTION_DAYS = 90
 MAX_RUNS = 60
@@ -49,25 +46,48 @@ def candidate_runs(repository, now=None, api=lib.gh_api):
     return runs[:MAX_RUNS]
 
 
+def publication_plan(expected, covered, head, previous_commit, served_commit, runs, *, ancestor):
+    needed = sorted(name for name, item in expected.items() if not set(item['outputs']) <= covered)
+    if any(commit and commit != head and not ancestor(commit, head)
+           for commit in (previous_commit, served_commit)):
+        # A queued workflow must not roll a newer published/served module set
+        # back merely because both commits happen to share hardware outputs.
+        action = 'up-to-date'
+    elif needed:
+        action = 'publish' if runs else 'missing'
+    else:
+        action = 'reuse' if previous_commit != head else ('up-to-date' if served_commit == head else 'deploy')
+    return {'schema': 1, 'action': action, 'head': head, 'needed': needed, 'runs': list(runs)}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--repository', required=True)
     parser.add_argument('--previous-metadata', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--previous-commit', required=True)
+    parser.add_argument('--build-runs', nargs='*', default=[])
+    parser.add_argument('--served-commit', default='')
     args = parser.parse_args()
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', args.repository):
         parser.error('--repository owner/name')
+    if not re.fullmatch('[a-f0-9]{40}', args.previous_commit):
+        parser.error('--previous-commit must be a full Git commit')
+    if any(not re.fullmatch('[0-9]+', run) for run in args.build_runs):
+        parser.error('--build-runs must contain numeric workflow run IDs')
+    if args.served_commit and not re.fullmatch('[a-f0-9]{40}', args.served_commit):
+        parser.error('--served-commit must be a full Git commit')
     expected = collector.expected_outputs()
     covered = collector.store_paths(args.previous_metadata)
-    needed = sorted(name for name, item in expected.items() if not set(item['outputs']) <= covered)
-    runs = candidate_runs(args.repository) if needed else []
-    action = 'publish' if needed and runs else ('missing' if needed else 'up-to-date')
-    plan = {'schema': 1, 'action': action, 'head': lib.git(ROOT, 'rev-parse', 'HEAD'), 'needed': needed,
-            'runs': [run['id'] for run in runs]}
+    head = lib.git(ROOT, 'rev-parse', 'HEAD')
+    needed = any(not set(item['outputs']) <= covered for item in expected.values())
+    runs = args.build_runs or ([run['id'] for run in candidate_runs(args.repository)] if needed else [])
+    plan = publication_plan(expected, covered, head, args.previous_commit, args.served_commit, runs,
+                            ancestor=lambda before, after: lib.is_ancestor(ROOT, before, after))
     args.output.write_text(json.dumps(plan, indent=2) + '\n')
-    lib.write_github_output(action=action, runs=' '.join(map(str, plan['runs'])), rebuild=' '.join(needed))
-    print(f'Outputs not in the base snapshot: {", ".join(needed) or "none"}')
-    print(f'Action: {action}; candidate runs: {len(runs)}')
+    lib.write_github_output(action=plan['action'], runs=' '.join(map(str, plan['runs'])), rebuild=' '.join(plan['needed']))
+    print(f'Outputs not in the base snapshot: {", ".join(plan['needed']) or "none"}')
+    print(f'Action: {plan["action"]}; candidate runs: {len(runs)}')
 
 
 if __name__ == '__main__':

@@ -85,16 +85,6 @@ class ImageRequirements(unittest.TestCase):
 
 
 class SharedDistributionConfig(unittest.TestCase):
-    def test_nixos_derives_hardware_from_the_resolved_alarm_snapshot(self):
-        recipe = (ROOT / "overlay.nix").read_text()
-        configure = recipe.split("# Start from the resolved configuration", 1)[1].split("postConfigure =", 1)[0]
-        self.assertIn('"$buildRoot/.config" ${stableFile ./kernel/nixos.config}', configure)
-        self.assertNotIn("arch/arm64/configs/asahi.config", configure)
-        self.assertIn('builtins.hashFile "sha256" ./kernel/config', recipe)
-        self.assertIn("kernelProvenance.config_upstream.kernel_commit", recipe)
-        self.assertNotIn("common.config", recipe)
-        self.assertFalse((ROOT / "kernel/common.config").exists())
-
     def test_vendored_files_match_their_recorded_source(self):
         provenance = json.loads((ROOT / "kernel/provenance.json").read_text())
         upstream = provenance["config_upstream"]

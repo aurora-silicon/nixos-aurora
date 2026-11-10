@@ -1,0 +1,40 @@
+From: Ryan Murray <ryan@aurorasilicon.org>
+Subject: [PATCH] ntdll: guard FEX predicate writes by the SVE record extent
+
+License: LGPL-2.1-or-later, matching dlls/ntdll/unix/signal_arm64.c.
+That file carries Copyright 2010-2013 André Hentschel.
+
+Only initialize FEX predicates when the signal record contains valid vector
+state. Header-only records must remain untouched.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+
+--- a/dlls/ntdll/unix/signal_arm64.c
++++ b/dlls/ntdll/unix/signal_arm64.c
+@@ -1485,12 +1485,18 @@
+             memcpy( fp->vregs, frame->v, sizeof(fp->vregs) );
+         }
+ 
+-        if (sve)
+-        {
+-            /* setup FEX SVE state */
+-            ULONG64 vq = sve_vq_from_vl(sve->vl);
+-            *(UINT16 *)((BYTE *)sve + SVE_SIG_PREG_OFFSET(vq, 2)) = 0x155;
+-            *(UINT16 *)((BYTE *)sve + SVE_SIG_PREG_OFFSET(vq, 6)) = 0xffff;
++        /* Linux may supply only an SVE header when vector state is not live.
++         * SME-only, non-streaming contexts may also advertise VL zero. Do not
++         * access predicate offsets unless this record contains the payload.
++         * A full streaming or non-streaming record retains the FEX setup. */
++        if (sve && !(sve->flags & ~SVE_SIG_FLAG_SM) && sve_vl_valid( sve->vl ))
++        {
++            ULONG64 vq = sve_vq_from_vl( sve->vl );
++            if (sve->head.size >= SVE_SIG_CONTEXT_SIZE( vq ))
++            {
++                *(UINT16 *)((BYTE *)sve + SVE_SIG_PREG_OFFSET( vq, 2 )) = 0x155;
++                *(UINT16 *)((BYTE *)sve + SVE_SIG_PREG_OFFSET( vq, 6 )) = 0xffff;
++            }
+         }
+     }
+ #elif defined(__APPLE__)
+

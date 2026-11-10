@@ -2,6 +2,7 @@
 # Build a native installer image from a previously built NixOS system closure.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+source "$root/scripts/testlib.sh"
 desktop=${1:?kde, gnome or minimal required}
 system=${2:?built NixOS system path required}
 installer=${3:?built nixos-install path required}
@@ -44,7 +45,18 @@ btrfs subvolume create "$target/root";btrfs subvolume create "$target/home";umou
 mount -o subvol=root,compress=zstd:1 "${loop}p3" "$target"
 mkdir -p "$target/boot/efi"
 mount "${loop}p2" "$target/boot";mkdir -p "$target/boot/efi";mount "${loop}p1" "$target/boot/efi"
-"$installer/bin/nixos-install" --root "$target" --system "$system" --no-root-passwd --no-channel-copy
+# The factory system already contains installed-system update tooling and its
+# checked Stage 2 hook. Give that hook the image ESP's identity, rather than
+# the physical Mac building the image; nixos-enter preserves this environment.
+# A universal image needs boot.bin regardless of the builder's Mach-O board.
+mkdir -p "$target/boot/efi/m1n1" "$target/run"
+blkid -s PARTUUID -o value "${loop}p1" > "$target/run/aurora-image-esp-partuuid"
+AURORA_DEVICE_TREE_ESP=/run/aurora-image-esp-partuuid \
+  AURORA_DEVICE_TREE_COMPATIBLE=/dev/null \
+  "$installer/bin/nixos-install" --root "$target" --system "$system" --no-root-passwd --no-channel-copy
+rm -f "$target/run/aurora-image-esp-partuuid"
+chroot "$target" "$system/sw/bin/test" -x "$system/sw/bin/aurora-update"
+chroot "$target" "$system/sw/bin/test" -x "$system/sw/bin/aurora-install-stage2"
 # The source image has /boot on GPT partition 2. The macOS installer places
 # it in a different slot. The bootloader install (aurora-harden-grub, from
 # boot.loader.grub.extraInstallCommands) built a core image whose EFI stub
@@ -55,7 +67,7 @@ grep -qF 'Aurora: look for this installation only on the disk GRUB started from.
 grep -qF "probe --set=aurora_uuid" "$target/boot/efi/EFI/BOOT/grub.cfg"
 grep -qF "\"$boot_uuid\"" "$target/boot/efi/EFI/BOOT/grub.cfg"
 grep -aqF '/EFI/BOOT' "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI"
-! grep -aqE '\(,gpt[0-9]+\)/grub' "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI"
+nomatch -aE '\(,gpt[0-9]+\)/grub' "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI"
 # Every image ships the basics (locale, terminal, wallpapers, network, lid
 # policy, GRUB finding /boot by UUID on the startup disk); a build that lacks
 # one fails here instead of on a Mac.
@@ -90,7 +102,7 @@ python3 - "$target/etc/nixos" "$revision" "$desktop" "$root/images/layouts.json"
 import json,sys
 from pathlib import Path
 out=Path(sys.argv[1]);revision,desktop=sys.argv[2:4];layout=json.load(open(sys.argv[4]))[desktop]
-(out/'machine.nix').write_text('{ lib, ... }: {\n  aurora.desktop = '+json.dumps(desktop)+';\n  system.stateVersion = lib.mkForce "26.05";\n  aurora.imageLayout = lib.mkForce {\n'+''.join('    '+key+' = '+json.dumps(value)+';\n' for key,value in layout.items())+'  };\n}\n')
+(out/'machine.nix').write_text('{ lib, ... }: {\n  aurora.desktop = '+json.dumps(desktop)+';\n  system.stateVersion = "26.05";\n  aurora.imageLayout = lib.mkForce {\n'+''.join('    '+key+' = '+json.dumps(value)+';\n' for key,value in layout.items())+'  };\n}\n')
 (out/'owner.nix').write_text('{ ... }: {}\n')
 (out/'flake.nix').write_text('''{
   description = "This Mac's Aurora NixOS configuration";
