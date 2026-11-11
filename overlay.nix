@@ -748,9 +748,7 @@ in {
   # Touch ID as a FIDO2/U2F security key (aurora-sep-userspace fido/).
   # modules/fido.nix runs it with aurora.fido.enable; off by default.
   aurora-fido = let
-    py = final.python3.withPackages (ps: [ ps.cryptography ps.pygobject3 ]);
-    typelibs = final.lib.makeSearchPath "lib/girepository-1.0"
-      [ final.glib.out final.gobject-introspection ];
+    py = final.python3.withPackages (ps: [ ps.cryptography ]);
   in final.stdenv.mkDerivation {
     pname = "aurora-fido";
     version = pins.aurora-fido.version;
@@ -770,7 +768,6 @@ in {
     postInstall = ''
       for f in $out/bin/aurora-fido $out/libexec/aurora-fido/aurora-fidod; do
         substituteInPlace $f --replace-fail "#!/usr/bin/python3 -I" "#!${py.interpreter} -I"
-        wrapProgram $f --prefix GI_TYPELIB_PATH : ${typelibs}
       done
     '';
     passthru.commit = pins.aurora-fido.commit;
