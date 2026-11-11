@@ -153,6 +153,7 @@ settings; they do not need separate imports. Full option details are in the
 | `gnome-initial-setup.nix` | GNOME owner-account setup when an image layout is present. `aurora.gnomeInitialSetup.enable`; requires GDM and mutable users. |
 | `kbd-light.nix` | Ambient-light keyboard backlight control. `aurora.kbdLight.enable`, `package` and `settings`; the service skips machines without a keyboard backlight. |
 | `panel-nits.nix` | Built-in panel brightness shared with the boot loader and macOS through NVRAM `backlight-nits`: the panel starts at the loader's level, and the user's level is stored back (rate limited). `aurora.panelNits.enable` and `package`; machines without the panel backlight or the NVRAM device skip it. |
+| `btsync.nix` | Bluetooth pairings made in macOS, copied from NVRAM into BlueZ's storage before bluetoothd starts; keys of devices macOS paired again are refreshed and Linux-only pairings are left alone. `aurora.btsync.enable` and `package`. |
 | `parity.nix` | Records payload paths and source identities for finished-image verification. No Aurora-specific options. |
 | `plasma-setup.nix` | KDE owner-account setup when an image layout is present. `aurora.plasmaSetup.enable`; requires Plasma Login Manager and mutable users. |
 | `platform.nix` | Bluetooth, UPower, regulatory data, speaker protection and model-specific platform rules. No Aurora-specific options. |

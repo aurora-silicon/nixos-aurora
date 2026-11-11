@@ -82,6 +82,8 @@
         camera-denoise = pkgs.aurora-camera-denoise;
         kbd-light = pkgs.aurora-kbd-light;
         panel-nits = pkgs.aurora-panel-nits;
+        nvram = pkgs.aurora-nvram;
+        btsync = pkgs.aurora-btsync;
         fido = pkgs.aurora-fido;
         sep-sk = pkgs.aurora-sep-sk;
         xart = pkgs.aurora-xart;

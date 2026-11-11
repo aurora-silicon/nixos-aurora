@@ -70,6 +70,8 @@ NEEDS = {
     'camera-denoise': ['camera-denoise'],
     'kbd-light': ['kbd-light'],
     'panel-nits': ['aurora-bless'],
+    'nvram': ['aurora-bless'],
+    'btsync': ['aurora-bless'],
     'fido': ['aurora-fido'],
     'sep-sk': ['aurora-sep-sk'],
     'sep-luks': ['aurora-sep-luks'],
