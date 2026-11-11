@@ -1,0 +1,1630 @@
+diff --git a/data/meson.build b/data/meson.build
+index d011744..59af484 100644
+--- a/data/meson.build
++++ b/data/meson.build
+@@ -68,7 +68,7 @@ gsd_enums_dep = declare_dependency(
+ meson.override_dependency(meson.project_name(), gsd_enums_dep)
+ 
+ # for unit tests - gnome.compile_schemas() only looks in srcdir
+-custom_target('compile-schemas',
++compiled_schemas = custom_target('compile-schemas',
+   input: schemas_xml,
+   depends: mkenums,
+   output: 'gschemas.compiled',
+diff --git a/data/org.gnome.settings-daemon.plugins.color.gschema.xml.in b/data/org.gnome.settings-daemon.plugins.color.gschema.xml.in
+index 286ea80..01d03c5 100644
+--- a/data/org.gnome.settings-daemon.plugins.color.gschema.xml.in
++++ b/data/org.gnome.settings-daemon.plugins.color.gschema.xml.in
+@@ -11,6 +11,11 @@
+       <summary>The duration a printer profile is valid</summary>
+       <description>This is the number of days after which the printer color profile is considered invalid.</description>
+     </key>
++    <key name="ambient-white-point-enabled" type="b">
++      <default>false</default>
++      <summary>Adapt the display white point to the ambient light</summary>
++      <description>Use the ambient light sensor's colour temperature, where the computer has one, to make the displays slightly warmer in warm light, similar to how paper looks under different lights. Night Light takes priority. Requires a light sensor that reports colour and a compositor that supports Night Light.</description>
++    </key>
+     <key name="night-light-enabled" type="b">
+       <default>false</default>
+       <summary>If the night light mode is enabled</summary>
+diff --git a/plugins/color/ambient-policy-test.c b/plugins/color/ambient-policy-test.c
+new file mode 100644
+index 0000000..03f9ff7
+--- /dev/null
++++ b/plugins/color/ambient-policy-test.c
+@@ -0,0 +1,137 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <math.h>
++#include "gsd-ambient-policy.h"
++#include "ambient-test-vectors.h"
++
++static void
++test_targets (void)
++{
++        const GsdAmbientModel *model = &gsd_ambient_model_default;
++
++        for (guint i = 0; i < G_N_ELEMENTS (ambient_target_vectors); i++) {
++                const AmbientTargetVector *v = &ambient_target_vectors[i];
++                double kelvin = 1e6 / gsd_ambient_target_mired (model, v->valid, v->lux, v->kelvin);
++                g_assert_cmpfloat_with_epsilon (kelvin, v->expect_k, 1e-3);
++        }
++}
++
++static void
++test_trajectory (void)
++{
++        GsdAmbientPolicy policy;
++        guint tick = 0;
++
++        gsd_ambient_policy_init (&policy, &gsd_ambient_model_default);
++        for (guint r = 0; r < G_N_ELEMENTS (ambient_tick_runs); r++) {
++                const AmbientTickRun *run = &ambient_tick_runs[r];
++                for (int i = 0; i < run->count; i++, tick++) {
++                        double kelvin = gsd_ambient_policy_tick (&policy, run->releasing, run->valid,
++                                                                 run->lux, run->kelvin);
++                        g_assert_cmpuint (tick, <, G_N_ELEMENTS (ambient_tick_expect_k));
++                        g_assert_cmpfloat_with_epsilon (kelvin, ambient_tick_expect_k[tick], 1e-3);
++                }
++        }
++        g_assert_cmpuint (tick, ==, G_N_ELEMENTS (ambient_tick_expect_k));
++        g_assert_true (gsd_ambient_policy_is_neutral (&policy));
++}
++
++static void
++test_limits (void)
++{
++        const GsdAmbientModel *model = &gsd_ambient_model_default;
++        double swing = gsd_ambient_mired (model->warmest_k) - gsd_ambient_mired (model->coolest_k);
++        GsdAmbientPolicy policy;
++        double previous = 6500;
++
++        /* Any input stays inside the limits, and no step is faster than the
++         * largest swing over the shortest fade at the fade's steepest. */
++        gsd_ambient_policy_init (&policy, model);
++        for (guint i = 0; i < 2000; i++) {
++                double lux = (i * 7919) % 3000;
++                double kelvin = 1000 + (i * 104729) % 15000;
++
++                gsd_ambient_policy_sample (&policy, FALSE, TRUE, lux, kelvin);
++                for (guint step = 0; step < 10; step++) {
++                        double out = gsd_ambient_policy_advance (&policy, GSD_AMBIENT_STEP_S);
++                        g_assert_cmpfloat (out, >=, model->warmest_k - 1e-6);
++                        g_assert_cmpfloat (out, <=, model->coolest_k + 1e-6);
++                        g_assert_cmpfloat (fabs (1e6 / out - 1e6 / previous), <=,
++                                           1.9 * swing * GSD_AMBIENT_STEP_S / model->toggle_ramp_s + 1e-9);
++                        previous = out;
++                }
++        }
++}
++
++static guint
++fade_steps (GsdAmbientPolicy *policy)
++{
++        guint steps = 0;
++
++        while (!gsd_ambient_policy_is_settled (policy)) {
++                gsd_ambient_policy_advance (policy, GSD_AMBIENT_STEP_S);
++                steps++;
++        }
++        return steps;
++}
++
++static void
++test_ramp (void)
++{
++        const GsdAmbientModel *model = &gsd_ambient_model_default;
++        double n = gsd_ambient_mired (6500), w = gsd_ambient_mired (5000);
++        GsdAmbientPolicy policy;
++        guint steps = 0;
++
++        /* The fade shape passes through its three quartiles and is monotonic. */
++        g_assert_cmpfloat_with_epsilon (gsd_ambient_ease (0.25), 0.25033, 1e-9);
++        g_assert_cmpfloat_with_epsilon (gsd_ambient_ease (0.5), 0.66672, 1e-9);
++        g_assert_cmpfloat_with_epsilon (gsd_ambient_ease (0.75), 0.91656, 1e-9);
++        for (guint i = 0; i < 200; i++)
++                g_assert_cmpfloat (gsd_ambient_ease (i / 200.0), <=, gsd_ambient_ease ((i + 1) / 200.0));
++
++        /* Switching on fades over the 2 s toggle time along that shape. */
++        gsd_ambient_policy_init (&policy, model);
++        gsd_ambient_policy_sample (&policy, FALSE, TRUE, 300, 3000);
++        while (!gsd_ambient_policy_is_settled (&policy)) {
++                double out = gsd_ambient_policy_advance (&policy, GSD_AMBIENT_STEP_S);
++                steps++;
++                g_assert_cmpfloat_with_epsilon (1e6 / out, n + (w - n) *
++                        gsd_ambient_ease (MIN (steps * GSD_AMBIENT_STEP_S / model->toggle_ramp_s, 1.0)), 1e-6);
++        }
++        g_assert_cmpuint (steps, ==, (guint) round (model->toggle_ramp_s / GSD_AMBIENT_STEP_S));
++        g_assert_cmpfloat_with_epsilon (gsd_ambient_policy_get_kelvin (&policy), 5000, 1e-6);
++
++        /* A move of the ambient target afterwards takes the 5 s ambient fade. */
++        for (guint i = 0; i < 40; i++)
++                gsd_ambient_policy_sample (&policy, FALSE, TRUE, 300, 6000);
++        g_assert_false (gsd_ambient_policy_is_settled (&policy));
++        steps = fade_steps (&policy);
++        g_assert_cmpuint (steps, <=, (guint) round (model->ambient_ramp_s / GSD_AMBIENT_STEP_S));
++        g_assert_cmpuint (steps, >, (guint) round (model->toggle_ramp_s / GSD_AMBIENT_STEP_S));
++
++        /* Switching off returns to neutral in the toggle time. */
++        gsd_ambient_policy_sample (&policy, TRUE, TRUE, 300, 3000);
++        g_assert_cmpuint (fade_steps (&policy), ==, (guint) round (model->toggle_ramp_s / GSD_AMBIENT_STEP_S));
++        g_assert_true (gsd_ambient_policy_is_neutral (&policy));
++}
++
++static void
++test_compose (void)
++{
++        /* Night Light wins: the result is never cooler than Night Light. */
++        g_assert_cmpfloat (gsd_ambient_compose (6500, 5600), ==, 5600);
++        g_assert_cmpfloat (gsd_ambient_compose (2700, 5600), ==, 2700);
++        g_assert_cmpfloat (gsd_ambient_compose (4000, 6500), ==, 4000);
++}
++
++int
++main (int argc, char **argv)
++{
++        g_test_init (&argc, &argv, NULL);
++        g_test_add_func ("/color/ambient/targets", test_targets);
++        g_test_add_func ("/color/ambient/trajectory", test_trajectory);
++        g_test_add_func ("/color/ambient/limits", test_limits);
++        g_test_add_func ("/color/ambient/ramp", test_ramp);
++        g_test_add_func ("/color/ambient/compose", test_compose);
++        return g_test_run ();
++}
+diff --git a/plugins/color/ambient-service-test.c b/plugins/color/ambient-service-test.c
+new file mode 100644
+index 0000000..5f32a5f
+--- /dev/null
++++ b/plugins/color/ambient-service-test.c
+@@ -0,0 +1,300 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ *
++ * Runs the ambient white point object against fake iio-sensor-proxy and
++ * mutter services on a private bus.
++ */
++#include <math.h>
++#include <gio/gio.h>
++#include "gsd-ambient-white-point.h"
++
++static const char sensor_xml[] =
++        "<node><interface name='net.hadess.SensorProxy'>"
++        "<method name='ClaimLight'/><method name='ReleaseLight'/>"
++        "<property name='HasAmbientLight' type='b' access='read'/>"
++        "<property name='LightLevelUnit' type='s' access='read'/>"
++        "<property name='LightLevel' type='d' access='read'/>"
++        "<property name='ColorTemperature' type='d' access='read'/>"
++        "</interface></node>";
++static const char display_xml[] =
++        "<node><interface name='org.gnome.Mutter.DisplayConfig'>"
++        "<property name='NightLightSupported' type='b' access='read'/>"
++        "</interface></node>";
++
++typedef struct {
++        GTestDBus *bus;
++        GDBusConnection *service;
++        GDBusNodeInfo *sensor_info, *display_info;
++        guint sensor_object, display_object;
++        guint sensor_name, display_name;
++        gboolean has_light, supported;
++        const char *unit;
++        double lux, kelvin;
++        int claims;
++        GSettings *settings;
++        GsdAmbientWhitePoint *ambient;
++} Fixture;
++
++static void
++sensor_method (GDBusConnection *c, const char *sender, const char *path, const char *iface,
++               const char *method, GVariant *params, GDBusMethodInvocation *invocation, gpointer data)
++{
++        Fixture *f = data;
++        f->claims += g_str_equal (method, "ClaimLight") ? 1 : -1;
++        g_dbus_method_invocation_return_value (invocation, NULL);
++}
++
++static GVariant *
++sensor_property (GDBusConnection *c, const char *sender, const char *path, const char *iface,
++                 const char *name, GError **error, gpointer data)
++{
++        Fixture *f = data;
++        if (g_str_equal (name, "HasAmbientLight"))
++                return g_variant_new_boolean (f->has_light);
++        if (g_str_equal (name, "LightLevelUnit"))
++                return g_variant_new_string (f->unit);
++        if (g_str_equal (name, "LightLevel"))
++                return g_variant_new_double (f->lux);
++        return g_variant_new_double (f->kelvin);
++}
++
++static GVariant *
++display_property (GDBusConnection *c, const char *sender, const char *path, const char *iface,
++                  const char *name, GError **error, gpointer data)
++{
++        return g_variant_new_boolean (((Fixture *) data)->supported);
++}
++
++static const GDBusInterfaceVTable sensor_vtable = { sensor_method, sensor_property, NULL };
++static const GDBusInterfaceVTable display_vtable = { NULL, display_property, NULL };
++
++static void
++emit_changed (Fixture *f, const char *path, const char *iface, const char *name, GVariant *value)
++{
++        GVariantBuilder changed;
++        g_variant_builder_init (&changed, G_VARIANT_TYPE ("a{sv}"));
++        g_variant_builder_add (&changed, "{sv}", name, value);
++        g_dbus_connection_emit_signal (f->service, NULL, path, "org.freedesktop.DBus.Properties",
++                                       "PropertiesChanged",
++                                       g_variant_new ("(sa{sv}as)", iface, &changed, NULL), NULL);
++}
++
++static void
++set_light (Fixture *f, double lux, double kelvin)
++{
++        f->lux = lux;
++        f->kelvin = kelvin;
++        emit_changed (f, "/net/hadess/SensorProxy", "net.hadess.SensorProxy", "LightLevel", g_variant_new_double (lux));
++        emit_changed (f, "/net/hadess/SensorProxy", "net.hadess.SensorProxy", "ColorTemperature", g_variant_new_double (kelvin));
++}
++
++static void
++set_supported (Fixture *f, gboolean supported)
++{
++        f->supported = supported;
++        emit_changed (f, "/org/gnome/Mutter/DisplayConfig", "org.gnome.Mutter.DisplayConfig",
++                      "NightLightSupported", g_variant_new_boolean (supported));
++}
++
++static void
++own_sensor (Fixture *f)
++{
++        f->sensor_object = g_dbus_connection_register_object (f->service, "/net/hadess/SensorProxy",
++                                                              f->sensor_info->interfaces[0],
++                                                              &sensor_vtable, f, NULL, NULL);
++        f->sensor_name = g_bus_own_name_on_connection (f->service, "net.hadess.SensorProxy",
++                                                       G_BUS_NAME_OWNER_FLAGS_NONE, NULL, NULL, NULL, NULL);
++}
++
++static void
++drop_sensor (Fixture *f)
++{
++        g_clear_handle_id (&f->sensor_name, g_bus_unown_name);
++        g_dbus_connection_unregister_object (f->service, f->sensor_object);
++        /* The real daemon forgets claims of clients it no longer serves. */
++        f->claims = 0;
++}
++
++static gboolean
++timeout_cb (gpointer data)
++{
++        g_error ("Timed out waiting for a condition");
++        return G_SOURCE_REMOVE;
++}
++
++#define WAIT_FOR(cond) G_STMT_START { \
++        guint id = g_timeout_add_seconds (20, timeout_cb, NULL); \
++        while (!(cond)) g_main_context_iteration (NULL, TRUE); \
++        g_source_remove (id); \
++} G_STMT_END
++
++static void
++setup (Fixture *f, gconstpointer data)
++{
++        f->bus = g_test_dbus_new (G_TEST_DBUS_NONE);
++        g_test_dbus_up (f->bus);
++        g_setenv ("DBUS_SYSTEM_BUS_ADDRESS", g_test_dbus_get_bus_address (f->bus), TRUE);
++        f->service = g_dbus_connection_new_for_address_sync (g_test_dbus_get_bus_address (f->bus),
++                                                             G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
++                                                             G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,
++                                                             NULL, NULL, NULL);
++        g_assert_nonnull (f->service);
++        f->sensor_info = g_dbus_node_info_new_for_xml (sensor_xml, NULL);
++        f->display_info = g_dbus_node_info_new_for_xml (display_xml, NULL);
++        f->has_light = TRUE;
++        f->supported = TRUE;
++        f->unit = "lux";
++        f->lux = 300;
++        f->kelvin = 3000;
++        own_sensor (f);
++        f->display_object = g_dbus_connection_register_object (f->service, "/org/gnome/Mutter/DisplayConfig",
++                                                               f->display_info->interfaces[0],
++                                                               &display_vtable, f, NULL, NULL);
++        f->display_name = g_bus_own_name_on_connection (f->service, "org.gnome.Mutter.DisplayConfig",
++                                                        G_BUS_NAME_OWNER_FLAGS_NONE, NULL, NULL, NULL, NULL);
++        f->settings = g_settings_new ("org.gnome.settings-daemon.plugins.color");
++        g_settings_set_boolean (f->settings, "ambient-white-point-enabled", FALSE);
++        f->ambient = gsd_ambient_white_point_new ();
++        gsd_ambient_white_point_set_tick_interval (f->ambient, 2);
++        gsd_ambient_white_point_start (f->ambient);
++}
++
++static void
++teardown (Fixture *f, gconstpointer data)
++{
++        gsd_ambient_white_point_stop (f->ambient);
++        g_clear_object (&f->ambient);
++        g_clear_object (&f->settings);
++        g_clear_handle_id (&f->display_name, g_bus_unown_name);
++        g_clear_handle_id (&f->sensor_name, g_bus_unown_name);
++        g_clear_object (&f->service);
++        g_clear_pointer (&f->sensor_info, g_dbus_node_info_unref);
++        g_clear_pointer (&f->display_info, g_dbus_node_info_unref);
++        g_test_dbus_down (f->bus);
++        g_clear_object (&f->bus);
++}
++
++static void
++spin (guint ms)
++{
++        gint64 end = g_get_monotonic_time () + ms * 1000;
++        while (g_get_monotonic_time () < end)
++                g_main_context_iteration (NULL, FALSE);
++}
++
++/* Off by default: no claim, neutral. */
++static void
++test_default_off (Fixture *f, gconstpointer data)
++{
++        spin (300);
++        g_assert_cmpint (f->claims, ==, 0);
++        g_assert_cmpuint (gsd_ambient_white_point_get_temperature (f->ambient), ==, 6500);
++        g_assert_false (gsd_ambient_white_point_get_active (f->ambient));
++}
++
++/* Enabled in warm light: claims the sensor, ramps slowly to the warm limit,
++ * never overshoots, and returns to neutral and releases when disabled. */
++static void
++test_follow_and_release (Fixture *f, gconstpointer data)
++{
++        guint previous = 6500;
++
++        g_settings_set_boolean (f->settings, "ambient-white-point-enabled", TRUE);
++        WAIT_FOR (f->claims == 1);
++        WAIT_FOR (gsd_ambient_white_point_get_ambient_temperature (f->ambient) == 3000);
++        g_assert_true (gsd_ambient_white_point_get_available (f->ambient));
++        while (gsd_ambient_white_point_get_temperature (f->ambient) > 5000) {
++                guint t = gsd_ambient_white_point_get_temperature (f->ambient);
++                g_assert_cmpuint (t, <=, previous);
++                g_assert_cmpuint (t, >=, 5000);
++                previous = t;
++                g_main_context_iteration (NULL, TRUE);
++        }
++        g_assert_true (gsd_ambient_white_point_get_active (f->ambient));
++
++        g_settings_set_boolean (f->settings, "ambient-white-point-enabled", FALSE);
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 6500);
++        WAIT_FOR (f->claims == 0);
++        g_assert_false (gsd_ambient_white_point_get_active (f->ambient));
++}
++
++/* Darkness, an unsupported compositor, a vendor unit and a lost sensor all
++ * lead back to neutral. */
++static void
++test_back_off (Fixture *f, gconstpointer data)
++{
++        g_settings_set_boolean (f->settings, "ambient-white-point-enabled", TRUE);
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 5000);
++
++        set_light (f, 1, 3000);
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 6500);
++        g_assert_cmpint (f->claims, ==, 1);
++
++        set_light (f, 300, 3000);
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 5000);
++        set_supported (f, FALSE);
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 6500);
++        WAIT_FOR (f->claims == 0);
++        g_assert_false (gsd_ambient_white_point_get_available (f->ambient));
++
++        set_supported (f, TRUE);
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 5000);
++        drop_sensor (f);
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 6500);
++        g_assert_false (gsd_ambient_white_point_get_available (f->ambient));
++
++        own_sensor (f);
++        WAIT_FOR (f->claims == 1);
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 5000);
++}
++
++/* A sensor without colour, or a light level that is not in lux, does
++ * nothing. */
++static void
++test_no_colour (Fixture *f, gconstpointer data)
++{
++        f->kelvin = 0;
++        g_settings_set_boolean (f->settings, "ambient-white-point-enabled", TRUE);
++        WAIT_FOR (f->claims == 1);
++        spin (300);
++        g_assert_cmpuint (gsd_ambient_white_point_get_temperature (f->ambient), ==, 6500);
++        g_assert_false (gsd_ambient_white_point_get_available (f->ambient));
++
++        f->unit = "vendor";
++        emit_changed (f, "/net/hadess/SensorProxy", "net.hadess.SensorProxy", "LightLevelUnit",
++                      g_variant_new_string ("vendor"));
++        set_light (f, 300, 3000);
++        spin (300);
++        g_assert_cmpuint (gsd_ambient_white_point_get_temperature (f->ambient), ==, 6500);
++}
++
++/* A directly set temperature pauses until the setting is toggled. */
++static void
++test_pause (Fixture *f, gconstpointer data)
++{
++        g_settings_set_boolean (f->settings, "ambient-white-point-enabled", TRUE);
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 5000);
++        gsd_ambient_white_point_pause (f->ambient);
++        g_assert_true (gsd_ambient_white_point_get_paused (f->ambient));
++        g_assert_cmpuint (gsd_ambient_white_point_get_temperature (f->ambient), ==, 6500);
++        WAIT_FOR (f->claims == 0);
++        spin (200);
++        g_assert_cmpuint (gsd_ambient_white_point_get_temperature (f->ambient), ==, 6500);
++
++        g_settings_set_boolean (f->settings, "ambient-white-point-enabled", FALSE);
++        g_settings_set_boolean (f->settings, "ambient-white-point-enabled", TRUE);
++        g_assert_false (gsd_ambient_white_point_get_paused (f->ambient));
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 5000);
++}
++
++int
++main (int argc, char **argv)
++{
++        g_setenv ("GSETTINGS_BACKEND", "memory", TRUE);
++        g_test_init (&argc, &argv, NULL);
++        g_test_add ("/color/ambient-service/default-off", Fixture, NULL, setup, test_default_off, teardown);
++        g_test_add ("/color/ambient-service/follow-and-release", Fixture, NULL, setup, test_follow_and_release, teardown);
++        g_test_add ("/color/ambient-service/back-off", Fixture, NULL, setup, test_back_off, teardown);
++        g_test_add ("/color/ambient-service/no-colour", Fixture, NULL, setup, test_no_colour, teardown);
++        g_test_add ("/color/ambient-service/pause", Fixture, NULL, setup, test_pause, teardown);
++        return g_test_run ();
++}
+diff --git a/plugins/color/ambient-test-vectors.h b/plugins/color/ambient-test-vectors.h
+new file mode 100644
+index 0000000..ba05f5b
+--- /dev/null
++++ b/plugins/color/ambient-test-vectors.h
+@@ -0,0 +1,140 @@
++/* Generated by ambient_model.py. Do not edit. */
++#pragma once
++
++#include <math.h>
++
++typedef struct { int valid; double lux; double kelvin; double expect_k; } AmbientTargetVector;
++typedef struct { int count; int releasing; int valid; double lux; double kelvin; } AmbientTickRun;
++
++static const AmbientTargetVector ambient_target_vectors[] = {
++    { 1, 600.0, 6500.0, 6500.000000 },
++    { 1, 600.0, 5400.0, 5899.159664 },
++    { 1, 600.0, 5000.0, 5652.173913 },
++    { 1, 600.0, 4929.29, 5606.714853 },
++    { 1, 600.0, 4000.0, 5000.000000 },
++    { 1, 600.0, 2700.0, 5000.000000 },
++    { 1, 600.0, 9000.0, 6500.000000 },
++    { 1, 50.0, 4000.0, 5000.000000 },
++    { 1, 15.0, 4000.0, 5000.000000 },
++    { 1, 12.5, 4000.0, 5621.621622 },
++    { 1, 10.0, 4000.0, 6500.000000 },
++    { 1, 5.0, 2700.0, 6500.000000 },
++    { 1, 1.0, 2700.0, 6500.000000 },
++    { 1, 0.0, 2700.0, 6500.000000 },
++    { 0, 600.0, 2700.0, 6500.000000 },
++    { 1, 600.0, 1000.0, 6500.000000 },
++    { 1, 600.0, 25000.0, 6500.000000 },
++    { 1, NAN, 4000.0, 6500.000000 },
++    { 1, 600.0, INFINITY, 6500.000000 },
++    { 1, -1.0, 4000.0, 6500.000000 },
++    { 1, 20000.0, 5800.0, 6130.081301 },
++    { 1, 30.0, 5200.0, 5777.777778 },
++};
++static const AmbientTickRun ambient_tick_runs[] = {
++    { 20, 0, 1, 400.0, 6500.0 },
++    { 120, 0, 1, 300.0, 3000.0 },
++    { 6, 0, 1, 300.0, 9000.0 },
++    { 20, 0, 1, 300.0, 3000.0 },
++    { 60, 0, 1, 300.0, 4800.0 },
++    { 40, 0, 1, 12.0, 3000.0 },
++    { 120, 0, 1, 2.0, 3000.0 },
++    { 60, 0, 1, 300.0, 3000.0 },
++    { 40, 0, 0, 0.0, 0.0 },
++    { 60, 0, 1, 300.0, 3000.0 },
++    { 10, 1, 1, 300.0, 3000.0 },
++};
++static const double ambient_tick_expect_k[] = {
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6409.485502,
++    6243.778145, 6079.928588, 5873.580242, 5610.477169, 5395.433089, 5244.952904,
++    5130.239073, 5068.457282, 5032.510546, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5022.353649, 5065.514654, 5111.301840, 5173.911253, 5262.987946,
++    5344.864580, 5407.838592, 5459.408387, 5488.578768, 5506.028423, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894, 5522.123894,
++    5522.123894, 5509.729670, 5486.261500, 5462.010501, 5429.878077, 5386.096771,
++    5347.730787, 5319.368431, 5296.846000, 5284.376201, 5277.007656, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270,
++    5270.270270, 5270.270270, 5270.270270, 5270.270270, 5270.270270, 5317.627683,
++    5410.281752, 5510.363526, 5650.292060, 5855.754530, 6051.551753, 6206.900766,
++    6337.329477, 6412.428004, 6457.818282, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6409.485502,
++    6243.778145, 6079.928588, 5873.580242, 5610.477169, 5395.433089, 5244.952904,
++    5130.239073, 5068.457282, 5032.510546, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5054.911740,
++    5162.976700, 5280.652480, 5446.853185, 5694.495073, 5934.569455, 6127.951409,
++    6292.337048, 6387.839177, 6445.866733, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6409.485502, 6243.778145, 6079.928588,
++    5873.580242, 5610.477169, 5395.433089, 5244.952904, 5130.239073, 5068.457282,
++    5032.510546, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000, 5000.000000,
++    5306.551305, 5909.176861, 6341.265443, 6500.000000, 6500.000000, 6500.000000,
++    6500.000000, 6500.000000, 6500.000000, 6500.000000,
++};
+diff --git a/plugins/color/gsd-ambient-policy.c b/plugins/color/gsd-ambient-policy.c
+new file mode 100644
+index 0000000..b467f54
+--- /dev/null
++++ b/plugins/color/gsd-ambient-policy.c
+@@ -0,0 +1,206 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "gsd-ambient-policy.h"
++#include <math.h>
++#include <string.h>
++
++/* The low-light branch points (no adaptation through 10 lux, blending in to
++ * full at 15 lux, no high-lux cut-off) and the fade durations (2 s when
++ * switched on or off, 5 s when the ambient target moves) are fixed
++ * parameters of the policy. The amount of adaptation is a default that
++ * can be tuned later, applied as a
++ * fraction of the ambient shift in mired and limited to 5000 to 6500 K. The
++ * test vectors pin the behaviour. */
++const GsdAmbientModel gsd_ambient_model_default = {
++        .neutral_k = 6500,
++        .warmest_k = 5000,
++        .coolest_k = 6500,
++        .strength = 0.5,
++        .lux_low = 10,
++        .lux_full = 15,
++        .min_valid_k = 1500,
++        .max_valid_k = 20000,
++        .window_s = 10,
++        .deadband_mired = 2.5,
++        .toggle_ramp_s = 2.0,
++        .ambient_ramp_s = 5.0,
++};
++
++/* The fade is a monotone cubic through its quartiles (0.25033, 0.66672
++ * and 0.91656 of the change at a quarter, half and three quarters of the
++ * time), with Fritsch-Carlson slopes. */
++static const double ease_y[] = { 0.0, 0.25033, 0.66672, 0.91656, 1.0 };
++static const double ease_m[] = { 1.00132, 1.25072, 1.24919, 0.50040, 0.33376 };
++
++double
++gsd_ambient_ease (double x)
++{
++        double t, h = 0.25;
++        int i;
++
++        if (x <= 0)
++                return 0;
++        if (x >= 1)
++                return 1;
++        i = MIN ((int) (x * 4), 3);
++        t = (x - i * h) / h;
++        return (2 * t * t * t - 3 * t * t + 1) * ease_y[i] +
++               (t * t * t - 2 * t * t + t) * h * ease_m[i] +
++               (-2 * t * t * t + 3 * t * t) * ease_y[i + 1] +
++               (t * t * t - t * t) * h * ease_m[i + 1];
++}
++
++double
++gsd_ambient_target_mired (const GsdAmbientModel *model, gboolean valid,
++                          double lux, double kelvin)
++{
++        double neutral = gsd_ambient_mired (model->neutral_k);
++        double fraction, target;
++
++        if (!valid || !isfinite (lux) || !isfinite (kelvin) || lux < 0 ||
++            kelvin < model->min_valid_k || kelvin > model->max_valid_k)
++                return neutral;
++        if (lux <= model->lux_low)
++                return neutral;
++        fraction = CLAMP ((lux - model->lux_low) / (model->lux_full - model->lux_low), 0.0, 1.0);
++        target = neutral + model->strength * fraction * (gsd_ambient_mired (kelvin) - neutral);
++        return CLAMP (target, gsd_ambient_mired (model->coolest_k),
++                      gsd_ambient_mired (model->warmest_k));
++}
++
++void
++gsd_ambient_policy_init (GsdAmbientPolicy *policy, const GsdAmbientModel *model)
++{
++        memset (policy, 0, sizeof (*policy));
++        policy->model = *model;
++        policy->window = (guint) CLAMP (round (model->window_s / GSD_AMBIENT_TICK_S),
++                                        1, GSD_AMBIENT_MAX_SAMPLES);
++        gsd_ambient_policy_reset (policy);
++}
++
++void
++gsd_ambient_policy_reset (GsdAmbientPolicy *policy)
++{
++        policy->n_samples = 0;
++        policy->next_sample = 0;
++        policy->have_target = FALSE;
++        policy->held_mired = gsd_ambient_mired (policy->model.neutral_k);
++        policy->current_mired = policy->held_mired;
++        policy->ramp_from = policy->held_mired;
++        policy->ramp_to = policy->held_mired;
++        policy->ramp_duration = policy->model.toggle_ramp_s;
++        policy->ramp_elapsed = policy->ramp_duration;
++}
++
++void
++gsd_ambient_policy_set_current (GsdAmbientPolicy *policy, double kelvin)
++{
++        if (isfinite (kelvin) && kelvin > 0)
++                policy->current_mired = gsd_ambient_mired (kelvin);
++}
++
++static int
++compare_double (const void *a, const void *b)
++{
++        double x = *(const double *) a, y = *(const double *) b;
++        return (x > y) - (x < y);
++}
++
++static double
++median (const GsdAmbientPolicy *policy)
++{
++        double sorted[GSD_AMBIENT_MAX_SAMPLES];
++        guint n = policy->n_samples;
++
++        memcpy (sorted, policy->samples, n * sizeof (double));
++        qsort (sorted, n, sizeof (double), compare_double);
++        return n % 2 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
++}
++
++void
++gsd_ambient_policy_sample (GsdAmbientPolicy *policy, gboolean releasing,
++                           gboolean valid, double lux, double kelvin)
++{
++        const GsdAmbientModel *model = &policy->model;
++        double neutral = gsd_ambient_mired (model->neutral_k);
++        /* Switching on or off fades like a manual change; later moves use
++         * the slower ambient fade. */
++        gboolean toggle = releasing || !policy->have_target;
++
++        if (releasing) {
++                policy->n_samples = 0;
++                policy->next_sample = 0;
++                policy->have_target = FALSE;
++                policy->held_mired = neutral;
++        } else {
++                double filtered;
++                gboolean at_bound;
++
++                policy->samples[policy->next_sample] =
++                        gsd_ambient_target_mired (model, valid, lux, kelvin);
++                policy->next_sample = (policy->next_sample + 1) % policy->window;
++                policy->n_samples = MIN (policy->n_samples + 1, policy->window);
++                filtered = median (policy);
++
++                /* The deadband keeps small wobbles off the screen, but the
++                 * neutral point and the warm limit are always reachable. */
++                at_bound = filtered == neutral ||
++                           filtered == gsd_ambient_mired (model->warmest_k);
++                if (!policy->have_target || at_bound ||
++                    fabs (filtered - policy->held_mired) >= model->deadband_mired) {
++                        policy->held_mired = filtered;
++                        policy->have_target = TRUE;
++                }
++        }
++
++        /* A new target starts a fresh ramp from wherever the screen is now. */
++        if (policy->held_mired != policy->ramp_to) {
++                policy->ramp_from = policy->current_mired;
++                policy->ramp_to = policy->held_mired;
++                policy->ramp_elapsed = 0;
++                policy->ramp_duration = toggle ? model->toggle_ramp_s : model->ambient_ramp_s;
++        }
++}
++
++double
++gsd_ambient_policy_advance (GsdAmbientPolicy *policy, double seconds)
++{
++        double ramp_s = policy->ramp_duration;
++
++        /* In mired, where equal steps look about equally large, with the
++         * eased fade shape. */
++        if (policy->ramp_elapsed < ramp_s) {
++                policy->ramp_elapsed += seconds;
++                /* Finish exactly, whatever rounding the steps collected. */
++                if (policy->ramp_elapsed > ramp_s - 1e-9)
++                        policy->ramp_elapsed = ramp_s;
++                policy->current_mired = policy->ramp_from +
++                        (policy->ramp_to - policy->ramp_from) * gsd_ambient_ease (policy->ramp_elapsed / ramp_s);
++        }
++        return gsd_ambient_policy_get_kelvin (policy);
++}
++
++double
++gsd_ambient_policy_tick (GsdAmbientPolicy *policy, gboolean releasing,
++                         gboolean valid, double lux, double kelvin)
++{
++        gsd_ambient_policy_sample (policy, releasing, valid, lux, kelvin);
++        return gsd_ambient_policy_advance (policy, GSD_AMBIENT_TICK_S);
++}
++
++gboolean
++gsd_ambient_policy_is_settled (const GsdAmbientPolicy *policy)
++{
++        return policy->ramp_elapsed >= policy->ramp_duration;
++}
++
++double
++gsd_ambient_policy_get_kelvin (const GsdAmbientPolicy *policy)
++{
++        return 1e6 / policy->current_mired;
++}
++
++gboolean
++gsd_ambient_policy_is_neutral (const GsdAmbientPolicy *policy)
++{
++        return fabs (policy->current_mired - gsd_ambient_mired (policy->model.neutral_k)) < 1e-9;
++}
+diff --git a/plugins/color/gsd-ambient-policy.h b/plugins/color/gsd-ambient-policy.h
+new file mode 100644
+index 0000000..f09f8cf
+--- /dev/null
++++ b/plugins/color/gsd-ambient-policy.h
+@@ -0,0 +1,90 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ *
++ * Ambient white point policy: maps the ambient light's correlated colour
++ * temperature and illuminance to a display white point, expressed as a
++ * colour temperature for the compositor's existing Night Light path.
++ *
++ * This file has no dependency on the rest of the plugin so that the model
++ * can be tested in isolation. KWin carries the same model with the same
++ * constants and test vectors.
++ */
++#pragma once
++#include <glib.h>
++
++typedef struct {
++        double neutral_k;          /* display native white, identity output */
++        double warmest_k;          /* never warmer than this */
++        double coolest_k;          /* never cooler than this */
++        double strength;           /* fraction of the ambient shift followed, in mired */
++        double lux_low;            /* at or below this, no adaptation */
++        double lux_full;           /* at or above this, full strength */
++        double min_valid_k;        /* sensor readings outside are ignored */
++        double max_valid_k;
++        double window_s;           /* median filter window */
++        double deadband_mired;     /* ignore target changes smaller than this */
++        double toggle_ramp_s;      /* fade when switched on or off */
++        double ambient_ramp_s;     /* fade when the ambient target moves */
++} GsdAmbientModel;
++
++extern const GsdAmbientModel gsd_ambient_model_default;
++
++#define GSD_AMBIENT_TICK_S 0.5   /* sensor sampling interval */
++#define GSD_AMBIENT_STEP_S 0.05  /* ramp update interval */
++#define GSD_AMBIENT_MAX_SAMPLES 64
++
++typedef struct {
++        GsdAmbientModel model;
++        double samples[GSD_AMBIENT_MAX_SAMPLES];
++        guint n_samples;
++        guint next_sample;
++        guint window;
++        double held_mired;
++        double current_mired;
++        double ramp_from;
++        double ramp_to;
++        double ramp_elapsed;
++        double ramp_duration;
++        gboolean have_target;
++} GsdAmbientPolicy;
++
++static inline double
++gsd_ambient_mired (double kelvin)
++{
++        return 1e6 / kelvin;
++}
++
++/* Instantaneous target, in mired, for one sensor reading. Invalid input
++ * (no colour temperature, not lux, non-finite) gives the neutral point. */
++double gsd_ambient_target_mired (const GsdAmbientModel *model, gboolean valid,
++                                 double lux, double kelvin);
++
++void gsd_ambient_policy_init (GsdAmbientPolicy *policy, const GsdAmbientModel *model);
++/* Forget all samples and jump to neutral. */
++void gsd_ambient_policy_reset (GsdAmbientPolicy *policy);
++/* Start from an explicit temperature, e.g. the one already on screen. */
++void gsd_ambient_policy_set_current (GsdAmbientPolicy *policy, double kelvin);
++/* Takes one sensor sample (every GSD_AMBIENT_TICK_S) and starts a ramp to
++ * a new target when it moves. When releasing, the target is neutral and the
++ * sensor is ignored. */
++void gsd_ambient_policy_sample (GsdAmbientPolicy *policy, gboolean releasing,
++                                gboolean valid, double lux, double kelvin);
++/* The fade shape, 0 to 1 over normalised time 0 to 1. */
++double gsd_ambient_ease (double x);
++/* Moves along the current ramp by @seconds. Returns kelvin. */
++double gsd_ambient_policy_advance (GsdAmbientPolicy *policy, double seconds);
++/* A sample followed by a whole sampling interval of ramp. Returns kelvin. */
++double gsd_ambient_policy_tick (GsdAmbientPolicy *policy, gboolean releasing,
++                                gboolean valid, double lux, double kelvin);
++/* No ramp in progress. */
++gboolean gsd_ambient_policy_is_settled (const GsdAmbientPolicy *policy);
++double gsd_ambient_policy_get_kelvin (const GsdAmbientPolicy *policy);
++gboolean gsd_ambient_policy_is_neutral (const GsdAmbientPolicy *policy);
++
++/* Night Light composition: Night Light always wins, ambient adaptation can
++ * never make the screen cooler than Night Light asks for. The warmer of the
++ * two is used, which also makes hand-overs continuous. */
++static inline double
++gsd_ambient_compose (double night_k, double ambient_k)
++{
++        return MIN (night_k, ambient_k);
++}
+diff --git a/plugins/color/gsd-ambient-white-point.c b/plugins/color/gsd-ambient-white-point.c
+new file mode 100644
+index 0000000..abee986
+--- /dev/null
++++ b/plugins/color/gsd-ambient-white-point.c
+@@ -0,0 +1,422 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ *
++ * Opt-in ambient white point. The ambient light's colour temperature and
++ * illuminance come from iio-sensor-proxy (the same light claim gsd-power
++ * uses for automatic brightness), the policy picks a display white point,
++ * and the colour manager publishes it through the existing Temperature
++ * property that mutter applies for Night Light.
++ */
++#include "gsd-ambient-white-point.h"
++#include "gsd-ambient-policy.h"
++#include <math.h>
++
++#define SENSOR_PROXY_NAME  "net.hadess.SensorProxy"
++#define SENSOR_PROXY_PATH  "/net/hadess/SensorProxy"
++#define DISPLAY_CONFIG_NAME "org.gnome.Mutter.DisplayConfig"
++#define DISPLAY_CONFIG_PATH "/org/gnome/Mutter/DisplayConfig"
++
++struct _GsdAmbientWhitePoint {
++        GObject parent;
++        GSettings *settings;
++        GsdAmbientPolicy policy;
++
++        guint sensor_watch;
++        GDBusProxy *sensor;
++        GCancellable *sensor_cancellable;
++        gboolean claimed;
++
++        guint display_watch;
++        GDBusProxy *display;
++        GCancellable *display_cancellable;
++        gboolean supported;
++
++        guint timer;
++        guint ramp_timer;
++        guint tick_ms;
++        guint step_ms;
++        gboolean running;
++        gboolean paused;
++};
++G_DEFINE_TYPE (GsdAmbientWhitePoint, gsd_ambient_white_point, G_TYPE_OBJECT)
++
++static guint changed_signal;
++static void update (GsdAmbientWhitePoint *self);
++
++static gboolean
++enabled (GsdAmbientWhitePoint *self)
++{
++        return g_settings_get_boolean (self->settings, "ambient-white-point-enabled");
++}
++
++static gboolean
++get_double (GDBusProxy *proxy, const char *name, double *value)
++{
++        g_autoptr(GVariant) variant = proxy ? g_dbus_proxy_get_cached_property (proxy, name) : NULL;
++
++        if (!variant || !g_variant_is_of_type (variant, G_VARIANT_TYPE_DOUBLE))
++                return FALSE;
++        *value = g_variant_get_double (variant);
++        return isfinite (*value);
++}
++
++static gboolean
++get_boolean (GDBusProxy *proxy, const char *name)
++{
++        g_autoptr(GVariant) variant = proxy ? g_dbus_proxy_get_cached_property (proxy, name) : NULL;
++
++        return variant && g_variant_is_of_type (variant, G_VARIANT_TYPE_BOOLEAN) &&
++               g_variant_get_boolean (variant);
++}
++
++/* A usable reading needs lux (not a vendor scale, which the lux limits
++ * cannot interpret) and a colour temperature. */
++static gboolean
++read_sensor (GsdAmbientWhitePoint *self, double *lux, double *kelvin)
++{
++        g_autoptr(GVariant) unit = NULL;
++
++        if (!self->claimed || !get_boolean (self->sensor, "HasAmbientLight"))
++                return FALSE;
++        unit = g_dbus_proxy_get_cached_property (self->sensor, "LightLevelUnit");
++        if (!unit || !g_variant_is_of_type (unit, G_VARIANT_TYPE_STRING) ||
++            g_strcmp0 (g_variant_get_string (unit, NULL), "lux") != 0)
++                return FALSE;
++        return get_double (self->sensor, "LightLevel", lux) &&
++               get_double (self->sensor, "ColorTemperature", kelvin) && *kelvin > 0;
++}
++
++static gboolean
++wanted (GsdAmbientWhitePoint *self)
++{
++        return self->running && enabled (self) && !self->paused && self->supported &&
++               self->sensor && get_boolean (self->sensor, "HasAmbientLight");
++}
++
++static void
++claim (GsdAmbientWhitePoint *self, gboolean value)
++{
++        if (self->claimed == value || !self->sensor)
++                return;
++        self->claimed = value;
++        g_dbus_proxy_call (self->sensor, value ? "ClaimLight" : "ReleaseLight",
++                           NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL);
++}
++
++static gboolean
++ramp_step (gpointer data)
++{
++        GsdAmbientWhitePoint *self = data;
++        guint before = gsd_ambient_white_point_get_temperature (self);
++
++        gsd_ambient_policy_advance (&self->policy, GSD_AMBIENT_STEP_S);
++        if (gsd_ambient_white_point_get_temperature (self) != before)
++                g_signal_emit (self, changed_signal, 0);
++        if (!gsd_ambient_policy_is_settled (&self->policy))
++                return G_SOURCE_CONTINUE;
++        self->ramp_timer = 0;
++        return G_SOURCE_REMOVE;
++}
++
++/* Samples the sensor; a new target starts a short ramp at a finer step. Once
++ * switched off and back at neutral, it stops and releases the sensor. */
++static gboolean
++tick (gpointer data)
++{
++        GsdAmbientWhitePoint *self = data;
++        gboolean want = wanted (self);
++        double lux = 0, kelvin = 0;
++        gboolean valid = want && read_sensor (self, &lux, &kelvin);
++
++        gsd_ambient_policy_sample (&self->policy, !want, valid, lux, kelvin);
++        if (!gsd_ambient_policy_is_settled (&self->policy) && self->ramp_timer == 0) {
++                self->ramp_timer = g_timeout_add (self->step_ms, ramp_step, self);
++                g_source_set_name_by_id (self->ramp_timer, "[gnome-settings-daemon] ambient white point ramp");
++        }
++        if (!want && gsd_ambient_policy_is_settled (&self->policy) &&
++            gsd_ambient_policy_is_neutral (&self->policy)) {
++                gsd_ambient_policy_reset (&self->policy);
++                claim (self, FALSE);
++                self->timer = 0;
++                g_signal_emit (self, changed_signal, 0);
++                return G_SOURCE_REMOVE;
++        }
++        return G_SOURCE_CONTINUE;
++}
++
++/* Re-evaluate after any input change: claim the sensor and run the policy
++ * while wanted, or let the policy return to neutral and then release. */
++static void
++update (GsdAmbientWhitePoint *self)
++{
++        if (wanted (self))
++                claim (self, TRUE);
++        if (self->timer == 0 && (wanted (self) || !gsd_ambient_policy_is_neutral (&self->policy))) {
++                self->timer = g_timeout_add (self->tick_ms, tick, self);
++                g_source_set_name_by_id (self->timer, "[gnome-settings-daemon] ambient white point");
++        }
++        if (!wanted (self))
++                claim (self, FALSE);
++        g_signal_emit (self, changed_signal, 0);
++}
++
++static void
++sensor_properties_changed (GDBusProxy *proxy, GVariant *changed, GStrv invalidated, gpointer data)
++{
++        GsdAmbientWhitePoint *self = data;
++        g_autoptr(GVariant) has = g_variant_lookup_value (changed, "HasAmbientLight", NULL);
++
++        /* Readings are sampled by the timer; only availability matters here. */
++        if (has)
++                update (self);
++        else
++                g_signal_emit (self, changed_signal, 0);
++}
++
++static void
++sensor_proxy_ready (GObject *source, GAsyncResult *result, gpointer data)
++{
++        g_autoptr(GError) error = NULL;
++        GDBusProxy *proxy = g_dbus_proxy_new_for_bus_finish (result, &error);
++        GsdAmbientWhitePoint *self;
++
++        if (!proxy) {
++                if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
++                        g_warning ("Failed to connect to iio-sensor-proxy: %s", error->message);
++                return;
++        }
++        self = data;
++        self->sensor = proxy;
++        self->claimed = FALSE;
++        g_signal_connect (proxy, "g-properties-changed", G_CALLBACK (sensor_properties_changed), self);
++        update (self);
++}
++
++static void
++sensor_appeared (GDBusConnection *connection, const char *name, const char *owner, gpointer data)
++{
++        GsdAmbientWhitePoint *self = data;
++
++        g_cancellable_cancel (self->sensor_cancellable);
++        g_clear_object (&self->sensor_cancellable);
++        self->sensor_cancellable = g_cancellable_new ();
++        g_dbus_proxy_new (connection, G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START, NULL,
++                          SENSOR_PROXY_NAME, SENSOR_PROXY_PATH, SENSOR_PROXY_NAME,
++                          self->sensor_cancellable, sensor_proxy_ready, self);
++}
++
++static void
++sensor_vanished (GDBusConnection *connection, const char *name, gpointer data)
++{
++        GsdAmbientWhitePoint *self = data;
++
++        if (self->sensor)
++                g_signal_handlers_disconnect_by_data (self->sensor, self);
++        g_clear_object (&self->sensor);
++        /* The daemon dropped our claim along with its connection. */
++        self->claimed = FALSE;
++        update (self);
++}
++
++static void
++display_properties_changed (GDBusProxy *proxy, GVariant *changed, GStrv invalidated, gpointer data)
++{
++        GsdAmbientWhitePoint *self = data;
++        g_autoptr(GVariant) value = g_variant_lookup_value (changed, "NightLightSupported", NULL);
++
++        if (value || g_strv_contains ((const char * const *) invalidated, "NightLightSupported")) {
++                self->supported = get_boolean (proxy, "NightLightSupported");
++                update (self);
++        }
++}
++
++static void
++display_proxy_ready (GObject *source, GAsyncResult *result, gpointer data)
++{
++        g_autoptr(GError) error = NULL;
++        GDBusProxy *proxy = g_dbus_proxy_new_for_bus_finish (result, &error);
++        GsdAmbientWhitePoint *self;
++
++        if (!proxy) {
++                if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
++                        g_warning ("Failed to connect to the compositor: %s", error->message);
++                return;
++        }
++        self = data;
++        self->display = proxy;
++        self->supported = get_boolean (proxy, "NightLightSupported");
++        g_signal_connect (proxy, "g-properties-changed", G_CALLBACK (display_properties_changed), self);
++        update (self);
++}
++
++static void
++display_appeared (GDBusConnection *connection, const char *name, const char *owner, gpointer data)
++{
++        GsdAmbientWhitePoint *self = data;
++
++        g_cancellable_cancel (self->display_cancellable);
++        g_clear_object (&self->display_cancellable);
++        self->display_cancellable = g_cancellable_new ();
++        g_dbus_proxy_new (connection, G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START, NULL,
++                          DISPLAY_CONFIG_NAME, DISPLAY_CONFIG_PATH, DISPLAY_CONFIG_NAME,
++                          self->display_cancellable, display_proxy_ready, self);
++}
++
++static void
++display_vanished (GDBusConnection *connection, const char *name, gpointer data)
++{
++        GsdAmbientWhitePoint *self = data;
++
++        if (self->display)
++                g_signal_handlers_disconnect_by_data (self->display, self);
++        g_clear_object (&self->display);
++        self->supported = FALSE;
++        /* Nothing is applying the temperature any more; start over from
++         * neutral when the compositor returns. */
++        gsd_ambient_policy_reset (&self->policy);
++        update (self);
++}
++
++static void
++setting_changed (GSettings *settings, const char *key, gpointer data)
++{
++        GsdAmbientWhitePoint *self = data;
++
++        self->paused = FALSE;
++        update (self);
++}
++
++void
++gsd_ambient_white_point_start (GsdAmbientWhitePoint *self)
++{
++        if (self->running)
++                return;
++        self->running = TRUE;
++        self->sensor_watch = g_bus_watch_name (G_BUS_TYPE_SYSTEM, SENSOR_PROXY_NAME,
++                                               G_BUS_NAME_WATCHER_FLAGS_NONE,
++                                               sensor_appeared, sensor_vanished, self, NULL);
++        self->display_watch = g_bus_watch_name (G_BUS_TYPE_SESSION, DISPLAY_CONFIG_NAME,
++                                                G_BUS_NAME_WATCHER_FLAGS_NONE,
++                                                display_appeared, display_vanished, self, NULL);
++}
++
++void
++gsd_ambient_white_point_stop (GsdAmbientWhitePoint *self)
++{
++        if (!self->running)
++                return;
++        self->running = FALSE;
++        g_clear_handle_id (&self->sensor_watch, g_bus_unwatch_name);
++        g_clear_handle_id (&self->display_watch, g_bus_unwatch_name);
++        g_clear_handle_id (&self->timer, g_source_remove);
++        g_clear_handle_id (&self->ramp_timer, g_source_remove);
++        claim (self, FALSE);
++        g_cancellable_cancel (self->sensor_cancellable);
++        g_clear_object (&self->sensor_cancellable);
++        g_cancellable_cancel (self->display_cancellable);
++        g_clear_object (&self->display_cancellable);
++        if (self->sensor)
++                g_signal_handlers_disconnect_by_data (self->sensor, self);
++        g_clear_object (&self->sensor);
++        if (self->display)
++                g_signal_handlers_disconnect_by_data (self->display, self);
++        g_clear_object (&self->display);
++        self->supported = FALSE;
++        gsd_ambient_policy_reset (&self->policy);
++        g_signal_emit (self, changed_signal, 0);
++}
++
++void
++gsd_ambient_white_point_pause (GsdAmbientWhitePoint *self)
++{
++        if (self->paused)
++                return;
++        self->paused = TRUE;
++        g_clear_handle_id (&self->timer, g_source_remove);
++        g_clear_handle_id (&self->ramp_timer, g_source_remove);
++        gsd_ambient_policy_reset (&self->policy);
++        claim (self, FALSE);
++        g_signal_emit (self, changed_signal, 0);
++}
++
++gboolean
++gsd_ambient_white_point_get_paused (GsdAmbientWhitePoint *self)
++{
++        return self->paused;
++}
++
++gboolean
++gsd_ambient_white_point_get_available (GsdAmbientWhitePoint *self)
++{
++        double kelvin;
++
++        /* The colour temperature is only known while the light is claimed,
++         * so availability is reported once a reading has arrived. */
++        return self->running && self->supported && get_boolean (self->sensor, "HasAmbientLight") &&
++               get_double (self->sensor, "ColorTemperature", &kelvin) && kelvin > 0;
++}
++
++gboolean
++gsd_ambient_white_point_get_active (GsdAmbientWhitePoint *self)
++{
++        return !self->paused && !gsd_ambient_policy_is_neutral (&self->policy);
++}
++
++guint
++gsd_ambient_white_point_get_temperature (GsdAmbientWhitePoint *self)
++{
++        if (self->paused)
++                return 6500;
++        return (guint) round (gsd_ambient_policy_get_kelvin (&self->policy));
++}
++
++guint
++gsd_ambient_white_point_get_ambient_temperature (GsdAmbientWhitePoint *self)
++{
++        double kelvin;
++
++        if (!self->claimed || !get_double (self->sensor, "ColorTemperature", &kelvin) || kelvin <= 0)
++                return 0;
++        return (guint) round (kelvin);
++}
++
++static void
++gsd_ambient_white_point_dispose (GObject *object)
++{
++        GsdAmbientWhitePoint *self = GSD_AMBIENT_WHITE_POINT (object);
++
++        gsd_ambient_white_point_stop (self);
++        g_clear_object (&self->settings);
++        G_OBJECT_CLASS (gsd_ambient_white_point_parent_class)->dispose (object);
++}
++
++static void
++gsd_ambient_white_point_class_init (GsdAmbientWhitePointClass *klass)
++{
++        G_OBJECT_CLASS (klass)->dispose = gsd_ambient_white_point_dispose;
++        changed_signal = g_signal_new ("changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
++                                       0, NULL, NULL, NULL, G_TYPE_NONE, 0);
++}
++
++static void
++gsd_ambient_white_point_init (GsdAmbientWhitePoint *self)
++{
++        gsd_ambient_policy_init (&self->policy, &gsd_ambient_model_default);
++        self->tick_ms = (guint) (GSD_AMBIENT_TICK_S * 1000);
++        self->step_ms = (guint) (GSD_AMBIENT_STEP_S * 1000);
++        self->settings = g_settings_new ("org.gnome.settings-daemon.plugins.color");
++        g_signal_connect (self->settings, "changed::ambient-white-point-enabled",
++                          G_CALLBACK (setting_changed), self);
++}
++
++void
++gsd_ambient_white_point_set_tick_interval (GsdAmbientWhitePoint *self, guint ms)
++{
++        self->tick_ms = ms;
++        self->step_ms = MAX (1, ms / 10);
++}
++
++GsdAmbientWhitePoint *
++gsd_ambient_white_point_new (void)
++{
++        return g_object_new (GSD_TYPE_AMBIENT_WHITE_POINT, NULL);
++}
+diff --git a/plugins/color/gsd-ambient-white-point.h b/plugins/color/gsd-ambient-white-point.h
+new file mode 100644
+index 0000000..9e97260
+--- /dev/null
++++ b/plugins/color/gsd-ambient-white-point.h
+@@ -0,0 +1,24 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include <gio/gio.h>
++
++#define GSD_TYPE_AMBIENT_WHITE_POINT (gsd_ambient_white_point_get_type ())
++G_DECLARE_FINAL_TYPE (GsdAmbientWhitePoint, gsd_ambient_white_point, GSD, AMBIENT_WHITE_POINT, GObject)
++
++GsdAmbientWhitePoint *gsd_ambient_white_point_new (void);
++/* Tests only: run the policy ticks faster than real time. */
++void gsd_ambient_white_point_set_tick_interval (GsdAmbientWhitePoint *self, guint ms);
++void gsd_ambient_white_point_start (GsdAmbientWhitePoint *self);
++void gsd_ambient_white_point_stop (GsdAmbientWhitePoint *self);
++/* A temperature set directly over D-Bus takes precedence until the setting
++ * is toggled. Neither persistent setting is rewritten. */
++void gsd_ambient_white_point_pause (GsdAmbientWhitePoint *self);
++gboolean gsd_ambient_white_point_get_paused (GsdAmbientWhitePoint *self);
++/* An ambient colour sensor and compositor support are both present. */
++gboolean gsd_ambient_white_point_get_available (GsdAmbientWhitePoint *self);
++/* Enabled and currently away from neutral, or moving. */
++gboolean gsd_ambient_white_point_get_active (GsdAmbientWhitePoint *self);
++/* The adapted white point in kelvin, 6500 when neutral. */
++guint gsd_ambient_white_point_get_temperature (GsdAmbientWhitePoint *self);
++/* The latest ambient reading, 0 when unknown. */
++guint gsd_ambient_white_point_get_ambient_temperature (GsdAmbientWhitePoint *self);
+diff --git a/plugins/color/gsd-color-manager.c b/plugins/color/gsd-color-manager.c
+index aae10e4..8c022de 100644
+--- a/plugins/color/gsd-color-manager.c
++++ b/plugins/color/gsd-color-manager.c
+@@ -28,6 +28,8 @@
+ #include "gsd-color-manager.h"
+ #include "gsd-color-state.h"
+ #include "gsd-night-light.h"
++#include "gsd-ambient-policy.h"
++#include "gsd-ambient-white-point.h"
+ 
+ #define GSD_DBUS_NAME "org.gnome.SettingsDaemon"
+ #define GSD_DBUS_PATH "/org/gnome/SettingsDaemon"
+@@ -43,6 +45,10 @@ static const gchar introspection_xml[] =
+ "    <method name='NightLightPreview'>"
+ "      <arg type='u' name='duration' direction='in'/>"
+ "    </method>"
++"    <property name='AmbientWhitePointAvailable' type='b' access='read'/>"
++"    <property name='AmbientWhitePointActive' type='b' access='read'/>"
++"    <property name='AmbientColorTemperature' type='u' access='read'/>"
++"    <property name='AmbientWhitePointTemperature' type='u' access='read'/>"
+ "    <property name='NightLightActive' type='b' access='read'/>"
+ "    <property name='Temperature' type='u' access='readwrite'/>"
+ "    <property name='DisabledUntilTomorrow' type='b' access='readwrite'/>"
+@@ -61,6 +67,13 @@ struct _GsdColorManager
+         GsdColorCalibrate *calibrate;
+         GsdColorState     *state;
+         GsdNightLight   *nlight;
++        GsdAmbientWhitePoint *ambient;
++
++        /* Last values published for the ambient white point */
++        gboolean         ambient_available;
++        gboolean         ambient_active;
++        guint            ambient_color_temperature;
++        guint            ambient_temperature;
+ 
+         guint            nlight_forced_timeout_id;
+ };
+@@ -98,6 +111,8 @@ gsd_color_manager_startup (GApplication *app)
+         if (!gsd_night_light_start (manager->nlight, &error))
+                 g_warning ("Could not start night light module: %s", error->message);
+ 
++        gsd_ambient_white_point_start (manager->ambient);
++
+         G_APPLICATION_CLASS (gsd_color_manager_parent_class)->startup (app);
+ 
+         gnome_settings_profile_end (NULL);
+@@ -109,6 +124,7 @@ gsd_color_manager_shutdown (GApplication *app)
+         GsdColorManager *manager = GSD_COLOR_MANAGER (app);
+ 
+         g_debug ("Stopping color manager");
++        gsd_ambient_white_point_stop (manager->ambient);
+         gsd_color_state_stop (manager->state);
+ 
+         g_clear_pointer (&manager->introspection_data, g_dbus_node_info_unref);
+@@ -166,12 +182,80 @@ emit_property_changed (GsdColorManager *manager,
+         g_variant_builder_clear (&invalidated_builder);
+ }
+ 
++/* Publish one effective temperature, which mutter applies to every output
++ * through its Night Light path. Night Light always wins: the screen gets the
++ * warmer of the Night Light and ambient temperatures, so the ambient white
++ * point never makes it cooler than Night Light asks for, and Night Light's
++ * fades, including a preview's, start from what is on screen. A temperature
++ * set directly over D-Bus pauses the ambient white point until it is
++ * toggled. */
++static void
++update_temperature (GsdColorManager *manager, gboolean night_changed)
++{
++        GsdAmbientWhitePoint *ambient = manager->ambient;
++        gdouble night = gsd_night_light_get_temperature (manager->nlight);
++        gdouble ambient_k = gsd_ambient_white_point_get_temperature (ambient);
++        gboolean available = gsd_ambient_white_point_get_available (ambient);
++        guint color_temperature = gsd_ambient_white_point_get_ambient_temperature (ambient);
++        gboolean active;
++        guint temperature;
++
++        if (gsd_ambient_white_point_get_paused (ambient)) {
++                /* Keep the directly set temperature until Night Light
++                 * itself changes, as without the ambient white point. */
++                active = FALSE;
++                temperature = night_changed ? (guint) round (night)
++                                            : gsd_color_state_get_temperature (manager->state);
++        } else {
++                active = gsd_ambient_white_point_get_active (ambient) && ambient_k < night;
++                temperature = (guint) round (gsd_ambient_compose (night, ambient_k));
++        }
++
++        if (manager->ambient_available != available) {
++                manager->ambient_available = available;
++                emit_property_changed (manager, "AmbientWhitePointAvailable",
++                                       g_variant_new_boolean (available));
++        }
++        if (manager->ambient_active != active) {
++                manager->ambient_active = active;
++                emit_property_changed (manager, "AmbientWhitePointActive",
++                                       g_variant_new_boolean (active));
++        }
++        if (manager->ambient_color_temperature != color_temperature) {
++                manager->ambient_color_temperature = color_temperature;
++                emit_property_changed (manager, "AmbientColorTemperature",
++                                       g_variant_new_uint32 (color_temperature));
++        }
++        if (manager->ambient_temperature != (guint) ambient_k) {
++                manager->ambient_temperature = (guint) ambient_k;
++                emit_property_changed (manager, "AmbientWhitePointTemperature",
++                                       g_variant_new_uint32 ((guint) ambient_k));
++        }
++        if (gsd_color_state_get_temperature (manager->state) != temperature) {
++                gsd_color_state_set_temperature (manager->state, temperature);
++                emit_property_changed (manager, "Temperature", g_variant_new_uint32 (temperature));
++        }
++}
++
++static void
++on_ambient_changed (GsdAmbientWhitePoint *ambient, gpointer user_data)
++{
++        update_temperature (GSD_COLOR_MANAGER (user_data), FALSE);
++}
++
++static void
++on_forced_notify (GsdNightLight *nlight, GParamSpec *pspec, gpointer user_data)
++{
++        update_temperature (GSD_COLOR_MANAGER (user_data), TRUE);
++}
++
+ static void
+ on_active_notify (GsdNightLight *nlight,
+                   GParamSpec      *pspec,
+                   gpointer         user_data)
+ {
+         GsdColorManager *manager = GSD_COLOR_MANAGER (user_data);
++        update_temperature (manager, TRUE);
+         emit_property_changed (manager, "NightLightActive",
+                                g_variant_new_boolean (gsd_night_light_get_active (manager->nlight)));
+ }
+@@ -211,11 +295,7 @@ on_temperature_notify (GsdNightLight *nlight,
+                        GParamSpec      *pspec,
+                        gpointer         user_data)
+ {
+-        GsdColorManager *manager = GSD_COLOR_MANAGER (user_data);
+-        gdouble temperature = gsd_night_light_get_temperature (manager->nlight);
+-        gsd_color_state_set_temperature (manager->state, temperature);
+-        emit_property_changed (manager, "Temperature",
+-                               g_variant_new_uint32 (roundf (temperature)));
++        update_temperature (GSD_COLOR_MANAGER (user_data), TRUE);
+ }
+ 
+ static void
+@@ -225,8 +305,16 @@ gsd_color_manager_init (GsdColorManager *manager)
+         manager->calibrate = gsd_color_calibrate_new (manager);
+         manager->state = gsd_color_state_new ();
+ 
++        /* ambient white point, off unless enabled */
++        manager->ambient = gsd_ambient_white_point_new ();
++        manager->ambient_temperature = GSD_COLOR_TEMPERATURE_DEFAULT;
++        g_signal_connect (manager->ambient, "changed",
++                          G_CALLBACK (on_ambient_changed), manager);
++
+         /* night light features */
+         manager->nlight = gsd_night_light_new ();
++        g_signal_connect (manager->nlight, "notify::forced",
++                          G_CALLBACK (on_forced_notify), manager);
+         g_signal_connect (manager->nlight, "notify::active",
+                           G_CALLBACK (on_active_notify), manager);
+         g_signal_connect (manager->nlight, "notify::sunset",
+@@ -249,6 +337,8 @@ gsd_color_manager_finalize (GObject *object)
+ 
+         manager = GSD_COLOR_MANAGER (object);
+ 
++        g_signal_handlers_disconnect_by_data (manager->ambient, manager);
++        g_clear_object (&manager->ambient);
+         g_clear_object (&manager->calibrate);
+         g_clear_object (&manager->state);
+         g_clear_object (&manager->nlight);
+@@ -328,6 +418,18 @@ handle_get_property (GDBusConnection *connection,
+                 return NULL;
+         }
+ 
++        if (g_strcmp0 (property_name, "AmbientWhitePointAvailable") == 0)
++                return g_variant_new_boolean (manager->ambient_available);
++
++        if (g_strcmp0 (property_name, "AmbientWhitePointActive") == 0)
++                return g_variant_new_boolean (manager->ambient_active);
++
++        if (g_strcmp0 (property_name, "AmbientColorTemperature") == 0)
++                return g_variant_new_uint32 (manager->ambient_color_temperature);
++
++        if (g_strcmp0 (property_name, "AmbientWhitePointTemperature") == 0)
++                return g_variant_new_uint32 (manager->ambient_temperature);
++
+         if (g_strcmp0 (property_name, "NightLightActive") == 0)
+                 return g_variant_new_boolean (gsd_night_light_get_active (manager->nlight));
+ 
+@@ -387,7 +489,9 @@ handle_set_property (GDBusConnection *connection,
+                                      temperature, GSD_COLOR_TEMPERATURE_MAX);
+                         return FALSE;
+                 }
++                gsd_ambient_white_point_pause (manager->ambient);
+                 gsd_color_state_set_temperature (manager->state, temperature);
++                emit_property_changed (manager, "Temperature", g_variant_new_uint32 (temperature));
+                 return TRUE;
+         }
+ 
+diff --git a/plugins/color/meson.build b/plugins/color/meson.build
+index 1c5be07..4eae33d 100644
+--- a/plugins/color/meson.build
++++ b/plugins/color/meson.build
+@@ -2,6 +2,8 @@ sources = files(
+   'gnome-datetime-source.c',
+   'gsd-color-calibrate.c',
+   'gsd-color-manager.c',
++  'gsd-ambient-policy.c',
++  'gsd-ambient-white-point.c',
+   'gsd-color-state.c',
+   'gsd-night-light.c',
+   'gsd-night-light-common.c',
+@@ -48,4 +50,18 @@ exe = executable(
+ )
+ 
+ envs = ['GSETTINGS_SCHEMA_DIR=@0@'.format(join_paths(meson.project_build_root(), 'data'))]
+-test(test_unit, exe, env: envs)
++test(test_unit, exe, env: envs, depends: compiled_schemas)
++
++ambient_policy_test = executable(
++  'ambient-policy-test',
++  ['ambient-policy-test.c', 'gsd-ambient-policy.c'],
++  dependencies: [glib_dep, m_dep],
++)
++test('ambient-policy', ambient_policy_test)
++
++ambient_service_test = executable(
++  'ambient-service-test',
++  ['ambient-service-test.c', 'gsd-ambient-policy.c', 'gsd-ambient-white-point.c'],
++  dependencies: [glib_dep, gio_dep, m_dep],
++)
++test('ambient-service', ambient_service_test, env: envs, depends: compiled_schemas, timeout: 120)
+diff --git a/subprojects/.wraplock b/subprojects/.wraplock
+new file mode 100644
+index 0000000..e69de29

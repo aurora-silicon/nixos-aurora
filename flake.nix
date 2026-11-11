@@ -43,7 +43,8 @@
         inherit (pkgs)
           plymouth docker libfprint fprintd omarchy-ane-tools mil-hwx-compiler upower
           fex steam mesa speakerguardd mutter speakersafetyd aurora-bless
-          plymouth-theme-aurora omdrop-awdl speakerguardd-v2;
+          plymouth-theme-aurora omdrop-awdl speakerguardd-v2 iio-sensor-proxy
+          gnome-settings-daemon;
         logos = pkgs.aurora-logos;
         firstboot = pkgs.aurora-firstboot;
         power-budget = pkgs.aurora-power-budget;
@@ -75,6 +76,7 @@
         ucm = pkgs.alsa-ucm-conf-asahi;
         fex-mesa = pkgs.aurora-fex-mesa;
         flatpak-gl = pkgs.aurora-flatpak-gl;
+        kwin = pkgs.kdePackages.kwin;
         bankstown = pkgs.bankstown-lv2;
         neo-platform = pkgs.aurora-neo-platform-config;
         camera-denoise = pkgs.aurora-camera-denoise;

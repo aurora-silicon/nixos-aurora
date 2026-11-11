@@ -59,6 +59,9 @@ NEEDS = {
     'speakerguardd-v2': ['speakerguardd-v2'],
     'speaker-upgrade': ['aurora-speaker-upgrade', 'speakerguardd-v2'],
     'mutter': [],
+    'iio-sensor-proxy': [],  # nixpkgs' pinned release, with the local patch
+    'gnome-settings-daemon': [],  # nixpkgs' pinned release, with the local patch
+    'kwin': [],  # nixpkgs' pinned release, with the local patch
     'docker': [],  # nixpkgs' pinned release, with the local engine patch
     'speakersafetyd': [],
     'bankstown': ['bankstown'],
