@@ -155,12 +155,12 @@
   },
   "camera-denoise": {
     "repository": "https://github.com/aurora-silicon/camera-denoise",
-    "commit": "74bb45ab9946634668bac3e2a8c655a5e81fd7b9",
+    "commit": "aa7a42ff3f26ac47c07b4cdb4ab1bfc5337291af",
     "version": "0.1.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/camera-denoise/tar.gz/74bb45ab9946634668bac3e2a8c655a5e81fd7b9",
-    "archive_root": "camera-denoise-74bb45ab9946634668bac3e2a8c655a5e81fd7b9",
-    "sha256": "a4f7a171ffdddaa109fcd7c171f29240e9da052428d2b72e169dab60493fe85d",
-    "nix_hash": "sha256-pPehcf/d2qEJ/NfBcfKSQOnaBSQo0rcuFp2rYEk/6F0="
+    "source_url": "https://codeload.github.com/aurora-silicon/camera-denoise/tar.gz/aa7a42ff3f26ac47c07b4cdb4ab1bfc5337291af",
+    "archive_root": "camera-denoise-aa7a42ff3f26ac47c07b4cdb4ab1bfc5337291af",
+    "sha256": "055616e027955455a6b21ef437aa46b061cd9176ab6f4241fa466e7b0d0bb15e",
+    "nix_hash": "sha256-BVYW4CeVVFWmsh70N6pGsGHNkXarb0JB+kZuew0LsV4="
   },
   "kbd-light": {
     "repository": "https://github.com/aurora-silicon/kbd-light",
