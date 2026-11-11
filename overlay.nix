@@ -861,4 +861,27 @@ in {
     cargoBuildFlags = [ "-p" "asahi-bless" ];
     cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "asahi-nvram" ];
   };
+  # The built-in panel's brightness shared with the boot loader through NVRAM
+  # backlight-nits (modules/panel-nits.nix), from the aurora-bless workspace.
+  aurora-panel-nits = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
+    pname = "aurora-panel-nits";
+    cargoBuildFlags = [ "-p" "aurora-panel-nits" ];
+    cargoTestFlags = [ "-p" "aurora-panel-nits" ];
+    postInstall = ''
+      dropin="$out/lib/systemd/system/systemd-backlight@backlight:apple-panel-bl.service.d"
+      install -Dm644 aurora-panel-nits/systemd/aurora-panel-nits.service $out/lib/systemd/system/aurora-panel-nits.service
+      install -Dm644 aurora-panel-nits/systemd/50-aurora-panel-nits.conf "$dropin/50-aurora-panel-nits.conf"
+      install -Dm644 aurora-panel-nits/systemd/90-aurora-panel-nits.rules $out/lib/udev/rules.d/90-aurora-panel-nits.rules
+      substituteInPlace $out/lib/systemd/system/aurora-panel-nits.service "$dropin/50-aurora-panel-nits.conf" \
+        --replace-fail /usr/bin/aurora-panel-nits $out/bin/aurora-panel-nits
+    '';
+    passthru.commit = pins.aurora-bless.commit;
+    meta = {
+      description = "Built-in panel brightness shared with the boot loader through NVRAM";
+      homepage = "https://github.com/aurora-silicon/aurora-bless";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-panel-nits";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
 }

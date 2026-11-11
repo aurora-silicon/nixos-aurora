@@ -114,6 +114,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aurora-panel-nits"
+version = "0.1.0"
+dependencies = [
+ "apple-nvram",
+ "nix",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
