@@ -909,7 +909,54 @@ in {
   aurora-stage2 = final.callPackage ./stage2/package.nix { };
   aurora-bless = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
     cargoBuildFlags = [ "-p" "asahi-bless" ];
-    cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "asahi-nvram" ];
+    cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "aurora-nvram" ];
+  };
+  # NVRAM reader/writer from the aurora-bless workspace; parses the NVRAM v3
+  # stores of current Macs. asahi-nvram stays as a name for old scripts.
+  aurora-nvram = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
+    pname = "aurora-nvram";
+    cargoBuildFlags = [ "-p" "aurora-nvram" ];
+    cargoTestFlags = [ "-p" "aurora-nvram" ];
+    postInstall = ''
+      ln -s aurora-nvram $out/bin/asahi-nvram
+      install -Dm644 aurora-nvram/README.md NEO.md -t $out/share/doc/aurora-nvram
+      install -Dm644 LICENSE $out/share/licenses/aurora-nvram/LICENSE
+    '';
+    passthru.commit = pins.aurora-bless.commit;
+    meta = {
+      description = "Read and write NVRAM variables on Apple Silicon Macs";
+      homepage = "https://github.com/aurora-silicon/aurora-bless";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-nvram";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
+  # Bluetooth pairings made in macOS, copied into BlueZ's storage
+  # (modules/btsync.nix), from the aurora-bless workspace.
+  aurora-btsync = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
+    pname = "aurora-btsync";
+    nativeBuildInputs = [ final.pkg-config ];
+    buildInputs = [ final.dbus ];
+    cargoBuildFlags = [ "-p" "aurora-btsync" ];
+    cargoTestFlags = [ "-p" "aurora-btsync" ];
+    postInstall = ''
+      ln -s aurora-btsync $out/bin/asahi-btsync
+      unit=$out/lib/systemd/system/aurora-btsync.service
+      install -Dm644 aurora-btsync/etc/systemd/system/aurora-btsync.service $unit
+      substituteInPlace $unit --replace-fail /usr/bin/aurora-btsync $out/bin/aurora-btsync
+      ln -s aurora-btsync.service $out/lib/systemd/system/asahi-btsync.service
+      install -Dm644 aurora-btsync/etc/udev/rules.d/96-aurora-btsync.rules $out/lib/udev/rules.d/96-aurora-btsync.rules
+      install -Dm644 aurora-btsync/README.md -t $out/share/doc/aurora-btsync
+      install -Dm644 LICENSE $out/share/licenses/aurora-btsync/LICENSE
+    '';
+    passthru.commit = pins.aurora-bless.commit;
+    meta = {
+      description = "Use the Bluetooth pairings made in macOS on Linux";
+      homepage = "https://github.com/aurora-silicon/aurora-bless";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-btsync";
+      platforms = [ "aarch64-linux" ];
+    };
   };
   # The built-in panel's brightness shared with the boot loader through NVRAM
   # backlight-nits (modules/panel-nits.nix), from the aurora-bless workspace.

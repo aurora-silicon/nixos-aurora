@@ -68,6 +68,11 @@ let
         "the built-in panel shares its brightness with the boot loader through NVRAM" = config.aurora.panelNits.enable
           && lib.elem value.pkgs.aurora-panel-nits config.systemd.packages
           && lib.elem value.pkgs.aurora-panel-nits config.services.udev.packages;
+        "the Bluetooth pairings made in macOS reach BlueZ, as with aurora-btsync on Fedora and ALARM" = config.aurora.btsync.enable
+          && lib.elem value.pkgs.aurora-btsync config.systemd.packages
+          && lib.elem value.pkgs.aurora-btsync config.services.udev.packages;
+        "aurora-nvram (and its asahi-nvram name) is on the PATH, as on Fedora and ALARM" =
+          lib.elem value.pkgs.aurora-nvram config.environment.systemPackages;
         "aurora-sep status is on the PATH, as on Fedora and ALARM" =
           lib.elem value.pkgs.aurora-sep config.environment.systemPackages;
         "the sep-key group gets /dev/sep-key for Secure Enclave SSH keys" = config.users.groups ? sep-key

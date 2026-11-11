@@ -109,6 +109,29 @@ The omdrop-awdl package to use.
 
 **Declared in:** [awdl.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/awdl.nix)
 
+## `aurora.btsync.enable`
+
+Use the Bluetooth pairings made in macOS: when the NVRAM device appears,
+aurora-btsync copies them into BlueZ's storage before bluetoothd starts
+and refreshes the keys of devices macOS paired again. Pairings made only
+on Linux are left alone. False leaves BlueZ's storage to bluetoothd.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [btsync.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/btsync.nix)
+
+## `aurora.btsync.package`
+
+The aurora-btsync package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-btsync`
+
+**Declared in:** [btsync.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/btsync.nix)
+
 ## `aurora.cameraDenoise.enable`
 
 Start the denoise filter with each user's PipeWire service and enable
