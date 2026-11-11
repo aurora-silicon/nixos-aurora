@@ -58,10 +58,8 @@ let
           && lib.elem value.pkgs.aurora-camera-denoise config.systemd.packages
           && lib.elem "pipewire.service" config.systemd.user.services.aurora-camera-denoise.wantedBy;
         "the camera denoise unit skips root and system users, as on Fedora and ALARM" =
-          lib.any (p: lib.hasSuffix "camera-denoise-user-unit-guard.patch" (toString p))
-            value.pkgs.aurora-camera-denoise.patches
-          && lib.hasInfix "+ConditionUser=!root\n+ConditionUser=!@system\n"
-            (builtins.readFile ../patches/camera-denoise-user-unit-guard.patch);
+          value.pkgs.aurora-camera-denoise.doCheck
+          && value.pkgs.aurora-camera-denoise.passthru.commit != "456c567527d6bbba27d0aaeec1199032e0ec88c3";
         "the keyboard backlight follows the light sensor from boot" = config.aurora.kbdLight.enable
           && lib.elem value.pkgs.aurora-kbd-light config.systemd.packages
           && lib.elem "multi-user.target" config.systemd.services.aurora-kbd-light.wantedBy;
