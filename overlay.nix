@@ -666,8 +666,8 @@ in {
   };
   # The camera denoise filter, a PipeWire user daemon. Backends load from the
   # package's own lib/aurora-camera-denoise: cdn-backend-ave.so (the video
-  # encoder's temporal filter, the default where the kernel has it) is built
-  # here, and a Neural Engine backend has to be built into this derivation too. Settings come from /etc, which
+  # encoder's temporal filter, the default where the kernel has it) and
+  # cdn-backend-ane.so (the Neural Engine low-light stage) are built here. Settings come from /etc, which
   # modules/camera-denoise.nix writes.
   aurora-camera-denoise = final.callPackage ./pkgs/camera-denoise.nix {
     src = source "camera-denoise";
