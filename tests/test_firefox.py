@@ -30,6 +30,9 @@ class FirefoxTests(unittest.TestCase):
                           'MEDIA_REQUEST_IOC_QUEUE', 'MEDIA_REQUEST_IOC_REINIT'])
         self.assertIn('aM2mDevices.Contains(', patch)
 
+    def test_rdd_allows_sysinfo_for_mesa(self):
+        self.assertIn('+      case __NR_sysinfo:\n+        return Allow();\n', PATCH.read_text())
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -28,9 +28,11 @@ denial are failures, not hardware passes.
 ## Firefox
 
 Firefox's RDD sandbox does not admit the media controller node and the four
-media/request ioctls that libva-v4l2-request needs, so stock Firefox decodes in
-software. The overlay adds `patches/firefox-rdd-v4l2-request.patch` (Mozilla
-bug 2080696, the same patch as fedora-aurora and alarm-aurora) to
+media/request ioctls that libva-v4l2-request needs, and it rejects `sysinfo`,
+without which Mesa's zink driver cannot create the GBM device behind VA-API
+DMABuf surfaces, so stock Firefox decodes in software. The overlay adds
+`patches/firefox-rdd-v4l2-request.patch` (Mozilla bug 2080696 plus the RDD
+`sysinfo` patch, the same file as fedora-aurora and alarm-aurora) to
 `firefox-unwrapped`; nixpkgs' `firefox`, and so `programs.firefox`, wraps it.
 CI builds it as the `firefox` output and the Aurora cache serves it, so every
 nixpkgs update that moves Firefox rebuilds it.

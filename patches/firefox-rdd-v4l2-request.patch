@@ -176,3 +176,69 @@ index da9fc8db..5442218c 100644
 -- 
 2.50.1 (Apple Git-155)
 
+From e90d8bfbe10d08ba50671a6efb7b38fe82335cee Mon Sep 17 00:00:00 2001
+From: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 18:48:27 +1100
+Subject: [PATCH] Allow sysinfo in the RDD sandbox for Mesa's zink driver.
+
+Mesa's zink driver reads the physical memory size with
+sysconf(_SC_PHYS_PAGES) and fails screen creation without it.  glibc
+implements that with sysinfo, which the common policy rejects with
+EPERM, so in the RDD process the GBM device behind the VA-API DMABuf
+surfaces cannot be created: the decoder initialises, the first frame
+decodes, CreateImageVAAPI() fails to get a VideoFrameSurface and
+playback falls back to software.  Content processes already allow
+sysinfo.
+---
+ .../sandbox/common/test/SandboxTestingChildTests.h    |  5 +++++
+ security/sandbox/linux/SandboxFilter.cpp              | 11 +++++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/security/sandbox/common/test/SandboxTestingChildTests.h b/security/sandbox/common/test/SandboxTestingChildTests.h
+index 0174ceb9..1e889e24 100644
+--- a/security/sandbox/common/test/SandboxTestingChildTests.h
++++ b/security/sandbox/common/test/SandboxTestingChildTests.h
+@@ -25,6 +25,7 @@
+ #    include <sys/socket.h>
+ #    include <sys/statfs.h>
+ #    include <sys/syscall.h>
++#    include <sys/sysinfo.h>
+ #    include <sys/sysmacros.h>
+ #    include <sys/time.h>
+ #    include <sys/un.h>
+@@ -690,6 +691,10 @@ void RunTestsRDD(SandboxTestingChild* child) {
+     return rv;
+   });
+ 
++  // Mesa (zink) needs the physical memory size from sysinfo.
++  struct sysinfo si = {};
++  child->ErrnoTest("sysinfo"_ns, true, [&] { return sysinfo(&si); });
++
+   RunTestsSched(child);
+ 
+ #    ifdef MOZ_ENABLE_VULKAN_VIDEO
+diff --git a/security/sandbox/linux/SandboxFilter.cpp b/security/sandbox/linux/SandboxFilter.cpp
+index 03478109..cbba3ac3 100644
+--- a/security/sandbox/linux/SandboxFilter.cpp
++++ b/security/sandbox/linux/SandboxFilter.cpp
+@@ -2231,6 +2231,17 @@ class RDDSandboxPolicy final : public SandboxPolicyCommon {
+       case __NR_kcmp:
+         return KcmpPolicyForMesa();
+ 
++#ifdef DESKTOP
++        // Mesa's zink driver reads the physical memory size with
++        // sysconf(_SC_PHYS_PAGES), which glibc implements with sysinfo,
++        // and refuses to create a screen without it.  The GBM device
++        // behind the VA-API DMABuf surfaces then fails and hardware
++        // decoding falls back to software.  Content processes already
++        // allow sysinfo for the same reason.
++      case __NR_sysinfo:
++        return Allow();
++#endif
++
+         // We use this in our DMABuf support code.
+       case __NR_eventfd2:
+         return Allow();
+-- 
+2.50.1 (Apple Git-155)
+
