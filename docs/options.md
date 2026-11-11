@@ -538,6 +538,31 @@ manual or socket activation remains available. This does not open port
 
 **Declared in:** [aurora.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/aurora.nix)
 
+## `aurora.panelNits.enable`
+
+Share the built-in panel's brightness with the boot loader and macOS
+through the NVRAM backlight-nits variable: the panel starts at the boot
+loader's level instead of a level systemd-backlight saved, and the level
+the user picks is stored back after 5 s without a change, at most once a
+minute and at shutdown. Machines without the panel backlight or the NVRAM
+device skip it. False keeps systemd-backlight's own restore.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [panel-nits.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/panel-nits.nix)
+
+## `aurora.panelNits.package`
+
+The aurora-panel-nits package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-panel-nits`
+
+**Declared in:** [panel-nits.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/panel-nits.nix)
+
 ## `aurora.plasmaSetup.enable`
 
 Create the first owner account with Plasma Setup.
