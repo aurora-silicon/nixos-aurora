@@ -19,7 +19,7 @@ in
 assert builtins.elem "dockchannel-hid" cfg.boot.initrd.availableKernelModules;
 assert builtins.elem "dockchannel-hid" cfg.boot.blacklistedKernelModules;
 assert builtins.all (module: builtins.elem module cfg.boot.blacklistedKernelModules)
-  [ "brcmfmac" "hci_bcm4377" "aop_als" ];
+  [ "brcmfmac" "hci_bcm4377" "apple_z2" "aop_als" ];
 assert cfg.boot.initrd.systemd.services.aurora-vendor-firmware.serviceConfig.ExecStart == executable;
 assert cfg.systemd.services.aurora-vendor-firmware.serviceConfig.ExecStart == "${executable} runtime";
 assert builtins.all (tool: builtins.any (entry: toString entry.source == toString tool)

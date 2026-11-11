@@ -18,11 +18,12 @@ in {
   };
   # The keyboard driver probes from the admission script, after the ESP
   # firmware reaches the initrd, so it is in the initrd but not autoloaded.
-  # Broadcom radios and the ALS must wait for the real-root firmware path.
-  # Some ALS probes without calibration succeed but never produce samples.
+  # Broadcom radios, the Touch Bar digitizer and the ALS must wait for the
+  # real-root firmware path; the runtime pass of the admission script loads
+  # them. Some ALS probes without calibration succeed but never produce samples.
   boot.blacklistedKernelModules = [
     "aop" "mt7932-fullmac" "mt7932_bt_pcie" "dockchannel-hid"
-    "brcmfmac" "hci_bcm4377" "aop_als"
+    "brcmfmac" "hci_bcm4377" "apple_z2" "aop_als"
   ];
   boot.initrd.availableKernelModules = [ "vfat" "nvme_apple" "apple-mailbox" "aop" "mt7932-fullmac" "mt7932_bt_pcie" "dockchannel-hid" ];
   boot.initrd.systemd.services.aurora-vendor-firmware = {
