@@ -121,8 +121,9 @@ when the firewall reloads.
 Vendor firmware and calibration are read from this Mac's EFI partition at
 boot into `/run/aurora-firmware`; they are not embedded in the distributable
 Nix-store closure. Peripheral admission follows the handoff, and Bluetooth is
-admitted by the runtime service before BlueZ. Broadcom radios and the ALS wait
-for successful extraction and the real-root firmware search path. PCI aliases
+admitted by the runtime service before BlueZ. Broadcom radios, the Touch Bar
+digitizer and the ALS wait for successful extraction and the real-root firmware
+search path. PCI aliases
 select the installed Broadcom drivers. ALS calibration remains optional where
 the sensor supports operation without it.
 Model-specific speaker protection remains enabled.

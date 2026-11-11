@@ -11,6 +11,14 @@ has_firmware() {
   [ -s "$firmware_root/vendor/$1" ] || [ -s "$firmware_root/$1" ]
 }
 
+# The Touch Bar digitizer of the J293 and J493 reads apple/dfrmtfw-<board>.bin.
+has_touch_bar_firmware() {
+  for file in "$firmware_root"/apple/dfrmtfw-*.bin "$firmware_root"/vendor/apple/dfrmtfw-*.bin; do
+    [ -s "$file" ] && return 0
+  done
+  return 1
+}
+
 neo=false
 if grep -aq 'apple,j700' "$compatible"; then
   neo=true
@@ -68,11 +76,23 @@ if [ "${AURORA_RUNTIME_FIRMWARE_READY:-0}" = 1 ]; then
       if modules=$("$modprobe_command" --resolve-alias "$alias" 2>/dev/null); then
         for module in $modules; do
           case "$module" in
-            brcmfmac|hci_bcm4377) "$modprobe_command" "$module" ;;
+            brcmfmac) "$modprobe_command" "$module" ;;
+            hci_bcm4377)
+              if [ "${AURORA_ADMIT_BLUETOOTH:-0}" = 1 ]; then
+                "$modprobe_command" "$module"
+              fi
+              ;;
           esac
         done
       fi
     done
+  fi
+
+  # The Touch Bar digitizer uploads its firmware while probing and does not
+  # retry a failed probe. Its SPI device can appear after this pass, so load
+  # the driver by name; it binds whenever the device registers.
+  if has_touch_bar_firmware; then
+    "$modprobe_command" apple_z2
   fi
 
   # The ALS child reads calibration while probing, so it must follow the
