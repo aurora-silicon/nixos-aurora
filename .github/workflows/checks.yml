@@ -160,8 +160,11 @@ jobs:
         if: matrix.package == 'firefox'
         run: |
           sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet /usr/local/share/boost /opt/hostedtoolcache /usr/local/.ghcup || true
+          # gkrust's rustc needs >10 GB next to the C++ jobs; keep the kernel OOM killer as the only
+          # limit (systemd-oomd can kill on swap pressure before memory runs out).
+          sudo systemctl stop systemd-oomd.service systemd-oomd.socket 2>/dev/null || true
           sudo swapoff -a || true
-          sudo fallocate -l 24G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+          sudo fallocate -l 40G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
           free -g
           df -h /nix "$GITHUB_WORKSPACE" || df -h
       - name: Fetch pinned sources with verification and rate-limit backoff
@@ -169,7 +172,7 @@ jobs:
           PACKAGE: ${{ matrix.package }}
         run: python3 scripts/prefetch-sources.py "$PACKAGE"
       - name: Build the pinned Aurora hardware package
-        run: nix build --max-jobs 1 --cores 4 --print-build-logs --json '.#packages.aarch64-linux.${{ matrix.package }}^*' > build.json
+        run: nix build --max-jobs 1 --cores ${{ matrix.package == 'firefox' && 3 || 4 }} --print-build-logs --json '.#packages.aarch64-linux.${{ matrix.package }}^*' > build.json
       - name: Exercise graphics generation switch and rollback
         if: matrix.package == 'graphics'
         run: |
