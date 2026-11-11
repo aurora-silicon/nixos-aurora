@@ -128,7 +128,8 @@ jobs:
     if: needs.evaluate.outputs.packages != '[]'
     # Guest drivers contain x86 code and must be built on x86, as on Fedora.
     runs-on: ${{ matrix.package == 'fex-mesa' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
-    timeout-minutes: 180
+    # Firefox takes hours on the 4-core runner.
+    timeout-minutes: ${{ matrix.package == 'firefox' && 355 || 180 }}
     permissions:
       contents: read
       id-token: write
@@ -155,6 +156,14 @@ jobs:
       - name: Check isolated Flatpak build namespaces before fetching SDKs
         if: matrix.package == 'flatpak-gl'
         run: nix build --no-link --print-build-logs .#checks.aarch64-linux.flatpak-sandbox
+      - name: Prepare build capacity for Firefox
+        if: matrix.package == 'firefox'
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet /usr/local/share/boost /opt/hostedtoolcache /usr/local/.ghcup || true
+          sudo swapoff -a || true
+          sudo fallocate -l 24G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+          free -g
+          df -h /nix "$GITHUB_WORKSPACE" || df -h
       - name: Fetch pinned sources with verification and rate-limit backoff
         env:
           PACKAGE: ${{ matrix.package }}

@@ -434,6 +434,15 @@ in {
       ./patches/mutter-builtin-desktop-vrr.patch
     ];
   });
+  # Firefox's RDD sandbox admits the media controller node of an allowed M2M
+  # decoder and the four media/request ioctls libva-v4l2-request needs, so
+  # VA-API decodes on the AVD with the sandbox on (Mozilla bug 2080696; the
+  # same patch as fedora-aurora and alarm-aurora). nixpkgs' firefox wraps this
+  # firefox-unwrapped, so programs.firefox gets it, and it rebuilds with every
+  # nixpkgs Firefox update.
+  firefox-unwrapped = prev.firefox-unwrapped.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ (stableFile ./patches/firefox-rdd-v4l2-request.patch) ];
+  });
   # nixpkgs exposes a symlink join here: overriding its src does not replace
   # the inner model derivation. Build the pinned models explicitly, then merge
   # them ahead of the native common UCM definitions.

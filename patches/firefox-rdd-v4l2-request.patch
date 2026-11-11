@@ -1,0 +1,178 @@
+From 8a62262aa9914ca653734bf62f1e54ba0f012055 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 15:00:39 +1100
+Subject: [PATCH] Bug 2080696 - Allow V4L2 stateless decoders in the RDD
+ sandbox. r?#sandbox-reviewers
+
+libva-v4l2-request drives stateless (Request API) decoders through the
+media controller that owns the decoder's video node, so RDD also needs
+that /dev/media* node, the video node's sysfs uevent and four media
+ioctls. The broker only adds a media node whose topology contains a video
+node that is already allowed as an M2M device, so camera media nodes stay
+blocked. Seccomp allows the four ioctls by number instead of the whole '|'
+type, which keeps MEDIA_IOC_SETUP_LINK and the other media controller
+ioctls blocked.
+
+Based on a patch by Christian Bartels.
+---
+ security/sandbox/linux/SandboxFilter.cpp      | 10 +++
+ .../broker/SandboxBrokerPolicyFactory.cpp     | 80 +++++++++++++++++++
+ 2 files changed, 90 insertions(+)
+
+diff --git a/security/sandbox/linux/SandboxFilter.cpp b/security/sandbox/linux/SandboxFilter.cpp
+index cb5ce694..03478109 100644
+--- a/security/sandbox/linux/SandboxFilter.cpp
++++ b/security/sandbox/linux/SandboxFilter.cpp
+@@ -10,6 +10,9 @@
+ #include <fcntl.h>
+ #include <linux/ioctl.h>
+ #include <linux/ipc.h>
++#ifdef MOZ_ENABLE_V4L2
++#  include <linux/media.h>
++#endif
+ #include <linux/memfd.h>
+ #include <linux/mman.h>
+ #include <linux/net.h>
+@@ -2202,6 +2205,13 @@ class RDDSandboxPolicy final : public SandboxPolicyCommon {
+ #endif
+ #ifdef MOZ_ENABLE_V4L2
+             .ElseIf(shifted_type == kVideoType, Allow())
++            // Media controller and request fd ioctls used by stateless
++            // (Request API) decoders.
++            .ElseIf(AnyOf(request == MEDIA_IOC_G_TOPOLOGY,
++                          request == MEDIA_IOC_REQUEST_ALLOC,
++                          request == MEDIA_REQUEST_IOC_QUEUE,
++                          request == MEDIA_REQUEST_IOC_REINIT),
++                    Allow())
+ #endif
+         // NVIDIA decoder from Linux4Tegra, this is specific to Tegra ARM64 SoC
+ #if defined(__aarch64__)
+diff --git a/security/sandbox/linux/broker/SandboxBrokerPolicyFactory.cpp b/security/sandbox/linux/broker/SandboxBrokerPolicyFactory.cpp
+index da9fc8db..5442218c 100644
+--- a/security/sandbox/linux/broker/SandboxBrokerPolicyFactory.cpp
++++ b/security/sandbox/linux/broker/SandboxBrokerPolicyFactory.cpp
+@@ -17,6 +17,7 @@
+ #endif
+ #ifdef MOZ_ENABLE_V4L2
+ #  include <fcntl.h>
++#  include <linux/media.h>
+ #  include <linux/videodev2.h>
+ #  include <sys/ioctl.h>
+ #endif  // MOZ_ENABLE_V4L2
+@@ -56,6 +57,7 @@
+ #include "nsPrintfCString.h"
+ #include "nsReadableUtils.h"
+ #include "nsString.h"
++#include "nsTArray.h"
+ #include "nsThreadUtils.h"
+ #include "nsXULAppAPI.h"
+ #include "prenv.h"
+@@ -884,6 +886,77 @@ UniquePtr<SandboxBroker::Policy> SandboxBrokerPolicyFactory::GetContentPolicy(
+ }
+ 
+ #ifdef MOZ_ENABLE_V4L2
++// Stateless (Request API) decoders also need the media controller that owns
++// the decoder's video node, and that node's sysfs uevent, which
++// libva-v4l2-request reads to map the topology's device number to a path.
++// Only media devices whose topology contains one of the M2M video nodes
++// allowed by AddV4l2Dependencies are added, so camera media devices stay
++// blocked.
++static void AddV4l2RequestDependencies(SandboxBroker::Policy* policy,
++                                       const nsTArray<dev_t>& aM2mDevices) {
++  if (aM2mDevices.IsEmpty()) {
++    return;
++  }
++
++  DIR* dir = opendir("/dev");
++  if (!dir) {
++    return;
++  }
++
++  struct dirent* dir_entry;
++  while ((dir_entry = readdir(dir))) {
++    if (strncmp(dir_entry->d_name, "media", 5)) {
++      continue;
++    }
++
++    nsCString path = "/dev/"_ns;
++    path += nsDependentCString(dir_entry->d_name);
++
++    int fd = open(path.get(), O_RDWR | O_NONBLOCK, 0);
++    if (fd < 0) {
++      continue;
++    }
++
++    // The first call returns the number of interfaces, the second fills them
++    // in. If the topology grew in between, the second call fails.
++    struct media_v2_topology topology = {};
++    if (ioctl(fd, MEDIA_IOC_G_TOPOLOGY, &topology) < 0 ||
++        topology.num_interfaces == 0 || topology.num_interfaces > 256) {
++      close(fd);
++      continue;
++    }
++    const uint32_t count = topology.num_interfaces;
++    auto interfaces = std::make_unique<media_v2_interface[]>(count);
++    topology = {};
++    topology.num_interfaces = count;
++    topology.ptr_interfaces = reinterpret_cast<uintptr_t>(interfaces.get());
++    int result = ioctl(fd, MEDIA_IOC_G_TOPOLOGY, &topology);
++    close(fd);
++    if (result < 0 || topology.num_interfaces > count) {
++      continue;
++    }
++
++    bool allowed = false;
++    for (uint32_t i = 0; i < topology.num_interfaces; ++i) {
++      const media_v2_interface& intf = interfaces[i];
++      if (intf.intf_type != MEDIA_INTF_T_V4L_VIDEO ||
++          !aM2mDevices.Contains(
++              makedev(intf.devnode.major, intf.devnode.minor))) {
++        continue;
++      }
++      allowed = true;
++      policy->AddPath(rdonly,
++                      nsPrintfCString("/sys/dev/char/%u:%u/uevent",
++                                      intf.devnode.major, intf.devnode.minor)
++                          .get());
++    }
++    if (allowed) {
++      policy->AddPath(rdwr, path.get());
++    }
++  }
++  closedir(dir);
++}
++
+ static void AddV4l2Dependencies(SandboxBroker::Policy* policy) {
+   // For V4L2 hardware-accelerated video decode, RDD needs access to certain
+   // /dev/video* devices but don't want to allow it access to webcams etc.
+@@ -894,6 +967,7 @@ static void AddV4l2Dependencies(SandboxBroker::Policy* policy) {
+     return;
+   }
+ 
++  nsTArray<dev_t> m2mDevices;
+   struct dirent* dir_entry;
+   while ((dir_entry = readdir(dir))) {
+     if (strncmp(dir_entry->d_name, "video", 5)) {
+@@ -925,6 +999,10 @@ static void AddV4l2Dependencies(SandboxBroker::Policy* policy) {
+         (cap.device_caps & V4L2_CAP_VIDEO_M2M_MPLANE)) {
+       // This is an M2M device (i.e. not a webcam), so allow access
+       policy->AddPath(rdwr, path.get());
++      struct stat st;
++      if (fstat(fd, &st) == 0 && S_ISCHR(st.st_mode)) {
++        m2mDevices.AppendElement(st.st_rdev);
++      }
+     }
+ 
+     close(fd);
+@@ -933,6 +1011,8 @@ static void AddV4l2Dependencies(SandboxBroker::Policy* policy) {
+ 
+   // FFmpeg V4L2 needs to list /dev to find V4L2 devices.
+   policy->AddPath(rdonly, "/dev");
++
++  AddV4l2RequestDependencies(policy, m2mDevices);
+ }
+ #endif  // MOZ_ENABLE_V4L2
+ 
+-- 
+2.50.1 (Apple Git-155)
+
