@@ -308,6 +308,16 @@ in {
     src = source "omarchy-ane-tools";
     version = pins.omarchy-ane-tools.version;
   };
+  # power-profiles-daemon reads the platform profile only from ACPI's
+  # /sys/firmware/acpi/platform_profile. A device tree boot (Apple silicon)
+  # has a platform profile only as a class device, such as the M5 Pro/Max
+  # CLPC's apple-clpc: fall back to the first /sys/class/platform-profile
+  # device when the ACPI file is missing. ACPI machines are unchanged.
+  power-profiles-daemon = prev.power-profiles-daemon.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./patches/power-profiles-daemon-platform-profile-class.patch)
+    ];
+  });
   # Drive.Size for NVMe controllers that leave TNVMCAP at zero, such as the
   # Apple silicon SSDs, from their namespaces (udisks f032f09cc760 for 2.11.x),
   # so GNOME's About page and desktop tools show the internal disk's capacity.
