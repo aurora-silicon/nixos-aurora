@@ -92,6 +92,11 @@ including the MacBook Neo.
   Mach-O Macs, so no Mac gets a `boot-ctxr.bin` that rebuilds don't refresh.
 - Stage 1 (`aurora/stage1.bin`, `aurora/stage1.macho` and the boot object) is never written; it belongs
   to the installer.
+- Existing Mach-O installations may still have Stage 1 configured to load `m1n1/boot.bin`.
+  After verifying that filename from the installed boot chain, set `aurora.stage2.bootFile = "boot.bin";`.
+  This selects the destination for updates, checks and trial commits while retaining the board-specific
+  image. It does not rewrite Stage 1 or add trial support to older Stage 1 versions. The default `null`
+  keeps the packaged layout; `"boot-ctxr.bin"` can also be selected explicitly.
 - The Apple Silicon module's own copy (`boot.loader.grub.extraFiles`, an unchecked overwrite with no
   backup) is removed on installed systems. `aurora.stage2.enable = false` stops Stage 2 updates, the trial
   units and the pre-switch check entirely.

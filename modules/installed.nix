@@ -28,6 +28,8 @@ let
   # that does not declare one is generation 0, as on Fedora.
   dtbAbi = config.boot.kernelPackages.kernel.auroraDtbAbi or 0;
   configurationLimit = toString config.boot.loader.grub.configurationLimit;
+  bootFileEnv = lib.optionalString (cfg.bootFile != null)
+    "AURORA_STAGE2_BOOT_FILE=${lib.escapeShellArg cfg.bootFile}";
   stage2Parser = pkgs.writeTextDir "stage2.py" (builtins.readFile ../scripts/stage2.py);
   # The Apple Silicon module's combined Stage 2: the same bytes the image ships
   # in m1n1/boot.bin, so an unchanged system never rewrites the ESP.
@@ -53,7 +55,8 @@ let
     name = "aurora-install-stage2";
     runtimeInputs = [ pkgs.coreutils pkgs.util-linux pkgs.aurora-stage2 ];
     # writeShellApplication supplies the shebang and strict mode.
-    text = lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile ../scripts/install-stage2.sh);
+    text = lib.optionalString (cfg.bootFile != null) "export ${bootFileEnv}\n"
+      + lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile ../scripts/install-stage2.sh);
   };
   # The boot-time side of a trial: commit (the default) or guard.
   commit = pkgs.writeShellApplication {
@@ -74,6 +77,7 @@ let
       AURORA_MONITOR_FREE_MARKER=${aura}/share/aura/monitor-free
       AURORA_CONFIGURATION_LIMIT=${configurationLimit}
       export ESP_ROOT ESP_DEVICE ESP_FSTYPE TARGET AURORA_MONITOR_FREE_MARKER AURORA_CONFIGURATION_LIMIT
+      ${lib.optionalString (cfg.bootFile != null) "export ${bootFileEnv}"}
       exec aurora-stage2 "$mode"
     '';
   };
@@ -97,6 +101,17 @@ in {
     apply = files: builtins.removeAttrs files [ "m1n1/boot.bin" ];
   };
   options.aurora.stage2 = {
+    bootFile = lib.mkOption {
+      type = lib.types.nullOr (lib.types.enum [ "boot.bin" "boot-ctxr.bin" ]);
+      default = null;
+      example = "boot.bin";
+      description = ''
+        ESP Stage 2 filename configured in the enrolled Stage 1, relative to
+        m1n1/. Null uses the packaged layout. Existing Mach-O installations
+        may still load boot.bin and must select it explicitly. This changes
+        the update and trial target, not the board-specific image or Stage 1.
+      '';
+    };
     enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -164,7 +179,7 @@ in {
       case "$2" in
         switch|boot)
           AURORA_STAGE2_DIR=${stage2} ESP_ROOT=${lib.escapeShellArg esp} AURORA_TOPLEVEL="$1" \
-            AURORA_CONFIGURATION_LIMIT=${configurationLimit} ${pkgs.aurora-stage2}/bin/aurora-stage2 check
+            ${bootFileEnv} AURORA_CONFIGURATION_LIMIT=${configurationLimit} ${pkgs.aurora-stage2}/bin/aurora-stage2 check
           ;;
       esac
     '';

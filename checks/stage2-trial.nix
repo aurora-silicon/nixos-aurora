@@ -3,6 +3,7 @@ let
   inherit (nixpkgs) lib;
   probe = imageProbe.config;
   disabled = (imageProbe.extendModules { modules = [ { aurora.stage2.enable = false; } ]; }).config;
+  explicit = (imageProbe.extendModules { modules = [ { aurora.stage2.bootFile = "boot.bin"; } ]; }).config;
   text = value: builtins.unsafeDiscardStringContext (toString value);
   commit = probe.systemd.services.aurora-stage2-commit;
   guard = probe.systemd.services.aurora-stage2-guard;
@@ -42,5 +43,16 @@ in pkgs.runCommand "aurora-stage2-trial-evaluation" {
   tested = pkgs.aurora-stage2;
 } ''
   if [[ -n "$failures" ]]; then printf '%s\n' "$failures" >&2; exit 1; fi
+  # Exercise the installed command directly. With no arguments it exits
+  # before any device access; the exit trap checks its exported setting.
+  cat > "$TMPDIR/check-env" <<'EOF'
+  trap 'printenv AURORA_STAGE2_BOOT_FILE > "$TMPDIR/boot-file"' EXIT
+  EOF
+  if env -u AURORA_STAGE2_BOOT_FILE BASH_ENV="$TMPDIR/check-env" \
+      ${explicit.system.build.auroraStage2Tools}/bin/aurora-install-stage2 > "$TMPDIR/installer.log" 2>&1; then
+    echo "the installer accepted missing arguments" >&2
+    exit 1
+  fi
+  test "$(cat "$TMPDIR/boot-file")" = boot.bin
   touch $out
 ''

@@ -374,6 +374,23 @@ class InstallStage2Tests(unittest.TestCase):
                 self.assert_frozen()
                 self.assertEqual(self.ctxr.read_bytes(), stage2(boards=('j700',)))
 
+    def test_existing_macho_stage1_can_explicitly_keep_boot_bin(self):
+        self.compatible.write_bytes(compatible_file('j614s', 't6040'))
+        payload = stage2(boards=('j614s',))
+        self.write_ctxr_source('j614s', payload)
+        self.ctxr.write_bytes(b'not the configured boot file')
+        with patch.dict(os.environ, {'AURORA_STAGE2_BOOT_FILE': 'boot.bin'}):
+            result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.target.read_bytes(), payload)
+        self.assertEqual((self.esp / 'm1n1/boot.bin.old').read_bytes(), b'installed stage 2')
+        self.assertEqual(self.ctxr.read_bytes(), b'not the configured boot file')
+
+    def test_invalid_explicit_boot_file_changes_nothing(self):
+        with patch.dict(os.environ, {'AURORA_STAGE2_BOOT_FILE': '../elsewhere'}):
+            result = self.run_install()
+        self.assert_untouched(result)
+
     def test_macho_with_the_marker_says_where_the_update_went_and_warns_nothing(self):
         self.compatible.write_bytes(compatible_file('j700', 't8140'))
         self.write_ctxr_source('j700', stage2(boards=('j700',)))

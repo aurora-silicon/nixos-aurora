@@ -69,6 +69,20 @@ class NixosUpdate(bootchain.Update):
         super().__init__(root, env)
         self._generations = None
 
+    def boot_file(self, default):
+        name = self.env.get('AURORA_STAGE2_BOOT_FILE', default)
+        if name not in ('boot.bin', 'boot-ctxr.bin'):
+            raise Refused(f'invalid Stage 2 boot filename: {name!r}')
+        return name
+
+    def target(self):
+        if 'AURORA_STAGE2_BOOT_FILE' not in self.env:
+            return super().target()
+        name = self.env.get('TARGET')
+        if not name:
+            raise Refused('the entry point has not mounted a target ESP')
+        return self.path(name).with_name(self.boot_file('boot.bin'))
+
     # Generations GRUB lists, the way install-grub.pl walks them.
 
     def profiles(self):
@@ -218,8 +232,8 @@ class NixosUpdate(bootchain.Update):
         directory = self.path(self.env['AURORA_STAGE2_DIR'])
         board = self.ctxr_board()
         if board:
-            return directory / 'ctxr' / f'boot-ctxr-{board.removeprefix("apple,")}.bin', 'boot-ctxr.bin'
-        return directory / 'boot.bin', 'boot.bin'
+            return directory / 'ctxr' / f'boot-ctxr-{board.removeprefix("apple,")}.bin', self.boot_file('boot-ctxr.bin')
+        return directory / 'boot.bin', self.boot_file('boot.bin')
 
     def check(self):
         """Before a switch: refuse a Stage 2 change the listed generations cannot boot."""

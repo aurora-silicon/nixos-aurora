@@ -954,6 +954,21 @@ The speakerguardd-v2 package to use.
 
 **Declared in:** [speakerguardd-v2.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/speakerguardd-v2.nix)
 
+## `aurora.stage2.bootFile`
+
+ESP Stage 2 filename configured in the enrolled Stage 1, relative to
+m1n1/. Null uses the packaged layout. Existing Mach-O installations
+may still load boot.bin and must select it explicitly. This changes
+the update and trial target, not the board-specific image or Stage 1.
+
+**Type:** null or one of "boot.bin", "boot-ctxr.bin"
+
+**Default:** `null`
+
+**Example:** `"boot.bin"`
+
+**Declared in:** [installed.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/installed.nix)
+
 ## `aurora.stage2.enable`
 
 Refresh the checked ESP Stage 2 on bootloader installs and commit trials
