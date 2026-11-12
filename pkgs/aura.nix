@@ -37,12 +37,29 @@ in {
     cp build/aura.macho stage1/aura.macho
     cp build/aura-boot.macho stage1/aura-boot.macho
     make clean
+    # The secure-flavour Stage 1 that aurora-secboot stage1 build fills with the
+    # owner's key. Its built-in key, used only while the key block is unfilled,
+    # is a fresh one whose private half is never written down, so an unfilled
+    # image verifies nothing. A random key makes this one file differ between
+    # builds; nothing here checks outputs bit for bit (store paths are
+    # input-addressed), and any fixed key would be one whose private half
+    # someone could know.
+    python3 -c 'import os, sys; sys.path.insert(0, "tools"); import secboot_sign; sys.stdout.buffer.write(secboot_sign.pubkey(os.urandom(32)))' > "$NIX_BUILD_TOP/nobody.pub"
+    make $makeFlags SECBOOT=audit SECBOOT_FLAVOUR=secure SECBOOT_PUBKEY="$NIX_BUILD_TOP/nobody.pub"
+    cp build/aura.bin stage1/aura-secure-raw.bin
+    rm "$NIX_BUILD_TOP/nobody.pub"
+    make clean
     make $makeFlags ESP_STAGE2=1
   '';
   installPhase = ''
     mkdir -p $out/lib/m1n1 $out/share/aura/stage1
     cp build/aura.bin $out/lib/m1n1/m1n1.bin
     cp stage1/* $out/share/aura/stage1/
+    # aura's own Stage 1 and signing tools, for aurora-secboot stage1 build and
+    # its stage2 hook (AURORA_SECBOOT_AURA_DIR=$out/share/aura).
+    install -Dm644 -t $out/share/aura/tools \
+      tools/fill_stage1_config.py tools/secboot_sign.py tools/macho_boot_object.py \
+      tools/recovery/enroll-stage1.sh
     # Monitor-free Aura makes Stage 2 stop updating boot.bin on Mach-O Macs.
     found=false
     if [ -f src/ctxr_exec.c ] || [ ! -f src/monitor.c ]; then found=true; fi

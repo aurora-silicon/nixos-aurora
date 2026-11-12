@@ -22,6 +22,23 @@ let
     UKI_BUILD=${cfg.ukiBuild}
   '';
   secboot = "${cfg.package}/bin/aurora-secboot --config ${configFile}";
+  # The aura build installed.nix puts at the front of Stage 2, whose
+  # share/aura holds the Stage 1 images and aura's signing tools that
+  # `aurora-secboot stage1 build` and its stage2 hook use.
+  aura = pkgs.m1n1.override (lib.optionalAttrs (config.boot.m1n1CustomLogo != null) {
+    customLogo = config.boot.m1n1CustomLogo;
+  });
+  # aurora-secboot as installed and as the Stage 2 updater runs it: with this
+  # system's aura unless AURORA_SECBOOT_AURA_DIR says otherwise (sudo drops
+  # session variables, so a wrapper rather than environment.variables).
+  withAura = pkgs.symlinkJoin {
+    name = "aurora-secboot-with-aura";
+    paths = [ cfg.package ];
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+    postBuild = ''
+      wrapProgram $out/bin/aurora-secboot --set-default AURORA_SECBOOT_AURA_DIR ${aura}/share/aura
+    '';
+  };
   # install-grub.sh passes the configuration it makes the default as $1.
   install = pkgs.writeShellApplication {
     name = "aurora-secboot-install";
@@ -195,7 +212,7 @@ in {
 
   config = lib.mkMerge [
     (lib.mkIf (cfg.enable || cfg.adoptInstallerKey) {
-      environment.systemPackages = [ cfg.package ];
+      environment.systemPackages = [ withAura ];
       systemd.tmpfiles.settings.aurora-secboot.${cfg.keyDir}.d = {
         mode = "0700";
         user = "root";
@@ -239,6 +256,9 @@ in {
         ${install}/bin/aurora-secboot-install "''${1:-}"
       '';
       system.build.auroraSecureBootInstall = install;
+      # installed.nix hands each Stage 2 to this one's `stage2 hook`, which
+      # signs it with the owner's Stage 2 key when STAGE2_SIGN allows.
+      system.build.auroraStage2Signer = "${withAura}/bin/aurora-secboot";
       system.build.auroraSecureBootConfig = configFile;
     })
   ];

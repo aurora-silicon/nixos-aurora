@@ -4,7 +4,7 @@
 # runs both suites against the installed copies, with dtc.
 stdenvNoCC.mkDerivation {
   pname = "aurora-stage2";
-  version = "20261109";
+  version = "20261113";
   src = lib.fileset.toSource {
     root = ./.;
     fileset = lib.fileset.unions [
