@@ -368,11 +368,11 @@
   },
   "aurora-diag": {
     "repository": "https://github.com/aurora-silicon/aurora-diag",
-    "commit": "a343f3309ce7aa6eaa0b2dc89af59da425fdd1f9",
-    "version": "0.4.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/aurora-diag/tar.gz/a343f3309ce7aa6eaa0b2dc89af59da425fdd1f9",
-    "archive_root": "aurora-diag-a343f3309ce7aa6eaa0b2dc89af59da425fdd1f9",
-    "sha256": "92d16f1fef8b79f625e44aa748693658d63dec6dd0f051d45c9e0eec2a3292ce",
-    "nix_hash": "sha256-ktFvH++LefYl5EqnSGk2WNY97G3Q8FHUXJ4O7Coyks4="
+    "commit": "168fcb3852ce2562cda9de90ca9315733e0ab5f6",
+    "version": "0.5.0",
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-diag/tar.gz/168fcb3852ce2562cda9de90ca9315733e0ab5f6",
+    "archive_root": "aurora-diag-168fcb3852ce2562cda9de90ca9315733e0ab5f6",
+    "sha256": "bfa2433cbc7cfe95604484e52740a60cc14d65e0c8b48142e83e6e4239ab3965",
+    "nix_hash": "sha256-v6JDPLx8/pVgRITlJ0CmDMFNZeDItIFC6D5uQjmrOWU="
   }
 }

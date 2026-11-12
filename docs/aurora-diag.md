@@ -3,7 +3,11 @@
 `aurora-diag` is the bring-up and regression tool for Aurora on Apple
 silicon. It lists sensors, clocks, hardware blocks, services and the GPU
 APIs, says what works and what does not, and has `check`, `snapshot`,
-`diff` and `report` commands for comparing kernels. `aurora-panic-log`
+`diff` and `report` commands for comparing kernels. `status` sums up
+the kernel, fleet tag, boot chain and firmware versions, each block
+reported against working, the GPU APIs and services. `report` removes
+host and user names, MAC and IP addresses, serials, Wi-Fi names and
+UUIDs, and writes its files mode 0600. `aurora-panic-log`
 prints the last panic iBoot kept for the next OS and any kdump crash
 dumps. Source: https://github.com/aurora-silicon/aurora-diag (MIT).
 
