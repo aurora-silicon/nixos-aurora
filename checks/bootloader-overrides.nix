@@ -9,5 +9,8 @@ assert pkgs.lib.assertMsg (custom.drvPath != pkgs.m1n1.drvPath
 pkgs.runCommand "aurora-custom-boot-logo" { } ''
   test -s ${custom}/lib/m1n1/m1n1.bin
   test -s ${custom}/share/aura/stage1/aura-raw.bin
+  # The secure-flavour Stage 1 ships; its throwaway key does not.
+  test -s ${custom}/share/aura/stage1/aura-secure-raw.bin
+  test ! -e ${custom}/share/aura/stage1/nobody.pub
   touch $out
 ''
