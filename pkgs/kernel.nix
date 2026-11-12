@@ -1,4 +1,4 @@
-{ lib, callPackage, path, writeText, llvmPackages, openssl, binutils, aurora-bindgen
+{ lib, callPackage, path, writeText, llvmPackages, openssl, kmod, binutils, aurora-bindgen
 , src, pin, kernelCtxrExecmem, kernelDtbAbi, kernelPatches ? [ ] }:
 let
   stableFile = path: writeText (builtins.baseNameOf path) (builtins.readFile path);
@@ -114,16 +114,16 @@ let
             sed 's/$/.cer/' modules.order | xargs -r -d'\n' touch --)
         fi
       '' + (old.postInstall or "") + ''
-        if [[ -v modules ]]; then
+        cert="$dev/lib/modules/${old.passthru.modDirVersion}/build/certs/signing_key.x509"
+        if [[ -v modules && -f $cert ]]; then
           # Every module carries a signature from the certificate built into this
           # kernel: sign-file names it by serial number, or by key ID with -k.
-          cert="$dev/lib/modules/${old.passthru.modDirVersion}/build/certs/signing_key.x509"
           hexid() { tr -d ' :\t\n' | tr a-f A-F | sed 's/^0*//'; }
-          serial=$(openssl x509 -inform DER -in "$cert" -noout -serial | cut -d= -f2 | hexid)
-          skid=$(openssl x509 -inform DER -in "$cert" -noout -ext subjectKeyIdentifier | tail -n 1 | hexid)
+          serial=$(${lib.getBin openssl}/bin/openssl x509 -inform DER -in "$cert" -noout -serial | cut -d= -f2 | hexid)
+          skid=$(${lib.getBin openssl}/bin/openssl x509 -inform DER -in "$cert" -noout -ext subjectKeyIdentifier | tail -n 1 | hexid)
           signed=0 bad=0
           while IFS= read -r -d "" ko; do
-            key=$(modinfo -F sig_key "$ko" | hexid)
+            key=$(${kmod}/bin/modinfo -F sig_key "$ko" | hexid)
             if [[ "$(tail -c 28 "$ko")" == "~Module signature appended~" && -n $key &&
                   ( $key == "$serial" || $key == "$skid" ) ]]; then
               signed=$((signed + 1))
