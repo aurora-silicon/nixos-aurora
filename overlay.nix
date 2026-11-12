@@ -821,6 +821,7 @@ in {
   aurora-fido = let
     # jeepney: the per-user agent's D-Bus front-end (vault = user).
     py = final.python3.withPackages (ps: [ ps.cryptography ps.jeepney ]);
+    notificationPath = final.lib.makeBinPath [ final.util-linux final.libnotify final.glib.bin ];
   in final.stdenv.mkDerivation {
     pname = "aurora-fido";
     version = pins.aurora-fido.version;
@@ -837,11 +838,39 @@ in {
     # Unit tests: software stand-ins, no root, no hardware.
     doCheck = true;
     checkTarget = "check";
+    postPatch = ''
+      # The notifier sanitizes PATH before dropping into the user's session.
+      substituteInPlace aurora_fido/touchid.py \
+        --replace-fail '"PATH": "/usr/bin:/bin"' '"PATH": "${notificationPath}"'
+    '';
     postInstall = ''
       for f in $out/bin/aurora-fido $out/libexec/aurora-fido/aurora-fidod \
                $out/libexec/aurora-fido/aurora-passkeyd; do
         substituteInPlace $f --replace-fail "#!/usr/bin/python3 -I" "#!${py.interpreter} -I"
       done
+    '';
+    doInstallCheck = true;
+    installCheckPhase = ''
+      runHook preInstallCheck
+      ${py.interpreter} - "$out" <<'PY'
+      import os
+      import subprocess
+      import sys
+
+      sys.path.insert(0, os.path.join(sys.argv[1], "lib/aurora-fido"))
+      from aurora_fido.touchid import Notifier
+
+      # Exercise the sanitized subprocess environment, not the build's PATH.
+      env = Notifier()._env(os.getuid())
+      for helper in ("setpriv", "notify-send", "gdbus"):
+          subprocess.run(
+              [helper, "--help"],
+              env=env,
+              check=True,
+              stdout=subprocess.DEVNULL,
+          )
+      PY
+      runHook postInstallCheck
     '';
     passthru.commit = pins.aurora-fido.commit;
     meta = {
