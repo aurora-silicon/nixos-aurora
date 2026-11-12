@@ -98,7 +98,23 @@ let
         make "''${makeFlags[@]}" certs/
         "$buildRoot/certs/extract-cert" "" "$TMPDIR/aurora-empty-cert"
       '';
-      postInstall = (old.postInstall or "") + ''
+      # Kbuild signs the modules with the key this build puts in the kernel, as on
+      # ALARM and Fedora. nixpkgs' kmodigest signatures need CRYPTO_ECDSA and their
+      # certificates in the image, which this configuration doesn't have.
+      makeFlags = lib.filter (flag: !lib.hasPrefix "cmd_sign=" flag) old.makeFlags;
+      # INSTALL_MOD_STRIP strips each module before it's signed; stripping it again
+      # would drop the signature.
+      stripExclude = old.stripExclude ++ [ "*.ko" ];
+      # nixpkgs folds each module's kmodigest certificate into modules.cer, so give
+      # it empty ones. The signing key stays in the build tree it keeps in $dev and
+      # must not reach the store.
+      postInstall = ''
+        if [[ -v modules ]]; then
+          (cd -- "$modules/lib/modules/${old.passthru.modDirVersion}" &&
+            sed 's/$/.cer/' modules.order | xargs -r -d'\n' touch --)
+        fi
+      '' + (old.postInstall or "") + ''
+        rm -f -- "$dev/lib/modules/${old.passthru.modDirVersion}/build/certs/signing_key.pem"
         printf '%s\n' ${lib.escapeShellArg (finalAttrs.src.rev or "unknown")} > "$out/aurora-source-commit"
       '';
     });
