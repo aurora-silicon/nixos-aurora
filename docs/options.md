@@ -1100,3 +1100,13 @@ while retaining the launcher. Kernel-command-line changes need a reboot.
 **Default:** `true`
 
 **Declared in:** [userpages.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/userpages.nix)
+
+## `aurora.wifiFirmware.followMacOS`
+
+Keep the ESP's Wi-Fi firmware on the installed macOS's, as macOS does (aurora-wifi-firmware).
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [wifi-firmware.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/wifi-firmware.nix)

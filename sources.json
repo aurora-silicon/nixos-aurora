@@ -383,5 +383,14 @@
     "archive_root": "aurora-diag-168fcb3852ce2562cda9de90ca9315733e0ab5f6",
     "sha256": "bfa2433cbc7cfe95604484e52740a60cc14d65e0c8b48142e83e6e4239ab3965",
     "nix_hash": "sha256-v6JDPLx8/pVgRITlJ0CmDMFNZeDItIFC6D5uQjmrOWU="
+  },
+  "aurora-wifi-firmware": {
+    "repository": "https://github.com/aurora-silicon/aurora-installer",
+    "commit": "79a75495b160fcd92b76b0374f0acb4ca30f3a7b",
+    "version": "0.1",
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-installer/tar.gz/79a75495b160fcd92b76b0374f0acb4ca30f3a7b",
+    "archive_root": "aurora-installer-79a75495b160fcd92b76b0374f0acb4ca30f3a7b",
+    "sha256": "1e4b55ed6f0ecb862a6ea3a05ea72d3bece898df0dece9882110ffd8f41fcf4a",
+    "nix_hash": "sha256-HktV7W8Oy4YqbqOgXqctO+zomN8N7OmIIRD/2PQfz0o="
   }
 }

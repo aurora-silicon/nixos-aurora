@@ -284,6 +284,11 @@ in {
   aurora-firstboot = final.callPackage ./firstboot.nix { };
   aurora-power-budget = final.callPackage ./power-budget.nix { };
   aurora-secboot = final.callPackage ./secboot.nix { };
+  # The installed macOS's Wi-Fi firmware onto the ESP (modules/wifi-firmware.nix).
+  aurora-wifi-firmware = final.callPackage ./aurora-wifi-firmware.nix {
+    src = source "aurora-wifi-firmware";
+    version = pins.aurora-wifi-firmware.version;
+  };
   # The legacy-to-speakerguardd-v2 upgrade tool (modules/speaker-upgrade.nix).
   aurora-speaker-upgrade = final.callPackage ./aurora-speaker-upgrade.nix {
     src = source "aurora-speaker-upgrade";
