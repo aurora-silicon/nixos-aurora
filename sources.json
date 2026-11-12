@@ -365,5 +365,14 @@
     "archive_root": "aurora-sep-userspace-96f5aa45e6209cf94632d885a5b7c4c1bcc68209",
     "sha256": "d4f8f57c940d9d0fd8ea285cc49528e9559434b9ba7a64cff0b23dc992b8224f",
     "nix_hash": "sha256-1Pj1fJQNnQ/Y6ihcxJUo6VWUNLm6emTP8LI9yZK4Ik8="
+  },
+  "aurora-diag": {
+    "repository": "https://github.com/aurora-silicon/aurora-diag",
+    "commit": "168fcb3852ce2562cda9de90ca9315733e0ab5f6",
+    "version": "0.5.0",
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-diag/tar.gz/168fcb3852ce2562cda9de90ca9315733e0ab5f6",
+    "archive_root": "aurora-diag-168fcb3852ce2562cda9de90ca9315733e0ab5f6",
+    "sha256": "bfa2433cbc7cfe95604484e52740a60cc14d65e0c8b48142e83e6e4239ab3965",
+    "nix_hash": "sha256-v6JDPLx8/pVgRITlJ0CmDMFNZeDItIFC6D5uQjmrOWU="
   }
 }

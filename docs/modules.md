@@ -146,6 +146,7 @@ settings; they do not need separate imports. Full option details are in the
 | `branding.nix` | Aurora artwork and Plasma's About page. No Aurora-specific options. |
 | `camera-denoise.nix` | PipeWire camera filter. `aurora.cameraDenoise.enable`, `package` and `settings`; per-user configuration takes precedence. |
 | `dbus.nix` | Removes duplicate service-directory lookups from the system/session bus configuration. No Aurora-specific options. |
+| `diag.nix` | Opt-in aurora-diag, the bring-up and regression tool, and `aurora-panic-log`. `aurora.diag.enable` and `package`; off by default. See [aurora-diag](aurora-diag.md). |
 | `fex-mesa.nix` | Read-only guest Mesa layer, remounted across switches and rollbacks. `aurora.fexMesa.enable`, `package` and `rootfs`; an absent guest rootfs skips the mount. |
 | `fido.nix` | Opt-in Secure Enclave/Touch ID FIDO2/U2F service. `aurora.fido.enable`, `package` and `settings`; requires an enrolled finger. See the option reference for key-storage limits. |
 | `firmware.nix` | Initrd/runtime vendor-firmware extraction, peripheral ordering and firmware-search-path restoration after activation. No Aurora-specific options. |
