@@ -1,4 +1,4 @@
-{ lib, callPackage, path, writeText, llvmPackages, openssl, kmod, binutils, aurora-bindgen
+{ lib, callPackage, path, writeText, llvmPackages, openssl, binutils, aurora-bindgen
 , src, pin, kernelCtxrExecmem, kernelDtbAbi, kernelPatches ? [ ] }:
 let
   stableFile = path: writeText (builtins.baseNameOf path) (builtins.readFile path);
@@ -114,27 +114,36 @@ let
           (cd -- "$moddir" && sed 's/$/.cer/' modules.order | xargs -r -d'\n' touch --)
           if [[ -n $(find "$moddir" -name '*.ko' -print -quit) ]] &&
               grep -qx 'CONFIG_MODULE_SIG=y' "$buildRoot/.config"; then
-            # Every module carries a signature from the certificate built into this
-            # kernel: sign-file names it by serial number, or by key ID with -k.
+            # Every module's signature verifies against the certificate built into
+            # this kernel. sign-file appends a PKCS#7 blob, its 12-byte
+            # module_signature (sig_len big-endian in the last 4) and a 28-byte marker.
+            # modinfo can't read the signer: nixpkgs' kmod has no OpenSSL.
             cert="$buildRoot/certs/signing_key.x509"
             if [[ ! -f $cert ]]; then
               echo "no module signing certificate at $cert" >&2
               exit 1
             fi
-            hexid() { tr -d ' :\t\n' | tr a-f A-F | sed 's/^0*//'; }
-            serial=$(${lib.getBin openssl}/bin/openssl x509 -inform DER -in "$cert" -noout -serial | cut -d= -f2 | hexid)
-            skid=$(${lib.getBin openssl}/bin/openssl x509 -inform DER -in "$cert" -noout -ext subjectKeyIdentifier | tail -n 1 | hexid)
+            openssl=${lib.getBin openssl}/bin/openssl
+            "$openssl" x509 -inform DER -in "$cert" -out "$TMPDIR/aurora-module-cert.pem"
+            serial=$("$openssl" x509 -inform DER -in "$cert" -noout -serial | cut -d= -f2)
             signed=0 bad=0
             while IFS= read -r -d "" ko; do
-              key=$(${kmod}/bin/modinfo -F sig_key "$ko" | hexid)
-              if [[ "$(tail -c 28 "$ko")" == "~Module signature appended~" && -n $key &&
-                    ( $key == "$serial" || $key == "$skid" ) ]]; then
-                signed=$((signed + 1))
-              else
-                echo "module not signed by the built-in certificate: $ko" >&2
-                bad=$((bad + 1))
+              if [[ "$(tail -c 28 "$ko")" == "~Module signature appended~" ]]; then
+                size=$(stat -c %s "$ko")
+                siglen=$(tail -c 32 "$ko" | head -c 4 | od -An -tu4 --endian=big | tr -d ' ')
+                tail -c $((siglen + 40)) "$ko" | head -c "$siglen" > "$TMPDIR/aurora-module-sig"
+                head -c $((size - siglen - 40)) "$ko" > "$TMPDIR/aurora-module-body"
+                if "$openssl" cms -verify -binary -inform DER -in "$TMPDIR/aurora-module-sig" \
+                    -content "$TMPDIR/aurora-module-body" -certfile "$TMPDIR/aurora-module-cert.pem" \
+                    -nointern -noverify -out /dev/null 2>/dev/null; then
+                  signed=$((signed + 1))
+                  continue
+                fi
               fi
+              echo "module not signed by the built-in certificate: $ko" >&2
+              bad=$((bad + 1))
             done < <(find "$moddir" -name '*.ko' -print0)
+            rm -f -- "$TMPDIR"/aurora-module-{cert.pem,sig,body}
             echo "modules signed by the built-in certificate (serial $serial): $signed, other: $bad"
             if (( bad > 0 )); then
               exit 1
