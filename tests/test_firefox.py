@@ -10,7 +10,11 @@ PATCH = ROOT / 'patches' / 'firefox-rdd-v4l2-request.patch'
 class FirefoxTests(unittest.TestCase):
     def test_overlay_patches_the_unwrapped_browser_that_programs_firefox_wraps(self):
         overlay = (ROOT / 'overlay.nix').read_text()
-        self.assertRegex(overlay, r'firefox-unwrapped = prev\.firefox-unwrapped\.overrideAttrs \(old: \{\n'
+        self.assertRegex(overlay, r'firefox-unwrapped =\n'
+                                  r'\s+\(prev\.firefox-unwrapped\.override \{\n'
+                                  r'\s+enablePGO = false;\n'
+                                  r'\s+enableLTO = false;\n'
+                                  r'\s+\}\)\.overrideAttrs \(old: \{\n'
                                   r'\s+patches = \(old\.patches or \[ \]\) \+\+ '
                                   r'\[ \(stableFile \./patches/firefox-rdd-v4l2-request\.patch\) \];')
         self.assertIn('programs.firefox.enable', (ROOT / 'modules' / 'aurora.nix').read_text())

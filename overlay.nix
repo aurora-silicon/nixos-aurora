@@ -440,9 +440,19 @@ in {
   # same patch as fedora-aurora and alarm-aurora). nixpkgs' firefox wraps this
   # firefox-unwrapped, so programs.firefox gets it, and it rebuilds with every
   # nixpkgs Firefox update.
-  firefox-unwrapped = prev.firefox-unwrapped.overrideAttrs (old: {
-    patches = (old.patches or [ ]) ++ [ (stableFile ./patches/firefox-rdd-v4l2-request.patch) ];
-  });
+  #
+  # Built without PGO and LTO, like Fedora's and Arch Linux ARM's aarch64
+  # Firefox. On aarch64-linux nixpkgs builds Firefox twice for PGO (an
+  # instrumented build, a profiling run, then a full-LTO rebuild); the
+  # instrumented build alone took over four hours on a 4-core CI runner, so the
+  # whole build never finished inside the runner's 6 hour job limit.
+  firefox-unwrapped =
+    (prev.firefox-unwrapped.override {
+      enablePGO = false;
+      enableLTO = false;
+    }).overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ [ (stableFile ./patches/firefox-rdd-v4l2-request.patch) ];
+    });
   # nixpkgs exposes a symlink join here: overriding its src does not replace
   # the inner model derivation. Build the pinned models explicitly, then merge
   # them ahead of the native common UCM definitions.

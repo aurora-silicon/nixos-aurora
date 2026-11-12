@@ -35,4 +35,6 @@ DMABuf surfaces, so stock Firefox decodes in software. The overlay adds
 `sysinfo` patch, the same file as fedora-aurora and alarm-aurora) to
 `firefox-unwrapped`; nixpkgs' `firefox`, and so `programs.firefox`, wraps it.
 CI builds it as the `firefox` output and the Aurora cache serves it, so every
-nixpkgs update that moves Firefox rebuilds it.
+nixpkgs update that moves Firefox rebuilds it. It is built without PGO and
+LTO, as Fedora and Arch Linux ARM build Firefox on aarch64: nixpkgs' PGO build
+compiles Firefox twice and does not finish inside a CI runner's 6 hour limit.
