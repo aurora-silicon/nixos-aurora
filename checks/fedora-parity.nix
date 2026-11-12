@@ -17,6 +17,11 @@ let
         "Plasma About uses the immutable Aurora logo" = config.aurora.desktop != "kde"
           || lib.elem "LogoPath=${value.pkgs.aurora-logos}/share/pixmaps/system-logo-white.png"
             (lib.splitString "\n" config.environment.etc."xdg/kcm-about-distrorc".text);
+        "a stalled reboot or kexec is reset by the hardware watchdog within its 178 s range" =
+          config.systemd.settings.Manager.RebootWatchdogSec == "2min"
+          && config.systemd.settings.Manager.KExecWatchdogSec == "2min";
+        "trackpad clicks come from the host where the MTP trackpad has an actuator, as on Fedora and ALARM" =
+          lib.any (package: (package.name or "") == "aurora-trackpad-clicks-rules") config.services.udev.packages;
         "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
         "the Type-C port controllers find their USB4 router in the initrd" =
           lib.all (m: lib.elem m config.boot.initrd.availableKernelModules) [ "tps6598x" "thunderbolt_apple" ];
@@ -54,9 +59,20 @@ let
           && config.services.pipewire.enable
           && lib.elem value.pkgs.aurora-camera-denoise config.systemd.packages
           && lib.elem "pipewire.service" config.systemd.user.services.aurora-camera-denoise.wantedBy;
+        "the camera denoise unit skips root and system users, as on Fedora and ALARM" =
+          value.pkgs.aurora-camera-denoise.doCheck
+          && value.pkgs.aurora-camera-denoise.passthru.commit != "456c567527d6bbba27d0aaeec1199032e0ec88c3";
         "the keyboard backlight follows the light sensor from boot" = config.aurora.kbdLight.enable
           && lib.elem value.pkgs.aurora-kbd-light config.systemd.packages
           && lib.elem "multi-user.target" config.systemd.services.aurora-kbd-light.wantedBy;
+        "the built-in panel shares its brightness with the boot loader through NVRAM" = config.aurora.panelNits.enable
+          && lib.elem value.pkgs.aurora-panel-nits config.systemd.packages
+          && lib.elem value.pkgs.aurora-panel-nits config.services.udev.packages;
+        "the Bluetooth pairings made in macOS reach BlueZ, as with aurora-btsync on Fedora and ALARM" = config.aurora.btsync.enable
+          && lib.elem value.pkgs.aurora-btsync config.systemd.packages
+          && lib.elem value.pkgs.aurora-btsync config.services.udev.packages;
+        "aurora-nvram (and its asahi-nvram name) is on the PATH, as on Fedora and ALARM" =
+          lib.elem value.pkgs.aurora-nvram config.environment.systemPackages;
         "aurora-sep status is on the PATH, as on Fedora and ALARM" =
           lib.elem value.pkgs.aurora-sep config.environment.systemPackages;
         "the sep-key group gets /dev/sep-key for Secure Enclave SSH keys" = config.users.groups ? sep-key

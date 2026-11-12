@@ -109,6 +109,29 @@ The omdrop-awdl package to use.
 
 **Declared in:** [awdl.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/awdl.nix)
 
+## `aurora.btsync.enable`
+
+Use the Bluetooth pairings made in macOS: when the NVRAM device appears,
+aurora-btsync copies them into BlueZ's storage before bluetoothd starts
+and refreshes the keys of devices macOS paired again. Pairings made only
+on Linux are left alone. False leaves BlueZ's storage to bluetoothd.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [btsync.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/btsync.nix)
+
+## `aurora.btsync.package`
+
+The aurora-btsync package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-btsync`
+
+**Declared in:** [btsync.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/btsync.nix)
+
 ## `aurora.cameraDenoise.enable`
 
 Start the denoise filter with each user's PipeWire service and enable
@@ -277,11 +300,11 @@ because this path is an overlay mount's lower layer.
 
 Run aurora-fidod, which makes this Mac's Secure Enclave and Touch ID a
 FIDO2/U2F security key: WebAuthn and passkeys in browsers, SSH
-ecdsa-sk keys, pam_u2f and systemd-cryptenroll --fido2-device. Every
-operation asks for a Touch ID match. Keys live in the Secure Enclave
-when the kernel has /dev/sep-key and are sealed by it otherwise (root
-on this Mac can copy sealed keys); `aurora-fido status` says which.
-Off by default. Needs Touch ID (fprintd with an enrolled finger).
+ecdsa-sk keys, pam_u2f and systemd-cryptenroll --fido2-device. Keys
+live in the Secure Enclave, which checks the Touch ID match inside
+every signature itself, so root cannot sign without a finger. The
+service does not start on a kernel without /dev/sep-key. Off by
+default. Needs an enrolled Touch ID finger.
 
 **Type:** boolean
 
@@ -304,10 +327,10 @@ The aurora-fido package to use.
 /etc/aurora-fido/aurora-fido.conf, by section ([touchid],
 [authenticator], [keys]). Unset keys keep the daemon's defaults; see
 docs/fido.md in aurora-sep-userspace. touchid.policy picks who may
-approve new credentials, as on macOS: "touchid-or-password" (default:
-Touch ID, or your password in the polkit dialog), "touchid-any" or
-"touchid-current" (Touch ID only; the latter retires a credential
-when the enrolled fingers change).
+approve new credentials, enforced by the Secure Enclave: "auto"
+(default: touchid-or-password where the enclave can check your
+password, else touchid-any), "touchid-any" or "touchid-current"
+(the latter retires a credential when the enrolled fingers change).
 
 **Type:** attribute set of attribute set of (string or signed integer or boolean)
 
@@ -317,9 +340,6 @@ when the enrolled fingers change).
 
 ```nix
 {
-  keys = {
-    store = "sep-key";
-  };
   touchid = {
     policy = "touchid-current";
   };
@@ -538,6 +558,31 @@ manual or socket activation remains available. This does not open port
 
 **Declared in:** [aurora.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/aurora.nix)
 
+## `aurora.panelNits.enable`
+
+Share the built-in panel's brightness with the boot loader and macOS
+through the NVRAM backlight-nits variable: the panel starts at the boot
+loader's level instead of a level systemd-backlight saved, and the level
+the user picks is stored back after 5 s without a change, at most once a
+minute and at shutdown. Machines without the panel backlight or the NVRAM
+device skip it. False keeps systemd-backlight's own restore.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [panel-nits.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/panel-nits.nix)
+
+## `aurora.panelNits.package`
+
+The aurora-panel-nits package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-panel-nits`
+
+**Declared in:** [panel-nits.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/panel-nits.nix)
+
 ## `aurora.plasmaSetup.enable`
 
 Create the first owner account with Plasma Setup.
@@ -594,11 +639,63 @@ by aurora-touchid-boot.service at every boot.
 
 ## `aurora.sepLuks.enable`
 
-Install aurora-sep-cryptenroll and its libcryptsetup token plugin, which
-unlock LUKS2 volumes with this Mac's Secure Enclave the way
-systemd-cryptenroll --tpm2-device=auto does with a TPM. Nothing is
-enrolled by this option: run aurora-sep-cryptenroll for each volume.
-The root volume is not supported yet.
+Install aurora-sep-cryptenroll, aurora-sep-fde and the libcryptsetup
+token plugin, which unlock LUKS2 volumes with this Mac's Secure Enclave.
+aurora-sep-cryptenroll seals a volume to the Mac, the way
+systemd-cryptenroll --tpm2-device=auto does with a TPM. aurora-sep-fde
+seals it to users' passwords, checked by the Secure Enclave (the
+FileVault model): each user gets their own keyslot, and volume owners
+add, remove and reset users. Nothing is enrolled by this option: run
+either tool for each volume. /etc/aurora-sep/fde.conf comes from the
+package unless environment.etc."aurora-sep/fde.conf" is set.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.initrd.enable`
+
+Open Secure Enclave volumes in the initrd too, the root volume included.
+Needs a kernel whose apple_sep has the
+key-store-only attach phase (the keystore_only parameter); with an
+older kernel the initrd leaves the driver alone and those volumes ask
+for their passphrase. For volumes sealed by aurora-sep-cryptenroll the
+SEP key store files from /var/lib go into the initrd through
+boot.initrd.secrets (never the Nix store), so they must exist when the
+boot loader is installed: enable Touch ID or run the SEP once first.
+Rebuild after the key store changes. Every volume keeps its passphrase
+or recovery key.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.initrd.keyStore`
+
+Copy the SEP key store (/var/lib/aurora-sep-keybag.bin and
+/var/lib/aurora-sep-refkey.bin) into the initrd as boot.initrd.secrets,
+for volumes sealed by aurora-sep-cryptenroll. Turn it off on a system
+whose initrd volumes are all sealed to passwords
+(initrd.passwordUnlock) and that has no key store yet.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.initrd.passwordUnlock`
+
+Also open volumes sealed to a user's password by aurora-sep-fde in the
+initrd: apple_sep loads there with keystore_only=2, which unlocks the
+user's key bag with the password typed at the prompt. Needs a kernel
+whose keystore_only parameter offers per-user key bags. Those tokens
+carry their wrapped key bag in the LUKS2 header, so this mode needs no
+key store copies.
 
 **Type:** boolean
 
@@ -613,6 +710,54 @@ The aurora-sep-luks package to use.
 **Type:** package
 
 **Default:** `pkgs.aurora-sep-luks`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.passwordSync.enable`
+
+Keep a user's disk password equal to their login password: after
+pam_unix changed a password (passwd, GNOME Settings), the
+pam_aurora_sep_fde module re-wraps the user's key bag in the Secure
+Enclave and writes it to every volume listed in
+/etc/aurora-sep/fde-volumes. The password stacks of
+passwordSync.services run it after pam_unix, which becomes
+authoritative there: a failed pam_unix change fails the stack
+instead of falling through to later password modules. A change
+without the old password (root running passwd for another user,
+chpasswd) leaves the disk password as it was and says how a volume
+owner resets it.
+
+**Type:** boolean
+
+**Default:** `config.aurora.sepLuks.enable`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.passwordSync.services`
+
+PAM services whose password changes also change the disk password.
+passwd covers passwd and GNOME Settings; add the login services to
+follow a change of an expired password at login.
+
+**Type:** list of string
+
+**Default:**
+
+```nix
+[
+  "passwd"
+]
+```
+
+**Example:**
+
+```nix
+[
+  "passwd"
+  "login"
+  "gdm-password"
+]
+```
 
 **Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
 

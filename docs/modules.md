@@ -121,8 +121,9 @@ when the firewall reloads.
 Vendor firmware and calibration are read from this Mac's EFI partition at
 boot into `/run/aurora-firmware`; they are not embedded in the distributable
 Nix-store closure. Peripheral admission follows the handoff, and Bluetooth is
-admitted by the runtime service before BlueZ. Broadcom radios and the ALS wait
-for successful extraction and the real-root firmware search path. PCI aliases
+admitted by the runtime service before BlueZ. Broadcom radios, the Touch Bar
+digitizer and the ALS wait for successful extraction and the real-root firmware
+search path. PCI aliases
 select the installed Broadcom drivers. ALS calibration remains optional where
 the sensor supports operation without it.
 Model-specific speaker protection remains enabled.
@@ -152,11 +153,13 @@ settings; they do not need separate imports. Full option details are in the
 | `flatpak.nix` | Installs and pins the local Aurora GL extensions for the locked Freedesktop runtimes. `aurora.flatpak.enable` and `package`; it does not add an application repository. |
 | `gnome-initial-setup.nix` | GNOME owner-account setup when an image layout is present. `aurora.gnomeInitialSetup.enable`; requires GDM and mutable users. |
 | `kbd-light.nix` | Ambient-light keyboard backlight control. `aurora.kbdLight.enable`, `package` and `settings`; the service skips machines without a keyboard backlight. |
+| `panel-nits.nix` | Built-in panel brightness shared with the boot loader and macOS through NVRAM `backlight-nits`: the panel starts at the loader's level, and the user's level is stored back (rate limited). `aurora.panelNits.enable` and `package`; machines without the panel backlight or the NVRAM device skip it. |
+| `btsync.nix` | Bluetooth pairings made in macOS, copied from NVRAM into BlueZ's storage before bluetoothd starts; keys of devices macOS paired again are refreshed and Linux-only pairings are left alone. `aurora.btsync.enable` and `package`. |
 | `parity.nix` | Records payload paths and source identities for finished-image verification. No Aurora-specific options. |
 | `plasma-setup.nix` | KDE owner-account setup when an image layout is present. `aurora.plasmaSetup.enable`; requires Plasma Login Manager and mutable users. |
 | `platform.nix` | Bluetooth, UPower, regulatory data, speaker protection and model-specific platform rules. No Aurora-specific options. |
 | `sep.nix` | Touch ID/PAM integration; ordinary login still uses a password. `aurora.sep.greeterFingerprint.enable` adds GNOME greeter authentication. Logind defaults a short power-key press to suspend. The Secure Enclave OpenSSH provider is installed; device access requires explicitly configured `sep-key` group membership. See [Touch ID setup](../sep/README.md). |
-| `sep-luks.nix` | Opt-in Secure Enclave LUKS2 unlock. `aurora.sepLuks.enable` and `package` install aurora-sep-cryptenroll and its cryptsetup token plugin; nothing is enrolled until it is run on a volume, the passphrase keyslot is kept, and the root volume is not supported yet. |
+| `sep-luks.nix` | Opt-in Secure Enclave LUKS2 unlock. `aurora.sepLuks.enable` and `package` install aurora-sep-cryptenroll (volumes sealed to the Mac), aurora-sep-fde (volumes sealed to users' passwords, with volume owners and a recovery key) and the cryptsetup token plugin; nothing is enrolled until one is run on a volume. `passwordSync` (on with `enable`) runs pam_aurora_sep_fde after pam_unix in `passwd`, so a password change also changes the disk password. `initrd.enable` opens those volumes in the initrd, root included; `initrd.passwordUnlock` loads apple_sep there with `keystore_only=2` for password-sealed volumes. See `docs/luks-sep-owners.md` and `docs/luks-sep-initrd.md` in aurora-sep-userspace. |
 | `speaker-upgrade.nix` | `aurora.speakerguardd.upgrade.enable` installs the migration tool and units without starting migration. Enable `aurora.speakerguardd.v2.enable` separately for v2 services, then follow the [preview procedure](speakerguardd-v2-preview.md). |
 | `speakerguardd-v2.nix` | Opt-in preview through `aurora.speakerguardd.v2.enable` and `package`. Legacy protection remains installed and gated; v2 takes over only after manual migration and successful checks. Off by default. See the [preview limitations](speakerguardd-v2-preview.md). |
 | `steam.nix` | Adapts the standard `programs.steam` module to ARM64 host graphics/audio. Steam is not enabled automatically; x86-only `extest` injection is rejected. |

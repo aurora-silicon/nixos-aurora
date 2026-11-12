@@ -12,6 +12,8 @@ stdenv.mkDerivation {
     "-Dsysconfdir=/etc"
     "-Dsystemduserunitdir=${placeholder "out"}/lib/systemd/user"
   ];
+  # checkPhase runs upstream's unit test: no unit for root or system users
+  # (the greeter), bounded restarts (camera-denoise#8).
   doCheck = true;
   postInstall = ''
     substituteInPlace $out/lib/systemd/user/aurora-camera-denoise.service \

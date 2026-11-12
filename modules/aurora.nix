@@ -2,7 +2,7 @@
 {
   imports = [ ./ane.nix ./firmware.nix ./platform.nix ./audio.nix ./system-fixes.nix
     ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix ./dbus.nix
-    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix ./fido.nix ./awdl.nix ./sep-luks.nix
+    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix ./panel-nits.nix ./btsync.nix ./fido.nix ./awdl.nix ./sep-luks.nix
     ./userpages.nix ./boot-splash.nix ./speakerguardd-v2.nix ./speaker-upgrade.nix ./steam.nix
     ./power-budget.nix ];
   options.aurora.desktop = lib.mkOption {
@@ -107,6 +107,6 @@
       && !config.aurora.openssh.startAtBoot) { wantedBy = lib.mkForce [ ]; };
     systemd.services.sshd-keygen = lib.mkIf (config.services.openssh.enable && config.services.openssh.generateHostKeys
       && !config.aurora.openssh.startAtBoot) { wantedBy = lib.mkForce [ ]; };
-    environment.systemPackages = [ pkgs.aurora-bless pkgs.git pkgs.cryptsetup pkgs.btrfs-progs ];
+    environment.systemPackages = [ pkgs.aurora-bless pkgs.aurora-nvram pkgs.git pkgs.cryptsetup pkgs.btrfs-progs ];
   };
 }

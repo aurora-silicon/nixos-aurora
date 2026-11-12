@@ -59,6 +59,9 @@ NEEDS = {
     'speakerguardd-v2': ['speakerguardd-v2'],
     'speaker-upgrade': ['aurora-speaker-upgrade', 'speakerguardd-v2'],
     'mutter': [],
+    'iio-sensor-proxy': [],  # nixpkgs' pinned release, with the local patch
+    'gnome-settings-daemon': [],  # nixpkgs' pinned release, with the local patch
+    'kwin': [],  # nixpkgs' pinned release, with the local patch
     'docker': [],  # nixpkgs' pinned release, with the local engine patch
     'speakersafetyd': [],
     'bankstown': ['bankstown'],
@@ -66,6 +69,9 @@ NEEDS = {
     'aurora-bless': ['aurora-bless'],
     'camera-denoise': ['camera-denoise'],
     'kbd-light': ['kbd-light'],
+    'panel-nits': ['aurora-bless'],
+    'nvram': ['aurora-bless'],
+    'btsync': ['aurora-bless'],
     'fido': ['aurora-fido'],
     'sep-sk': ['aurora-sep-sk'],
     'sep-luks': ['aurora-sep-luks'],
