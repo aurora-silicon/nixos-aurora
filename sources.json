@@ -109,12 +109,12 @@
   },
   "aurora-secboot": {
     "repository": "https://github.com/aurora-silicon/aurora-platform",
-    "commit": "9997aefd58d1af2b1006503b4f159f1dd6b0339a",
+    "commit": "2a0279f855c3bebcfb75c3dac008ab45243b9a44",
     "version": "0.1.13",
-    "source_url": "https://codeload.github.com/aurora-silicon/aurora-platform/tar.gz/9997aefd58d1af2b1006503b4f159f1dd6b0339a",
-    "archive_root": "aurora-platform-9997aefd58d1af2b1006503b4f159f1dd6b0339a",
-    "sha256": "be04326e2a119c128792b8cf9bf1fdcee4143e6ae3b1d6b621fe571785613f5d",
-    "nix_hash": "sha256-vgQybioRnBKHkrjPm/H9zuQUPmrjsda2If5XF4VhP10="
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-platform/tar.gz/2a0279f855c3bebcfb75c3dac008ab45243b9a44",
+    "archive_root": "aurora-platform-2a0279f855c3bebcfb75c3dac008ab45243b9a44",
+    "sha256": "403308545fd00e8a57d085e7a9599b99baafdc16e94968055119afa5a0d074ef",
+    "nix_hash": "sha256-QDMIVF/QDopX0IXnqVmbmbqv3BbpSWgFURmvpaDQdO8="
   },
   "libva-v4l2-request-avd": {
     "repository": "https://github.com/omacom/libva-v4l2_request",

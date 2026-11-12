@@ -69,10 +69,15 @@ let
             "$g/append-initrd-secrets" "$work/initrd"
           fi
           cp "$g/kernel-params" "$work/cmdline"
+          # The generation's own os-release: /etc is still the running one's.
+          osrel=()
+          if [[ -e $g/etc/os-release ]]; then
+            osrel=(--os-release "$g/etc/os-release")
+          fi
           # A failed UKI leaves GRUB's entries as they are; with securePath,
           # enable below refuses a default generation without one.
           if ! ${secboot} uki build "$kver" --image "$g/kernel" --initrd "$work/initrd" \
-              --cmdline-file "$work/cmdline" --init "$g/init" --output "$out"; then
+              --cmdline-file "$work/cmdline" --init "$g/init" "''${osrel[@]}" --output "$out"; then
             echo "aurora-secboot: no UKI for $g" >&2
             unset "keep[$out]"
           fi
