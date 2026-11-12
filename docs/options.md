@@ -258,6 +258,31 @@ enabled in all three profiles.
 
 **Declared in:** [aurora.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/aurora.nix)
 
+## `aurora.diag.enable`
+
+Install aurora-diag, the bring-up and regression tool: sensors,
+clocks, hardware blocks, services and GPU APIs with what works and
+what does not, `check`, `snapshot`, `diff` and `report` for
+comparing kernels, and `aurora-panic-log` for the last panic iBoot
+kept. Fedora and ALARM ship the same commit as the opt-in
+`aurora-diag` package. Off by default.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [diag.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/diag.nix)
+
+## `aurora.diag.package`
+
+The aurora-diag package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-diag`
+
+**Declared in:** [diag.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/diag.nix)
+
 ## `aurora.fexMesa.enable`
 
 Mount x86_64 and i686 Aurora Mesa over the guest rootfs at

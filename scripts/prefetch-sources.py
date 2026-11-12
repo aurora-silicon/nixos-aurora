@@ -72,6 +72,7 @@ NEEDS = {
     'panel-nits': ['aurora-bless'],
     'nvram': ['aurora-bless'],
     'btsync': ['aurora-bless'],
+    'diag': ['aurora-diag'],
     'fido': ['aurora-fido'],
     'sep-sk': ['aurora-sep-sk'],
     'sep-luks': ['aurora-sep-luks'],

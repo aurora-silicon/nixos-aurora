@@ -82,6 +82,8 @@ let
           && !(config.systemd.services ? aurora-fido);
         "AirDrop over AWDL stays off unless asked for" = !config.aurora.awdl.enable
           && !(lib.elem value.pkgs.omdrop-awdl config.systemd.packages);
+        "aurora-diag stays off unless asked for, as on Fedora and ALARM" = !config.aurora.diag.enable
+          && !(lib.elem value.pkgs.aurora-diag config.environment.systemPackages);
         "Flatpak uses the Aurora repository" = config.services.flatpak.enable
           && config.aurora.flatpak.enable
           && config.aurora.flatpak.package.commit == pkgs.aurora-flatpak-gl.commit

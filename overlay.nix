@@ -682,6 +682,12 @@ in {
     src = source "kbd-light";
     pin = pins.kbd-light;
   };
+  # Bring-up diagnostics, opt-in: modules/diag.nix installs it when
+  # aurora.diag.enable is set.
+  aurora-diag = final.callPackage ./pkgs/aurora-diag.nix {
+    src = source "aurora-diag";
+    pin = pins.aurora-diag;
+  };
   # OpenSSH ecdsa-sk keys in the Secure Enclave (aurora-sep-userspace sk/):
   # the provider library, the udev rule giving the sep-key group /dev/sep-key
   # and its sysusers entry. modules/sep.nix installs it and makes the group.
