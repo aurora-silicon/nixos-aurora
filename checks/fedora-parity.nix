@@ -64,6 +64,7 @@ let
           && value.pkgs.aurora-camera-denoise.passthru.commit != "456c567527d6bbba27d0aaeec1199032e0ec88c3";
         "the keyboard backlight follows the light sensor from boot" = config.aurora.kbdLight.enable
           && lib.elem value.pkgs.aurora-kbd-light config.systemd.packages
+          && lib.elem value.pkgs.aurora-kbd-light config.services.udev.packages
           && lib.elem "multi-user.target" config.systemd.services.aurora-kbd-light.wantedBy;
         "the built-in panel shares its brightness with the boot loader through NVRAM" = config.aurora.panelNits.enable
           && lib.elem value.pkgs.aurora-panel-nits config.systemd.packages

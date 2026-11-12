@@ -1,0 +1,5 @@
+# aurora-kbd-light: start the daemon when its devices appear. Its unit's start at boot comes before
+# pwm-apple's keyboard backlight LED and the AOP's ambient light sensor exist, and its
+# ConditionPathExistsGlob then skips it for the whole boot.
+SUBSYSTEM=="leds", KERNEL=="*kbd_backlight", ACTION=="add", TAG+="systemd", ENV{SYSTEMD_WANTS}+="aurora-kbd-light.service"
+SUBSYSTEM=="iio", ATTR{name}=="aop-sensors-als", ACTION=="add", TAG+="systemd", ENV{SYSTEMD_WANTS}+="aurora-kbd-light.service"
