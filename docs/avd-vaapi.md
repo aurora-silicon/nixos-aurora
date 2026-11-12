@@ -24,3 +24,17 @@ with software and run mpv muted with both `--hwdec=vaapi` and
 `about:support` Media/Graphics sections plus
 `MOZ_LOG=PlatformDecoderModule:5,FFmpegVideo:5`. Software fallback and sandbox
 denial are failures, not hardware passes.
+
+## Firefox
+
+Firefox's RDD sandbox does not admit the media controller node and the four
+media/request ioctls that libva-v4l2-request needs, and it rejects `sysinfo`,
+without which Mesa's zink driver cannot create the GBM device behind VA-API
+DMABuf surfaces, so stock Firefox decodes in software. The overlay adds
+`patches/firefox-rdd-v4l2-request.patch` (Mozilla bug 2080696 plus the RDD
+`sysinfo` patch, the same file as fedora-aurora and alarm-aurora) to
+`firefox-unwrapped`; nixpkgs' `firefox`, and so `programs.firefox`, wraps it.
+CI builds it as the `firefox` output and the Aurora cache serves it, so every
+nixpkgs update that moves Firefox rebuilds it. It is built without PGO and
+LTO, as Fedora and Arch Linux ARM build Firefox on aarch64: nixpkgs' PGO build
+compiles Firefox twice and does not finish inside a CI runner's 6 hour limit.

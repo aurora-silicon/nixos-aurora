@@ -44,6 +44,7 @@ NEEDS = {
     'flatpak-gl': ['mesa-aurora'],
     'alsa-utils': ['alsa-utils'],
     'pipewire': [],  # nixpkgs' pinned release, with the local patches
+    'firefox': [],  # nixpkgs' pinned release, with the RDD V4L2 Request patch
     'audio': ['aurora-audio'],
     'ucm': ['alsa-ucm-conf-aurora'],
     'firstboot': ['aurora-firstboot'],
@@ -73,6 +74,7 @@ NEEDS = {
     'panel-nits': ['aurora-bless'],
     'nvram': ['aurora-bless'],
     'btsync': ['aurora-bless'],
+    'diag': ['aurora-diag'],
     'fido': ['aurora-fido'],
     'sep-sk': ['aurora-sep-sk'],
     'sep-luks': ['aurora-sep-luks'],

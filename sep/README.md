@@ -152,3 +152,34 @@ fprintd to retain host records when deleting from the device fails.
 Keep the existing SEP OS identity and persistent state across this update.
 
 See the [controller-approved v4/v5 qualification plan](https://github.com/aurora-silicon/aurora-sep-userspace/blob/2799b51243708d0a551b67d902472319f132c417/docs/sep-v5-test-plan.md) before removing the kernel hold.
+
+## Suspend policy
+
+The common SEP integration also supplies the suspend policy, whether or not a
+fingerprint reader is present or SEP initialization succeeds. A suspend requests
+only `mem`; a refused request fails visibly instead of trying `standby` or
+`freeze`. Empty `MemorySleepMode=` preserves the kernel-selected mode, including
+`mem_sleep_default=s2idle` and a runtime selection in `/sys/power/mem_sleep`.
+No mode is forced to `deep` and no loader is started or retried by a sleep.
+The three suspend units retain only `After=aurora-sep.service`: they wait for
+an already queued load, including its existing timeout, without requiring success.
+
+This policy does not add a deep-sleep provider. The consolidated Linux sleep
+provider currently matches T8140 only; M5 experimental sleep is separate.
+Production delivery still requires a qualified kernel and matching released
+Stage 2. Merely installing this configuration does not establish hardware support
+or successful refusal recovery.
+
+The module uses the pinned nixpkgs `systemd.sleep.settings.Sleep` interface with
+`lib.mkDefault` values: `SuspendState = "mem"` and `MemorySleepMode = ""`.
+These render the same Sleep settings as the ALARM/Fedora vendor file. An owner
+can override either through the normal NixOS option priority; for example:
+
+```nix
+systemd.sleep.settings.Sleep.MemorySleepMode = "s2idle";
+```
+
+Alternatively use `boot.kernelParams = [ "mem_sleep_default=s2idle" ];`.
+Local `/etc/systemd/sleep.conf.d/` drop-ins also override the generated main
+configuration. The module emits MemorySleepMode only for systemd >=256; older
+packages retain mem-only requests and kernel-command-line/runtime opt-in.

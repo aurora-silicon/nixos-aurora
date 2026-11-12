@@ -1,12 +1,12 @@
 {
   "kernel-aurora": {
     "repository": "https://github.com/aurora-silicon/linux",
-    "commit": "84d091f7aded084ef1bfa4447695bc1399cd03b5",
+    "commit": "2b05915f81bc066670cd872be3cbdd916753bf26",
     "version": "7.3.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/linux/tar.gz/84d091f7aded084ef1bfa4447695bc1399cd03b5",
-    "archive_root": "linux-84d091f7aded084ef1bfa4447695bc1399cd03b5",
-    "sha256": "da370d86d62a7ad70337bb533fa90d9a4c5683071501b37e18fca731ad17939f",
-    "nix_hash": "sha256-2jcNhtYqetcDN7tTP6kNmkxWgwcVAbN+GPynMa0Xk58="
+    "source_url": "https://codeload.github.com/aurora-silicon/linux/tar.gz/2b05915f81bc066670cd872be3cbdd916753bf26",
+    "archive_root": "linux-2b05915f81bc066670cd872be3cbdd916753bf26",
+    "sha256": "267d4c5241687781cc582c16c8398c2c2bcd31d98575be40497f4addf24afaa0",
+    "nix_hash": "sha256-Jn1MUkFod4HMWCwWyDmMLCvNMdmFdb5ASX9K3fJK+qA="
   },
   "aura": {
     "repository": "https://github.com/aurora-silicon/aura",
@@ -314,12 +314,12 @@
   },
   "aurora-touchid-rearm": {
     "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
-    "commit": "501c12baad8e85999437304edcfbd95421fd5a1a",
+    "commit": "0996f01f55c64cfebadb5b48602690ca9d5f72aa",
     "version": "1",
-    "source_url": "https://codeload.github.com/aurora-silicon/aurora-sep-userspace/tar.gz/501c12baad8e85999437304edcfbd95421fd5a1a",
-    "archive_root": "aurora-sep-userspace-501c12baad8e85999437304edcfbd95421fd5a1a",
-    "sha256": "adfe47891bcb9cf25e5a9a90997926e0187533c4390e2c94799df6f4e9de8208",
-    "nix_hash": "sha256-rf5HiRvLnPJeWpqQmXkm4Bh1M8Q5DiyUeZ329Oneggg="
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-sep-userspace/tar.gz/0996f01f55c64cfebadb5b48602690ca9d5f72aa",
+    "archive_root": "aurora-sep-userspace-0996f01f55c64cfebadb5b48602690ca9d5f72aa",
+    "sha256": "0dd1a3761de7bdaf818140da9c7d16e120d37f82ef3b6a2107a2d3707b721c72",
+    "nix_hash": "sha256-DdGjdh3nva+BgUDanH0W4SDTf4LvO2ohB6LTcHtyHHI="
   },
   "aurora-fido": {
     "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
@@ -374,5 +374,14 @@
     "archive_root": "aurora-sep-userspace-96f5aa45e6209cf94632d885a5b7c4c1bcc68209",
     "sha256": "d4f8f57c940d9d0fd8ea285cc49528e9559434b9ba7a64cff0b23dc992b8224f",
     "nix_hash": "sha256-1Pj1fJQNnQ/Y6ihcxJUo6VWUNLm6emTP8LI9yZK4Ik8="
+  },
+  "aurora-diag": {
+    "repository": "https://github.com/aurora-silicon/aurora-diag",
+    "commit": "168fcb3852ce2562cda9de90ca9315733e0ab5f6",
+    "version": "0.5.0",
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-diag/tar.gz/168fcb3852ce2562cda9de90ca9315733e0ab5f6",
+    "archive_root": "aurora-diag-168fcb3852ce2562cda9de90ca9315733e0ab5f6",
+    "sha256": "bfa2433cbc7cfe95604484e52740a60cc14d65e0c8b48142e83e6e4239ab3965",
+    "nix_hash": "sha256-v6JDPLx8/pVgRITlJ0CmDMFNZeDItIFC6D5uQjmrOWU="
   }
 }

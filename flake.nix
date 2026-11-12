@@ -85,10 +85,12 @@
         panel-nits = pkgs.aurora-panel-nits;
         nvram = pkgs.aurora-nvram;
         btsync = pkgs.aurora-btsync;
+        diag = pkgs.aurora-diag;
         fido = pkgs.aurora-fido;
         sep-sk = pkgs.aurora-sep-sk;
         xart = pkgs.aurora-xart;
         sep-luks = pkgs.aurora-sep-luks;
+        firefox = pkgs.firefox-unwrapped;
       };
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;

@@ -133,10 +133,13 @@ in {
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
     # Opt-in ambient white point in Night Light (AmbientWhitePoint in kwinrc,
     # off by default), fed by iio-sensor-proxy's ColorTemperature. The same
-    # patch is in fedora-aurora's and alarm-aurora's kwin packages.
+    # patch is in fedora-aurora's and alarm-aurora's kwin packages. Also
+    # upstream c9d72079 (6.8 branch), as in Fedora's kwin 6.8.2-3: no crash on
+    # a scanout device without a render device (DisplayLink).
     kwin = kdePrev.kwin.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [
         ./patches/kwin-nightlight-ambient-white-point.patch
+        ./patches/kwin-handle-missing-render-device.patch
       ];
     });
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
@@ -503,6 +506,25 @@ in {
       ./patches/mutter-builtin-desktop-vrr.patch
     ];
   });
+  # Firefox's RDD sandbox admits the media controller node of an allowed M2M
+  # decoder and the four media/request ioctls libva-v4l2-request needs, so
+  # VA-API decodes on the AVD with the sandbox on (Mozilla bug 2080696; the
+  # same patch as fedora-aurora and alarm-aurora). nixpkgs' firefox wraps this
+  # firefox-unwrapped, so programs.firefox gets it, and it rebuilds with every
+  # nixpkgs Firefox update.
+  #
+  # Built without PGO and LTO, like Fedora's and Arch Linux ARM's aarch64
+  # Firefox. On aarch64-linux nixpkgs builds Firefox twice for PGO (an
+  # instrumented build, a profiling run, then a full-LTO rebuild); the
+  # instrumented build alone took over four hours on a 4-core CI runner, so the
+  # whole build never finished inside the runner's 6 hour job limit.
+  firefox-unwrapped =
+    (prev.firefox-unwrapped.override {
+      enablePGO = false;
+      enableLTO = false;
+    }).overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ [ (stableFile ./patches/firefox-rdd-v4l2-request.patch) ];
+    });
   # nixpkgs exposes a symlink join here: overriding its src does not replace
   # the inner model derivation. Build the pinned models explicitly, then merge
   # them ahead of the native common UCM definitions.
@@ -682,6 +704,12 @@ in {
   aurora-kbd-light = final.callPackage ./pkgs/kbd-light.nix {
     src = source "kbd-light";
     pin = pins.kbd-light;
+  };
+  # Bring-up diagnostics, opt-in: modules/diag.nix installs it when
+  # aurora.diag.enable is set.
+  aurora-diag = final.callPackage ./pkgs/aurora-diag.nix {
+    src = source "aurora-diag";
+    pin = pins.aurora-diag;
   };
   # OpenSSH ecdsa-sk keys in the Secure Enclave (aurora-sep-userspace sk/):
   # the provider library, the udev rule giving the sep-key group /dev/sep-key
