@@ -4,9 +4,9 @@
   "shared_fragment_source": "arch/arm64/configs/asahi.config at kernel_commit",
   "config_upstream": {
     "repository": "https://github.com/aurora-silicon/alarm-aurora",
-    "commit": "1b1eb124e1e5a71f26ed9b7952772e944484828e",
+    "commit": "ece071247855a2a144ccdec40f7966188267150a",
     "config_path": "packages/linux-aurora/config",
-    "config_sha256": "0ebf6704f02149c39ad96c8918be90a584ede22786188246859680663faa42fe",
+    "config_sha256": "87635df7e0b1bd2a460969400b0623211fb52551c53b606bca14c29c078aa8d1",
     "kernel_commit": "2b05915f81bc066670cd872be3cbdd916753bf26"
   }
 }
