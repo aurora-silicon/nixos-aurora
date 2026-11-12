@@ -28,12 +28,12 @@
   },
   "mesa-aurora": {
     "repository": "https://github.com/aurora-silicon/mesa",
-    "commit": "be147e36250b3dbacb6ddcee3e68acfad610f17d",
+    "commit": "33cf8cfc66830cb093e3a35c024b92d1b01a9773",
     "version": "26.3.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/be147e36250b3dbacb6ddcee3e68acfad610f17d",
-    "archive_root": "mesa-be147e36250b3dbacb6ddcee3e68acfad610f17d",
-    "sha256": "cd102b328248601e3c6d58a804b00e5889e515d833564adba916ba6adf7cfb1c",
-    "nix_hash": "sha256-zRArMoJIYB48bVioBLAOWInlFdgzVkrbqRa6at98+xw="
+    "source_url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/33cf8cfc66830cb093e3a35c024b92d1b01a9773",
+    "archive_root": "mesa-33cf8cfc66830cb093e3a35c024b92d1b01a9773",
+    "sha256": "9f6a1f9ef66195885e640fc4d9746fc1612f0e63cb1ddb5052f5a66d59c68599",
+    "nix_hash": "sha256-n2ofnvZhlYheZA/E2XRvwWEvDmPLHdtQUvWmbVnGhZk="
   },
   "speakerguardd": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
