@@ -39,6 +39,13 @@
       destination = "/lib/udev/rules.d/62-aurora-gpu-render-only.rules";
       text = builtins.readFile ./62-aurora-gpu-render-only.rules;
     })
+    # Trackpad clicks from the host, as macOS does, where the MTP trackpad
+    # has a haptic actuator (hid_magicmouse haptic_press).
+    (pkgs.writeTextFile {
+      name = "aurora-trackpad-clicks-rules";
+      destination = "/lib/udev/rules.d/64-aurora-trackpad-clicks.rules";
+      text = builtins.readFile ./64-aurora-trackpad-clicks.rules;
+    })
   ];
   # The sense-PCM udev rule starts the feed-forward guardian only on J700.
   systemd.services.speakersafetyd.serviceConfig = {
