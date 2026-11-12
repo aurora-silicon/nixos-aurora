@@ -624,6 +624,7 @@ in {
         substituteInPlace $lx/$f --replace-quiet /usr/share/speakerguardd/ $out/share/speakerguardd/
       done
       install -Dm644 packaging/session/wiring.py packaging/session/gen.py -t $lx
+      substituteInPlace $lx/gen.py --replace-fail /usr/share/speakerguardd/ $out/share/speakerguardd/
       substituteInPlace $lx/speakerguardd-gate $lx/speakerguardd-provision \
         --replace-fail 'default="aurora-speaker-tuning"' "default=\"$out/bin/aurora-speaker-tuning\""
       substituteInPlace $lx/speakerguardd-gate --replace-fail '["amixer",' '["${final.alsa-utils}/bin/amixer",'

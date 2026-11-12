@@ -41,6 +41,36 @@ in assert lib.assertMsg (lib.all (entry: entry.assertion) on.assertions
      test -f $p/lib/lv2/sgv2.lv2/libsgv2_lv2.so
      test -f $p/share/speakerguardd/gate.json
      test -f $p/share/speakerguardd/parity.json
+     ${pkgs.python3}/bin/python3 -I - "$lx" "$p/share/speakerguardd/gate.json" <<'PY'
+     import json
+     import os
+     import sys
+     os.environ.pop("SGV2_GATE", None)
+     sys.path.insert(0, sys.argv[1])
+     import gen
+     with open(sys.argv[2]) as source:
+         assert gen.load_gate() == json.load(source)
+     PY
+     # Session handoff runs inside these units, without the interactive
+     # shell's PATH. Both privilege tools must be available there.
+     ${pkgs.python3}/bin/python3 -I - <<'PY'
+     import os
+     import subprocess
+     paths = ${builtins.toJSON (builtins.mapAttrs (_: service: lib.makeBinPath service.path) {
+       inherit (on.systemd.services)
+         speakerguardd-v2-provision speakerguardd-v2-selfcheck
+         speakerguardd-v2-switchtest speakerguardd-v2-seat speakerguardd-v2-sleep;
+     })}
+     for unit, path in paths.items():
+         for tool in ("setpriv", "runuser"):
+             result = subprocess.run([tool, "--version"], env={**os.environ, "PATH": path},
+                                     capture_output=True, text=True)
+             assert result.returncode == 0, (unit, tool, result.stderr)
+     PY
+     LV2_PATH=${lib.escapeShellArg (lib.makeSearchPath "lib/lv2" on.services.pipewire.extraLv2Packages)} \
+       ${pkgs.lilv}/bin/lv2ls > plugins
+     grep -Fx 'https://aurora-silicon.org/lv2/sgv2#6ch-vi' plugins
+     grep -Fx 'https://aurora-silicon.org/lv2/sgv2#voicing-6ch' plugins
      grep -q "$p/share/speakerguardd/parity.json" $lx/speakerguardd-selfcheck
      grep -qx "ExecStart=$lx/speakerguardd \$SGV2_ARGS" $p/lib/systemd/system/speakerguardd-v2.service
      grep -qx "ExecStart=$lx/speakerguardd-provision run" $p/lib/systemd/system/speakerguardd-v2-provision.service
