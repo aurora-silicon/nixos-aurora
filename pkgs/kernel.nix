@@ -1,4 +1,4 @@
-{ lib, callPackage, path, writeText, llvmPackages, openssl, binutils, aurora-bindgen
+{ lib, callPackage, path, writeText, llvmPackages, openssl, kmod, binutils, aurora-bindgen
 , src, pin, kernelCtxrExecmem, kernelDtbAbi, kernelPatches ? [ ] }:
 let
   stableFile = path: writeText (builtins.baseNameOf path) (builtins.readFile path);
@@ -98,7 +98,46 @@ let
         make "''${makeFlags[@]}" certs/
         "$buildRoot/certs/extract-cert" "" "$TMPDIR/aurora-empty-cert"
       '';
-      postInstall = (old.postInstall or "") + ''
+      # Kbuild signs the modules with the key this build puts in the kernel, as on
+      # ALARM and Fedora. nixpkgs' kmodigest signatures need CRYPTO_ECDSA and their
+      # certificates in the image, which this configuration doesn't have.
+      makeFlags = lib.filter (flag: !lib.hasPrefix "cmd_sign=" flag) old.makeFlags;
+      # INSTALL_MOD_STRIP strips each module before it's signed; stripping it again
+      # would drop the signature.
+      stripExclude = old.stripExclude ++ [ "*.ko" ];
+      # nixpkgs folds each module's kmodigest certificate into modules.cer, so give
+      # it empty ones. The signing key stays in the build tree it keeps in $dev and
+      # must not reach the store.
+      postInstall = ''
+        if [[ -v modules ]]; then
+          (cd -- "$modules/lib/modules/${old.passthru.modDirVersion}" &&
+            sed 's/$/.cer/' modules.order | xargs -r -d'\n' touch --)
+        fi
+      '' + (old.postInstall or "") + ''
+        cert="$dev/lib/modules/${old.passthru.modDirVersion}/build/certs/signing_key.x509"
+        if [[ -v modules && -f $cert ]]; then
+          # Every module carries a signature from the certificate built into this
+          # kernel: sign-file names it by serial number, or by key ID with -k.
+          hexid() { tr -d ' :\t\n' | tr a-f A-F | sed 's/^0*//'; }
+          serial=$(${lib.getBin openssl}/bin/openssl x509 -inform DER -in "$cert" -noout -serial | cut -d= -f2 | hexid)
+          skid=$(${lib.getBin openssl}/bin/openssl x509 -inform DER -in "$cert" -noout -ext subjectKeyIdentifier | tail -n 1 | hexid)
+          signed=0 bad=0
+          while IFS= read -r -d "" ko; do
+            key=$(${kmod}/bin/modinfo -F sig_key "$ko" | hexid)
+            if [[ "$(tail -c 28 "$ko")" == "~Module signature appended~" && -n $key &&
+                  ( $key == "$serial" || $key == "$skid" ) ]]; then
+              signed=$((signed + 1))
+            else
+              echo "module not signed by the built-in certificate: $ko" >&2
+              bad=$((bad + 1))
+            fi
+          done < <(find "$modules/lib/modules/${old.passthru.modDirVersion}" -name '*.ko' -print0)
+          echo "modules signed by the built-in certificate (serial $serial): $signed, other: $bad"
+          if (( signed == 0 || bad > 0 )); then
+            exit 1
+          fi
+        fi
+        rm -f -- "$dev/lib/modules/${old.passthru.modDirVersion}/build/certs/signing_key.pem"
         printf '%s\n' ${lib.escapeShellArg (finalAttrs.src.rev or "unknown")} > "$out/aurora-source-commit"
       '';
     });
