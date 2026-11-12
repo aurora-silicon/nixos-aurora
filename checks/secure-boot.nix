@@ -82,7 +82,8 @@ assert lib.assertMsg (lib.hasSuffix "aurora-secboot-install \"\${1:-}\"\n" (inst
   "the UKI hook is the last bootloader install step";
 # Stage 2 signing: the updater runs aurora-secboot's stage2 hook only while the
 # module is on, and only then says so to `aurora-secboot stage1 build --enforce`.
-assert lib.assertMsg (lib.hasInfix "AURORA_STAGE2_SIGNER=${on.system.build.auroraStage2Signer} " (installCommands on)
+assert lib.assertMsg (lib.hasInfix "AURORA_STAGE2_SIGNER=${builtins.unsafeDiscardStringContext on.system.build.auroraStage2Signer} "
+    (installCommands on)
   && lib.hasInfix "AURORA_STAGE2_SIGNER=" on.system.preSwitchChecks.aurora-stage2-dt-abi
   && on.environment.etc ? "aurora/stage2-sign-hook"
   && !(lib.hasInfix "AURORA_STAGE2_SIGNER" (installCommands off))
