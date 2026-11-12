@@ -69,6 +69,11 @@ in {
     src = source "libva-v4l2-request-avd";
     version = pins.libva-v4l2-request-avd.version;
     portabilityPatch = stableFile ./patches/libva-v4l2-request-offline-test-portability.patch;
+    # Chrome AV1 decode on AVD; drop when omacom/libva-v4l2_request merges them.
+    extraPatches = map stableFile [
+      ./patches/libva-v4l2-request-av1-chrome.patch
+      ./patches/libva-v4l2-request-av1-multitile.patch
+    ];
   };
   plymouth = prev.plymouth.overrideAttrs (old: {
     version = "${old.version}-aurora3";

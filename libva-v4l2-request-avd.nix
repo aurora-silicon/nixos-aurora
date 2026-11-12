@@ -1,10 +1,10 @@
-{ lib, stdenv, src, version, portabilityPatch, meson, ninja, pkg-config
+{ lib, stdenv, src, version, portabilityPatch, extraPatches ? [ ], meson, ninja, pkg-config
 , python3, libva, libdrm, linuxHeaders }:
 stdenv.mkDerivation {
   pname = "libva-v4l2-request-avd";
   inherit version src;
 
-  patches = [ portabilityPatch ];
+  patches = [ portabilityPatch ] ++ extraPatches;
   strictDeps = true;
   nativeBuildInputs = [ meson ninja pkg-config python3 ];
   buildInputs = [ libva libdrm linuxHeaders ];
