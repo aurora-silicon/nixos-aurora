@@ -48,6 +48,7 @@
         logos = pkgs.aurora-logos;
         firstboot = pkgs.aurora-firstboot;
         power-budget = pkgs.aurora-power-budget;
+        secboot = pkgs.aurora-secboot;
         sep = pkgs.aurora-sep;
         avd-fw = pkgs.aurora-avd-firmware;
         speaker-upgrade = pkgs.aurora-speaker-upgrade;

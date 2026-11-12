@@ -633,6 +633,121 @@ Balanced and Performance are untouched.
 
 **Declared in:** [power-budget.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/power-budget.nix)
 
+## `aurora.secureBoot.adoptInstallerKey`
+
+At first boot, move the Stage 2 key the installer left on the ESP
+(aurora/secboot/stage2.key, owner-managed installs) into keyDir and
+wipe the ESP copy (aurora-secboot-adopt.service). Works without
+enable, so the key never stays on the unencrypted ESP.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.enable`
+
+Build a signed unified kernel image (UKI) for each boot generation at
+every bootloader install, with aurora-secboot: the generation's kernel,
+its initrd (boot.initrd.secrets included) and its kernel parameters
+plus init= and lockdown=, minus debug and shell parameters. UKIs go to
+ESP/EFI/Linux/aurora-nixos-<hash>.efi and are signed with the db key in
+keyDir. The keys stay in keyDir and never enter the Nix store. GRUB
+stays the boot loader unless securePath is set. Writes
+/etc/aurora/secboot.conf; `aurora-secboot status` reports the chain.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.generations`
+
+Number of newest system generations that keep a UKI, besides the
+default one. Each UKI holds a kernel and an initrd, so this bounds the
+space taken on the ESP.
+
+**Type:** positive integer, meaning >0
+
+**Default:** `3`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.keyDir`
+
+Directory with the signing keys (db.key/db.crt, KEK, PK and the Stage 2
+key), root only. It must not be in the Nix store.
+
+**Type:** string
+
+**Default:** `"/var/lib/aurora/secboot/keys"`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.keyOwner`
+
+Who signs this Mac's boot chain, as chosen at install: Aurora's release
+keys (no private key on the machine, locally built UKIs stay unsigned),
+the owner's keys made on the machine (`aurora-secboot keys create`), or
+both.
+
+**Type:** one of "aurora", "owner", "both"
+
+**Default:** `"aurora"`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.lockdown`
+
+Kernel lockdown level on the UKI command line. integrity refuses
+unsigned modules, unsigned kexec images and raw memory or I/O port
+access; confidentiality also blocks reading kernel memory.
+
+**Type:** one of "integrity", "confidentiality"
+
+**Default:** `"integrity"`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.package`
+
+The aurora-secboot package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-secboot`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.securePath`
+
+Boot the default generation's signed UKI directly: it becomes
+ESP/EFI/BOOT/BOOTAA64.EFI, with GRUB kept as BOOTAA64.EFI.aurora-shim
+and put back when this is turned off. Needs owner keys (keyOwner
+"owner" or "both") and a UKI that verifies against db.crt; the
+bootloader install fails otherwise. Signatures are only checked once
+U-Boot and Stage 1 enforce them.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.ukiBuild`
+
+Build UKIs at bootloader installs: auto builds them only when keyDir
+has db.key (so they are signed), yes builds unsigned ones too, no
+builds none and removes the ones this module made.
+
+**Type:** one of "auto", "yes", "no"
+
+**Default:** `"auto"`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
 ## `aurora.sep.greeterFingerprint.enable`
 
 Patch GNOME Shell's greeter to offer fingerprint sign-in as well as
@@ -662,6 +777,23 @@ by aurora-touchid-boot.service at every boot.
 
 **Declared in:** [sep.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep.nix)
 
+## `aurora.sepLuks.bootChain`
+
+What the token plugin does before it asks the Secure Enclave for a
+volume key (fde.conf boot-chain). audit unlocks and logs one line
+when the boot chain is not verified from an enforcing Stage 1 on
+(/sys/firmware/aurora/boot_security). require leaves the volume to its
+passphrase or recovery key on such a boot. Set require only on a Mac
+whose `aurora-sep-fde boot-chain` reports a verified chain, and keep a
+passphrase or offline recovery keyslot on every volume: otherwise
+every boot asks for them. The initrd carries the same file.
+
+**Type:** one of "audit", "require"
+
+**Default:** `"audit"`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
 ## `aurora.sepLuks.enable`
 
 Install aurora-sep-cryptenroll, aurora-sep-fde and the libcryptsetup
@@ -672,7 +804,8 @@ seals it to users' passwords, checked by the Secure Enclave (the
 FileVault model): each user gets their own keyslot, and volume owners
 add, remove and reset users. Nothing is enrolled by this option: run
 either tool for each volume. /etc/aurora-sep/fde.conf comes from the
-package unless environment.etc."aurora-sep/fde.conf" is set.
+package, with bootChain applied, unless
+environment.etc."aurora-sep/fde.conf" is set.
 
 **Type:** boolean
 

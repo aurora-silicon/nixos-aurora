@@ -7,6 +7,12 @@ let
   # sealed to a user's password (aurora-sep-fde).
   keystoreOnly = if cfg.initrd.passwordUnlock then "2" else "1";
   pamModules = "${config.security.pam.package}/lib/security";
+  # The package's fde.conf with this system's boot-chain policy.
+  fdeConf = pkgs.runCommand "aurora-sep-fde.conf" { } ''
+    sed -E 's/^boot-chain[[:space:]]*=.*/boot-chain = ${cfg.bootChain}/' \
+      ${cfg.package}/etc/aurora-sep/fde.conf > $out
+    grep -qx 'boot-chain = ${cfg.bootChain}' $out
+  '';
   # After pam_unix changed the password, and only then:
   #
   #   password [success=ok default=2] pam_unix.so ...
@@ -49,7 +55,8 @@ in {
         FileVault model): each user gets their own keyslot, and volume owners
         add, remove and reset users. Nothing is enrolled by this option: run
         either tool for each volume. /etc/aurora-sep/fde.conf comes from the
-        package unless environment.etc."aurora-sep/fde.conf" is set.
+        package, with bootChain applied, unless
+        environment.etc."aurora-sep/fde.conf" is set.
       '';
     };
     initrd.enable = lib.mkOption {
@@ -121,13 +128,27 @@ in {
         '';
       };
     };
+    bootChain = lib.mkOption {
+      type = lib.types.enum [ "audit" "require" ];
+      default = "audit";
+      description = ''
+        What the token plugin does before it asks the Secure Enclave for a
+        volume key (fde.conf boot-chain). audit unlocks and logs one line
+        when the boot chain is not verified from an enforcing Stage 1 on
+        (/sys/firmware/aurora/boot_security). require leaves the volume to its
+        passphrase or recovery key on such a boot. Set require only on a Mac
+        whose `aurora-sep-fde boot-chain` reports a verified chain, and keep a
+        passphrase or offline recovery keyslot on every volume: otherwise
+        every boot asks for them. The initrd carries the same file.
+      '';
+    };
     package = lib.mkPackageOption pkgs "aurora-sep-luks" { };
   };
 
   config = lib.mkIf cfg.enable (lib.mkMerge [
     {
       environment.systemPackages = [ cfg.package ];
-      environment.etc."aurora-sep/fde.conf".source = lib.mkDefault "${cfg.package}/etc/aurora-sep/fde.conf";
+      environment.etc."aurora-sep/fde.conf".source = lib.mkDefault fdeConf;
       # nixpkgs' cryptsetup loads token plugins by name through the library
       # search path (relative-token-path.patch), so point crypttab's
       # systemd-cryptsetup instances at the plugin.
@@ -158,6 +179,9 @@ in {
       boot.initrd.systemd.storePaths = [ plugins initrdLoad ];
       # What the loader reads: the keystore_only mode, as the dracut module and
       # the mkinitcpio hook write it.
+      # The token plugin reads the boot-chain policy in the initrd too.
+      boot.initrd.systemd.contents."/etc/aurora-sep/fde.conf".source =
+        config.environment.etc."aurora-sep/fde.conf".source;
       boot.initrd.systemd.contents."/usr/lib/aurora-sep/initrd.conf".text =
         "AURORA_SEP_KEYSTORE_ONLY=${keystoreOnly}\n";
       boot.initrd.systemd.services.aurora-sep-initrd = {

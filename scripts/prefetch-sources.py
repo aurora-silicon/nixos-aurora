@@ -49,6 +49,7 @@ NEEDS = {
     'ucm': ['alsa-ucm-conf-aurora'],
     'firstboot': ['aurora-firstboot'],
     'power-budget': ['aurora-firstboot'],  # same aurora-platform archive
+    'secboot': ['aurora-secboot'],
     'libfprint': ['libfprint'],
     'fprintd': [],  # nixpkgs' pinned release, with the local companion patch
     'avd-fw': ['avd-fw'],
