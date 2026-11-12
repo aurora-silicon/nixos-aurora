@@ -59,10 +59,6 @@ let
       # kernel (kernel/config, see kernel/provenance.json), so every
       # distribution builds the same options, and add only NixOS's own
       # requirements on top.
-      # TODO: this draft config requests APPLE_SOC_SLEEP=y and
-      # RTC_DRV_APPLE_PMU=y for aurora-silicon/linux#1445. Keep validation
-      # strict; qualify/merge the final kernel and refresh its pin/config
-      # together before production delivery.
       configurePhase = ''
         runHook preConfigure
         # nixpkgs retains this tree beside source/ in the development output.
