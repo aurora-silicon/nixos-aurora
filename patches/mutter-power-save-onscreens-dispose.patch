@@ -1,0 +1,79 @@
+From 849b1aec9eca96865eaa8cbbcdb822fa1a36b7a7 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 09:10:53 +1100
+Subject: [PATCH] renderer/native: Drop power save page flip onscreens on
+ dispose
+
+While an output is in power save mode,
+meta_renderer_native_queue_power_save_page_flip() keeps a reference on
+each onscreen it fakes page flips for, until the 100 ms timeout fires.
+The renderer only dropped these references in finalize.
+
+At shutdown, meta_backend_dispose() disposes the renderer, destroys the
+Clutter context (and with it the Cogl context and display), and only
+then drops its last reference on the renderer. If an output is still in
+power save mode, the renderer views have released their onscreens by
+then, but the power save list still holds them, so the last unref
+happens in meta_renderer_native_finalize(). cogl_onscreen_egl_dispose()
+then looks up the display through the framebuffer's context. The
+framebuffer holds no reference on that context, and it has already been
+freed:
+
+  cogl_display_get_renderer
+  cogl_onscreen_egl_dispose
+  meta_onscreen_native_dispose
+  g_list_free_full
+  meta_renderer_native_finalize
+  meta_backend_dispose
+  meta_context_dispose
+  meta_context_destroy
+
+gnome-shell crashes this way on most reboots or logouts with the
+displays blanked, for example after org.gnome.Mutter.DisplayConfig
+PowerSaveMode was set to 3.
+
+Remove the timeout source and drop the queued onscreens in dispose,
+before the backend tears down the Clutter context, so they are disposed
+while the Cogl display still exists.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+---
+ src/backends/native/meta-renderer-native.c | 14 +++++++++-----
+ 1 file changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/src/backends/native/meta-renderer-native.c b/src/backends/native/meta-renderer-native.c
+index 802a2b5..01107b0 100644
+--- a/src/backends/native/meta-renderer-native.c
++++ b/src/backends/native/meta-renderer-native.c
+@@ -2564,6 +2564,15 @@ meta_renderer_native_dispose (GObject *object)
+ {
+   MetaRendererNative *renderer_native = META_RENDERER_NATIVE (object);
+ 
++  /* The backend destroys the Clutter context, and with it the Cogl
++   * display, right after disposing the renderer. Drop the onscreens
++   * queued for power save page flips now, while they can still be
++   * disposed. */
++  g_clear_handle_id (&renderer_native->power_save_page_flip_source_id,
++                     g_source_remove);
++  g_clear_list (&renderer_native->power_save_page_flip_onscreens,
++                g_object_unref);
++
+   clear_detached_onscreens (renderer_native);
+ 
+   G_OBJECT_CLASS (meta_renderer_native_parent_class)->dispose (object);
+@@ -2574,11 +2583,6 @@ meta_renderer_native_finalize (GObject *object)
+ {
+   MetaRendererNative *renderer_native = META_RENDERER_NATIVE (object);
+ 
+-  g_clear_list (&renderer_native->power_save_page_flip_onscreens,
+-                g_object_unref);
+-  g_clear_handle_id (&renderer_native->power_save_page_flip_source_id,
+-                     g_source_remove);
+-
+   g_list_free (renderer_native->pending_mode_set_views);
+   g_hash_table_unref (renderer_native->mode_set_updates);
+ 
+-- 
+2.50.1 (Apple Git-155)
+

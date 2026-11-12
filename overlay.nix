@@ -509,11 +509,15 @@ in {
   # A built-in panel in a variable refresh rate mode uses it on its whole
   # desktop, not only for fullscreen surfaces, so an idle desktop lets the
   # panel drop to its minimum rate.
+  # The renderer drops the onscreens it queued for power save page flips when
+  # it is disposed, before the Cogl display goes away, so gnome-shell does not
+  # crash at shutdown while outputs are in power save.
   mutter = prev.mutter.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ map stableFile [
       ./patches/mutter-prefer-variable-refresh-rate.patch
       ./patches/mutter-pq-reference-luminance.patch
       ./patches/mutter-builtin-desktop-vrr.patch
+      ./patches/mutter-power-save-onscreens-dispose.patch
     ];
   });
   # Firefox's RDD sandbox admits the media controller node of an allowed M2M
