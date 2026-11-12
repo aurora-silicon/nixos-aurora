@@ -258,6 +258,32 @@ class NixosTrialTests(unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
         self.assertEqual(ctxr.with_name('boot-ctxr.bin.prev').read_bytes(), b'GOOD-CTXR')
 
+    def test_explicit_boot_bin_is_trialled_and_committed_on_macho(self):
+        self.put('/stage2/monitor-free', b'')
+        self.put('/proc/device-tree/compatible', b'apple,j614s\0apple,t6040\0')
+        ctxr = self.put('/esp/m1n1/boot-ctxr.bin', b'UNUSED-CTXR')
+        self.env['AURORA_STAGE2_BOOT_FILE'] = 'boot.bin'
+        payload = self.stage2(image(dtb('j614s', 't6040')))
+        self.install()
+        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+        self.trial_boot('m1n1/boot.bin.next')
+        self.sane()
+        self.commit()
+        self.assertEqual(self.target.read_bytes(), payload)
+        self.assertEqual(ctxr.read_bytes(), b'UNUSED-CTXR')
+
+    def test_check_compares_the_explicit_boot_file(self):
+        self.put('/stage2/monitor-free', b'')
+        self.put('/proc/device-tree/compatible', b'apple,j614s\0apple,t6040\0')
+        self.env['AURORA_STAGE2_BOOT_FILE'] = 'boot.bin'
+        payload = image(dtb('j614s', 't6040'))
+        self.put('/stage2/ctxr/boot-ctxr-j614s.bin', payload)
+        self.target.write_bytes(payload)
+        self.generation(2, 'kernel-old', abi=0)
+        # No change to the file Stage 1 loads: the unused CTXR file must not
+        # cause an ABI refusal before the boot menu is updated.
+        nixos_stage2.NixosUpdate(self.root, self.env).check()
+
     # The newest bootloader install decides the trial.
 
     def test_a_second_install_before_reboot_replaces_the_untried_candidate(self):
