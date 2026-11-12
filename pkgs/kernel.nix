@@ -106,38 +106,42 @@ let
       # would drop the signature.
       stripExclude = old.stripExclude ++ [ "*.ko" ];
       # nixpkgs folds each module's kmodigest certificate into modules.cer, so give
-      # it empty ones. The signing key stays in the build tree it keeps in $dev and
-      # must not reach the store.
+      # it empty ones. The signatures are checked here, before nixpkgs' make clean
+      # removes the build's certificate (and its key) from the build tree.
       postInstall = ''
         if [[ -v modules ]]; then
-          (cd -- "$modules/lib/modules/${old.passthru.modDirVersion}" &&
-            sed 's/$/.cer/' modules.order | xargs -r -d'\n' touch --)
-        fi
-      '' + (old.postInstall or "") + ''
-        cert="$dev/lib/modules/${old.passthru.modDirVersion}/build/certs/signing_key.x509"
-        if [[ -v modules && -f $cert ]]; then
-          # Every module carries a signature from the certificate built into this
-          # kernel: sign-file names it by serial number, or by key ID with -k.
-          hexid() { tr -d ' :\t\n' | tr a-f A-F | sed 's/^0*//'; }
-          serial=$(${lib.getBin openssl}/bin/openssl x509 -inform DER -in "$cert" -noout -serial | cut -d= -f2 | hexid)
-          skid=$(${lib.getBin openssl}/bin/openssl x509 -inform DER -in "$cert" -noout -ext subjectKeyIdentifier | tail -n 1 | hexid)
-          signed=0 bad=0
-          while IFS= read -r -d "" ko; do
-            key=$(${kmod}/bin/modinfo -F sig_key "$ko" | hexid)
-            if [[ "$(tail -c 28 "$ko")" == "~Module signature appended~" && -n $key &&
-                  ( $key == "$serial" || $key == "$skid" ) ]]; then
-              signed=$((signed + 1))
-            else
-              echo "module not signed by the built-in certificate: $ko" >&2
-              bad=$((bad + 1))
+          moddir="$modules/lib/modules/${old.passthru.modDirVersion}"
+          (cd -- "$moddir" && sed 's/$/.cer/' modules.order | xargs -r -d'\n' touch --)
+          if [[ -n $(find "$moddir" -name '*.ko' -print -quit) ]] &&
+              grep -qx 'CONFIG_MODULE_SIG=y' "$buildRoot/.config"; then
+            # Every module carries a signature from the certificate built into this
+            # kernel: sign-file names it by serial number, or by key ID with -k.
+            cert="$buildRoot/certs/signing_key.x509"
+            if [[ ! -f $cert ]]; then
+              echo "no module signing certificate at $cert" >&2
+              exit 1
             fi
-          done < <(find "$modules/lib/modules/${old.passthru.modDirVersion}" -name '*.ko' -print0)
-          echo "modules signed by the built-in certificate (serial $serial): $signed, other: $bad"
-          if (( signed == 0 || bad > 0 )); then
-            exit 1
+            hexid() { tr -d ' :\t\n' | tr a-f A-F | sed 's/^0*//'; }
+            serial=$(${lib.getBin openssl}/bin/openssl x509 -inform DER -in "$cert" -noout -serial | cut -d= -f2 | hexid)
+            skid=$(${lib.getBin openssl}/bin/openssl x509 -inform DER -in "$cert" -noout -ext subjectKeyIdentifier | tail -n 1 | hexid)
+            signed=0 bad=0
+            while IFS= read -r -d "" ko; do
+              key=$(${kmod}/bin/modinfo -F sig_key "$ko" | hexid)
+              if [[ "$(tail -c 28 "$ko")" == "~Module signature appended~" && -n $key &&
+                    ( $key == "$serial" || $key == "$skid" ) ]]; then
+                signed=$((signed + 1))
+              else
+                echo "module not signed by the built-in certificate: $ko" >&2
+                bad=$((bad + 1))
+              fi
+            done < <(find "$moddir" -name '*.ko' -print0)
+            echo "modules signed by the built-in certificate (serial $serial): $signed, other: $bad"
+            if (( bad > 0 )); then
+              exit 1
+            fi
           fi
         fi
-        rm -f -- "$dev/lib/modules/${old.passthru.modDirVersion}/build/certs/signing_key.pem"
+      '' + (old.postInstall or "") + ''
         printf '%s\n' ${lib.escapeShellArg (finalAttrs.src.rev or "unknown")} > "$out/aurora-source-commit"
       '';
     });
