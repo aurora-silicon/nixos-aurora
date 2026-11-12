@@ -133,10 +133,13 @@ in {
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
     # Opt-in ambient white point in Night Light (AmbientWhitePoint in kwinrc,
     # off by default), fed by iio-sensor-proxy's ColorTemperature. The same
-    # patch is in fedora-aurora's and alarm-aurora's kwin packages.
+    # patch is in fedora-aurora's and alarm-aurora's kwin packages. Also
+    # upstream c9d72079 (6.8 branch), as in Fedora's kwin 6.8.2-3: no crash on
+    # a scanout device without a render device (DisplayLink).
     kwin = kdePrev.kwin.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [
         ./patches/kwin-nightlight-ambient-white-point.patch
+        ./patches/kwin-handle-missing-render-device.patch
       ];
     });
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
