@@ -15,6 +15,7 @@ in (import ./nix-lint.nix { inherit pkgs; }) // {
   legacy-speaker-protection = import ./legacy-speaker-protection.nix { inherit pkgs nixpkgs makeSystem; };
   speakerguardd-v2-opt-in = import ./speakerguardd-v2-opt-in.nix { inherit pkgs nixpkgs makeSystem; };
   sep-luks = import ./sep-luks.nix { inherit pkgs nixpkgs makeSystem; };
+  secure-boot = import ./secure-boot.nix { inherit pkgs nixpkgs makeSystem; };
   ane-packaging = import ./ane-packaging.nix { inherit pkgs nixpkgs system overlays; };
   touchid-pam = import ./touchid-pam.nix { inherit pkgs nixpkgs self; };
   fex-overlay-upgrade = import ./fex-overlay-upgrade.nix { inherit pkgs; };
