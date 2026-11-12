@@ -128,7 +128,8 @@ jobs:
     if: needs.evaluate.outputs.packages != '[]'
     # Guest drivers contain x86 code and must be built on x86, as on Fedora.
     runs-on: ${{ matrix.package == 'fex-mesa' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
-    timeout-minutes: 180
+    # Firefox takes hours on the 4-core runner.
+    timeout-minutes: ${{ matrix.package == 'firefox' && 355 || 180 }}
     permissions:
       contents: read
       id-token: write
@@ -155,12 +156,23 @@ jobs:
       - name: Check isolated Flatpak build namespaces before fetching SDKs
         if: matrix.package == 'flatpak-gl'
         run: nix build --no-link --print-build-logs .#checks.aarch64-linux.flatpak-sandbox
+      - name: Prepare build capacity for Firefox
+        if: matrix.package == 'firefox'
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet /usr/local/share/boost /opt/hostedtoolcache /usr/local/.ghcup || true
+          # gkrust's rustc needs >10 GB next to the C++ jobs; keep the kernel OOM killer as the only
+          # limit (systemd-oomd can kill on swap pressure before memory runs out).
+          sudo systemctl stop systemd-oomd.service systemd-oomd.socket 2>/dev/null || true
+          sudo swapoff -a || true
+          sudo fallocate -l 40G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+          free -g
+          df -h /nix "$GITHUB_WORKSPACE" || df -h
       - name: Fetch pinned sources with verification and rate-limit backoff
         env:
           PACKAGE: ${{ matrix.package }}
         run: python3 scripts/prefetch-sources.py "$PACKAGE"
       - name: Build the pinned Aurora hardware package
-        run: nix build --max-jobs 1 --cores 4 --print-build-logs --json '.#packages.aarch64-linux.${{ matrix.package }}^*' > build.json
+        run: nix build --max-jobs 1 --cores ${{ matrix.package == 'firefox' && 3 || 4 }} --print-build-logs --json '.#packages.aarch64-linux.${{ matrix.package }}^*' > build.json
       - name: Exercise graphics generation switch and rollback
         if: matrix.package == 'graphics'
         run: |
