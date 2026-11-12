@@ -37,12 +37,21 @@ in {
     cp build/aura.macho stage1/aura.macho
     cp build/aura-boot.macho stage1/aura-boot.macho
     make clean
+    # No secure-flavour Stage 1 (aura-secure-raw.bin) yet: with SECBOOT=audit
+    # SECBOOT_FLAVOUR=secure, aura 1.0.0b12's Stage 1 outgrows the space before
+    # the DCP log buffer, as on Fedora. aurora-secboot stage1 build takes the
+    # image from --stage1-image until aura fits it.
     make $makeFlags ESP_STAGE2=1
   '';
   installPhase = ''
     mkdir -p $out/lib/m1n1 $out/share/aura/stage1
     cp build/aura.bin $out/lib/m1n1/m1n1.bin
     cp stage1/* $out/share/aura/stage1/
+    # aura's own Stage 1 and signing tools, for aurora-secboot stage1 build and
+    # its stage2 hook (AURORA_SECBOOT_AURA_DIR=$out/share/aura).
+    install -Dm644 -t $out/share/aura/tools \
+      tools/fill_stage1_config.py tools/secboot_sign.py tools/macho_boot_object.py \
+      tools/recovery/enroll-stage1.sh
     # Monitor-free Aura makes Stage 2 stop updating boot.bin on Mach-O Macs.
     found=false
     if [ -f src/ctxr_exec.c ] || [ ! -f src/monitor.c ]; then found=true; fi

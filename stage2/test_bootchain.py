@@ -530,6 +530,60 @@ m.Update(root, env).apply()
         self.assertEqual(os.readlink(self.link), 'dtb-7.3')
 
 
+@unittest.skipUnless(shutil.which('dtc') and shutil.which('fdtget'), 'requires dtc')
+class SigningTests(unittest.TestCase):
+    setUp = BootchainTests.setUp
+    put = BootchainTests.put
+    dtb = BootchainTests.dtb
+    kernel = BootchainTests.kernel
+    apply = BootchainTests.apply
+
+    def signer(self, body):
+        path = self.put('/usr/bin/aurora-secboot', f'#!{sys.executable}\n{body}'.encode())
+        path.chmod(0o755)
+        return path
+
+    def test_without_aurora_secboot_the_stage2_is_unsigned(self):
+        self.kernel('7.3')
+        self.apply()
+        self.assertTrue(self.target.read_bytes().startswith(b'AURA'))
+        self.assertNotIn(b'AURSIGT1', self.target.read_bytes())
+
+    def test_the_signer_output_is_written(self):
+        self.kernel('7.3')
+        self.signer('import sys\n'
+                    'assert sys.argv[1:3] == ["stage2", "hook"]\n'
+                    'data = open(sys.argv[3], "rb").read()\n'
+                    'open(sys.argv[4], "wb").write(data + b"SIG" + b"AURSIGT1")\n'
+                    'print("aurora-secboot: Stage 2 signed")\n')
+        self.apply()
+        data = self.target.read_bytes()
+        self.assertTrue(data.startswith(b'AURA') and data.endswith(b'SIGAURSIGT1'))
+        self.assertEqual(self.root.joinpath('esp/m1n1/boot.bin.old').read_bytes(), b'GOOD-STAGE2')
+
+    def test_a_failed_signer_keeps_the_live_stage2(self):
+        self.kernel('7.3')
+        self.signer('import sys\nprint("aurora-secboot: there is no stage2.key", file=sys.stderr)\nsys.exit(1)\n')
+        with self.assertRaisesRegex(bootchain.Refused, 'Stage 2 signing failed: aurora-secboot: there is no stage2.key'):
+            self.apply()
+        self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
+        self.assertEqual(os.readlink(self.link), 'dtb-known')
+
+    def test_a_signer_that_changes_the_image_is_refused(self):
+        self.kernel('7.3')
+        self.signer('import sys\nopen(sys.argv[4], "wb").write(b"OTHER")\n')
+        with self.assertRaisesRegex(bootchain.Refused, 'changed the composed image'):
+            self.apply()
+        self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
+
+    def test_signer_path_comes_from_the_environment(self):
+        self.kernel('7.3')
+        self.signer('import sys\nsys.exit(1)\n')
+        self.env['AURORA_STAGE2_SIGNER'] = '/nonexistent/aurora-secboot'
+        self.apply()
+        self.assertTrue(self.target.read_bytes().startswith(b'AURA'))
+
+
 class TrialTests(unittest.TestCase):
     setUp = BootchainTests.setUp
     put = BootchainTests.put
@@ -587,6 +641,19 @@ class TrialTests(unittest.TestCase):
         self.kernel('7.3', board='j700')
         self.ctxr = self.put('/esp/m1n1/boot-ctxr.bin', b'GOOD-CTXR')
         self.candidate = self.ctxr.with_name('boot-ctxr.bin.next')
+
+    def test_trial_candidate_is_the_signed_stage2(self):
+        self.trial_setup()
+        signer = self.put('/usr/bin/aurora-secboot', f'#!{sys.executable}\nimport sys\n'
+                          'data = open(sys.argv[3], "rb").read()\n'
+                          'open(sys.argv[4], "wb").write(data + b"SIG" + b"AURSIGT1")\n'.encode())
+        signer.chmod(0o755)
+        self.apply()
+        candidate = self.candidate.read_bytes()
+        self.assertTrue(candidate.endswith(b'SIGAURSIGT1'))
+        self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
+        receipt = json.loads(self.candidate.with_name('boot.bin.next.json').read_text())
+        self.assertEqual(receipt['sha256'], hashlib.sha256(candidate).hexdigest())
 
     def test_ctxr_trial_keeps_both_live_slots(self):
         self.ctxr_setup()

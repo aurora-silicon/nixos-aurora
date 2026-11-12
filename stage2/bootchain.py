@@ -646,8 +646,34 @@ class Update:
         except OSError as error:
             print(f'aurora-stage2-commit: could not record the committed attempt: {error}')
 
+    def sign(self, payload):
+        """Hand the composed Stage 2 to aurora-secboot ("stage2 hook"), which signs it with the
+        owner's Stage 2 key when Stage 2 signing is on and returns it unchanged otherwise. A Stage 1
+        that enforces signatures refuses an unsigned Stage 2, so a failure keeps the last one."""
+        signer = self.path(self.env.get('AURORA_STAGE2_SIGNER', '/usr/bin/aurora-secboot'))
+        if not signer.is_file():
+            return payload
+        with tempfile.TemporaryDirectory(prefix='aurora-stage2-sign.') as work:
+            source, signed = Path(work) / 'stage2', Path(work) / 'stage2.signed'
+            source.write_bytes(payload)
+            result = subprocess.run([str(signer), 'stage2', 'hook', str(source), str(signed)],
+                                    capture_output=True, text=True)
+            if result.returncode:
+                detail = (result.stderr or result.stdout).strip().splitlines()
+                raise Refused('Stage 2 signing failed: ' + (detail[-1] if detail else f'exit {result.returncode}'))
+            output = signed.read_bytes()
+        # Signing only appends a trailer; the composed image itself stays as built.
+        if output[:len(payload)] != payload:
+            raise Refused('the Stage 2 signer changed the composed image')
+        if self.ctxr_board() and len(output) > 16 * 1024 * 1024:
+            raise Refused('signed CTXR Stage 2 exceeds the 16 MiB slot; keeping the working images')
+        for line in result.stdout.splitlines():
+            print(line)
+        return output
+
     def apply(self):
         selected, source, own, payload = self.plan()
+        payload = self.sign(payload)
         target = self.target()
         if target.is_symlink():
             raise Refused('Stage 2 target is a symlink')
