@@ -37,10 +37,14 @@ in {
     cp build/aura.macho stage1/aura.macho
     cp build/aura-boot.macho stage1/aura-boot.macho
     make clean
-    # No secure-flavour Stage 1 (aura-secure-raw.bin) yet: with SECBOOT=audit
-    # SECBOOT_FLAVOUR=secure, aura 1.0.0b12's Stage 1 outgrows the space before
-    # the DCP log buffer, as on Fedora. aurora-secboot stage1 build takes the
-    # image from --stage1-image until aura fits it.
+    # The secure-flavour Stage 1 that aurora-secboot stage1 build fills with the
+    # owner's key. Its built-in key, used only while the key block is unfilled, is
+    # a fresh one whose private half is never written down, so an unfilled image
+    # verifies nothing. The key stays out of $out.
+    python3 -c 'import os, sys; sys.path.insert(0, "tools"); import secboot_sign; sys.stdout.buffer.write(secboot_sign.pubkey(os.urandom(32)))' > "$TMPDIR/nobody.pub"
+    make $makeFlags SECBOOT=audit SECBOOT_FLAVOUR=secure SECBOOT_PUBKEY="$TMPDIR/nobody.pub"
+    cp build/aura.bin stage1/aura-secure-raw.bin
+    make clean
     make $makeFlags ESP_STAGE2=1
   '';
   installPhase = ''
