@@ -322,6 +322,8 @@ in {
   # period after a refused start and reports refusals at most once per 5 s;
   # 1008: a retry on a PCM that a system sleep suspended is an info line.
   # 1009: display audio nodes carry the ELD product name (upstream efb5aa06).
+  # 1010: a stream whose start the driver refused is prepared again on the next
+  # start (it failed every later start with -EPIPE until PipeWire restarted).
   # 1000-1004: AirPlay (RAOP)
   # sender fixes. nixpkgs runs the meson suite, with both new tests.
   aurora-pipewire = prev.pipewire.overrideAttrs (old: {
@@ -336,6 +338,7 @@ in {
       ./patches/pipewire/1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch
       ./patches/pipewire/1008-alsa-a-start-on-a-suspended-PCM-is-expected-not-an-error.patch
       ./patches/pipewire/1009-alsa-put-the-ELD-product-name-on-HDMI-DP-nodes.patch
+      ./patches/pipewire/1010-alsa-prepare-a-stream-again-after-its-start-failed.patch
     ];
     doCheck = true;
   });
