@@ -52,6 +52,8 @@ NEEDS = {
     'fprintd': [],  # nixpkgs' pinned release, with the local companion patch
     'avd-fw': ['avd-fw'],
     'libva-v4l2-request-avd': ['libva-v4l2-request-avd'],
+    'aurora-ave-vaapi': ['aurora-ave-vaapi'],
+    'aurora-va-dispatch': ['aurora-ave-vaapi'],
     'omarchy-ane-tools': ['omarchy-ane-tools'],
     'mil-hwx-compiler': ['mil-hwx-compiler'],
     'upower': ['upower-aurora'],

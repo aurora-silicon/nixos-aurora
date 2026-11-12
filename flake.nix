@@ -52,6 +52,8 @@
         avd-fw = pkgs.aurora-avd-firmware;
         speaker-upgrade = pkgs.aurora-speaker-upgrade;
         libva-v4l2-request-avd = pkgs.libvaV4l2RequestAvd;
+        aurora-ave-vaapi = pkgs.aurora-ave-vaapi;
+        aurora-va-dispatch = pkgs.aurora-va-dispatch;
         bindgen = pkgs.aurora-bindgen;
         aura = pkgs.m1n1;
         uboot = pkgs.uboot-asahi;

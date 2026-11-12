@@ -116,6 +116,15 @@
     "sha256": "826fda7396374daea1c39c08e2057dd2b4775cf0205c59bce2d30ce2bfd212a4",
     "nix_hash": "sha256-gm/ac5Y3Ta6hw5wI4gV90rR3XPAgXFm84tMM4r/SEqQ="
   },
+  "aurora-ave-vaapi": {
+    "repository": "https://github.com/EdupugantiAkhil/aurora-ave-vaapi",
+    "commit": "e40b036af142da8cbe56cdc16988a0007d804f9b",
+    "version": "0.1-unstable-2026-11-10",
+    "source_url": "https://codeload.github.com/EdupugantiAkhil/aurora-ave-vaapi/tar.gz/e40b036af142da8cbe56cdc16988a0007d804f9b",
+    "archive_root": "aurora-ave-vaapi-e40b036af142da8cbe56cdc16988a0007d804f9b",
+    "sha256": "89e6f8317b18c2b3586e29ab1d4f868c1c4694f613276be961de3be94c2accfd",
+    "nix_hash": "sha256-ieb4MXsYwrNYbimrHU+GjBxGlPYTJ2vpYd476UwqzP0="
+  },
   "avd-fw": {
     "repository": "https://github.com/aurora-silicon/avd-fw",
     "commit": "6062e8516c0a751bc8e50f5d604a17395923189f",
