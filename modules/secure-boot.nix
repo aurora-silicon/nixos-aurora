@@ -37,6 +37,14 @@ let
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postBuild = ''
       wrapProgram $out/bin/aurora-secboot --set-default AURORA_SECBOOT_AURA_DIR ${aura}/share/aura
+      # The Stage 2 updater's signer, only from an aurora-secboot that has
+      # `stage2 hook` (aurora-platform#17): bootchain.py leaves the Stage 2
+      # unsigned when the signer path does not exist, where an unknown
+      # command would fail every Stage 2 update.
+      if $out/bin/aurora-secboot stage2 hook --help > /dev/null 2>&1; then
+        mkdir -p $out/libexec
+        ln -s $out/bin/aurora-secboot $out/libexec/aurora-stage2-signer
+      fi
     '';
   };
   # install-grub.sh passes the configuration it makes the default as $1.
@@ -258,7 +266,7 @@ in {
       system.build.auroraSecureBootInstall = install;
       # installed.nix hands each Stage 2 to this one's `stage2 hook`, which
       # signs it with the owner's Stage 2 key when STAGE2_SIGN allows.
-      system.build.auroraStage2Signer = "${withAura}/bin/aurora-secboot";
+      system.build.auroraStage2Signer = "${withAura}/libexec/aurora-stage2-signer";
       system.build.auroraSecureBootConfig = configFile;
     })
   ];

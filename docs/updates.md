@@ -68,8 +68,8 @@ including the MacBook Neo.
   (`/proc/device-tree/chosen/asahi,efi-system-partition` when present) with an `m1n1` directory, then
   hands the write to `aurora-stage2 install` (below). An unchanged file is left alone. Any refusal
   leaves the ESP unchanged and fails the bootloader install loudly.
-- With `aurora.secureBoot.enable`, `aurora-stage2` first passes the built file through
-  `aurora-secboot stage2 hook` (`AURORA_STAGE2_SIGNER`), as `update-m1n1` does on Fedora. The hook signs it
+- With `aurora.secureBoot.enable` and an `aurora-secboot` that has `stage2 hook`, `aurora-stage2` first
+  passes the built file through it (`AURORA_STAGE2_SIGNER`), as `update-m1n1` does on Fedora. The hook signs it
   with the owner's Stage 2 key when `STAGE2_SIGN` allows (by default: `stage2.key` in `keyDir` and
   `keyOwner` `owner` or `both`) and returns it unchanged otherwise; receipts and trials name the signed
   bytes. A signing failure keeps the live Stage 2. The module then also writes `/etc/aurora/stage2-sign-hook`,
