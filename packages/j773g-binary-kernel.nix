@@ -21,7 +21,7 @@ let
     VFAT_FS = "y";
     RUST = "y";
     IP_NF_MATCH_RPFILTER = "n";
-    NF_TABLES = "n";
+    NF_TABLES = "m";
   };
   kernelConfig = rec {
     isSet = name: builtins.hasAttr name configValues;
@@ -47,7 +47,7 @@ stdenvNoCC.mkDerivation {
     grep -aF "Linux version ${kernelRelease} " ${kernelPayload}/Image >/dev/null
     grep -qx 'CONFIG_APPLE_WATCHDOG=y' ${kernelPayload}/config
     grep -qx 'CONFIG_NVME_APPLE=y' ${kernelPayload}/config
-    grep -qx '# CONFIG_NF_TABLES is not set' ${kernelPayload}/config
+    grep -qx 'CONFIG_NF_TABLES=m' ${kernelPayload}/config
 
     install -Dm0444 ${kernelPayload}/Image "$out/Image"
     install -Dm0444 ${kernelPayload}/t8132-j773g.dtb \
@@ -79,7 +79,9 @@ stdenvNoCC.mkDerivation {
       ia32Emulation = false;
       efiBootStub = false;
       netfilterRPFilter = kernelConfig.isEnabled "IP_NF_MATCH_RPFILTER";
-      nftables = kernelConfig.isEnabled "NF_TABLES";
+      # NF_TABLES is modular in the config, but the archived run-59 payload
+      # contains no .ko files. Do not claim a feature the package cannot load.
+      nftables = false;
     };
     auroraSourceCommit = sourceCommit;
     auroraDtbAbi = 1;
