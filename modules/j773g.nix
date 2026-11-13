@@ -41,15 +41,15 @@
   systemd.targets.hybrid-sleep.enable = false;
 
   # PowerDevil reads these defaults for newly-created Plasma users.
-  environment.etc."xdg/powerdevilrc".text = ''
-    [AC]
-    autoSuspendAction=0
-    autoSuspendIdleTimeoutSec=0
-    [Battery]
-    autoSuspendAction=0
-    autoSuspendIdleTimeoutSec=0
-    [LowBattery]
-    autoSuspendAction=0
-    autoSuspendIdleTimeoutSec=0
+  environment.etc."xdg/powerdevilprofilesrc".text = ''
+    [AC][SuspendSession]
+    idleTime=0
+    suspendType=0
+    [Battery][SuspendSession]
+    idleTime=0
+    suspendType=0
+    [LowBattery][SuspendSession]
+    idleTime=0
+    suspendType=0
   '';
 }
