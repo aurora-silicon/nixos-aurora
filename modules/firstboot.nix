@@ -106,7 +106,9 @@ in {
         Type = "oneshot";
         RemainAfterExit = true;
         TimeoutStartSec = "infinity";
-        ExecStartPre = "${pkgs.kmod}/bin/modprobe apple_wdt";
+        # apple_wdt is built in on some supported kernels. A missing optional
+        # loadable object must not prevent the initrd from mounting root.
+        ExecStartPre = "-${pkgs.kmod}/bin/modprobe apple_wdt";
         ExecStart = "${pkgs.aurora-firstboot}/lib/aurora/aurora-initrd-root";
         Environment = "AURORA_IMAGE_LAYOUT=${layoutFile}";
       };

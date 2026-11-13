@@ -6,7 +6,11 @@
   fileSystems."/" = { device = "/dev/disk/by-label/AURORA_ROOT"; fsType = "btrfs"; options = [ "subvol=root" "compress=zstd:1" ]; };
   fileSystems."/home" = { device = "/dev/disk/by-label/AURORA_ROOT"; fsType = "btrfs"; options = [ "subvol=home" "compress=zstd:1" ]; };
   fileSystems."/boot" = { device = "/dev/disk/by-label/AURORA_BOOT"; fsType = "ext4"; };
-  fileSystems."/boot/efi" = { device = "/dev/disk/by-label/AURORA_EFI"; fsType = "vfat"; };
+  fileSystems."/boot/efi" = {
+    device = "/dev/disk/by-label/AURORA_EFI";
+    fsType = "vfat";
+    options = [ "nofail" "x-systemd.device-timeout=5s" ];
+  };
   boot.loader.efi.efiSysMountPoint = "/boot/efi";
   # The shared first-boot adapter creates the Linux account; images carry no password.
   users.mutableUsers = true;
