@@ -392,5 +392,14 @@
     "archive_root": "aurora-installer-79a75495b160fcd92b76b0374f0acb4ca30f3a7b",
     "sha256": "1e4b55ed6f0ecb862a6ea3a05ea72d3bece898df0dece9882110ffd8f41fcf4a",
     "nix_hash": "sha256-HktV7W8Oy4YqbqOgXqctO+zomN8N7OmIIRD/2PQfz0o="
+  },
+  "credentialsd": {
+    "repository": "https://github.com/linux-credentials/credentialsd",
+    "commit": "3659aa69c6bfd4dfa24fc69daeba7ed42d35441c",
+    "version": "0.4.0",
+    "source_url": "https://codeload.github.com/linux-credentials/credentialsd/tar.gz/3659aa69c6bfd4dfa24fc69daeba7ed42d35441c",
+    "archive_root": "credentialsd-3659aa69c6bfd4dfa24fc69daeba7ed42d35441c",
+    "sha256": "668d56a7f6bd6ed063ca340306ab1d3ece4afa09bec6369eb6f07fb8e185ade6",
+    "nix_hash": "sha256-Zo1Wp/a9btBjyjQDBqsdPs5K+gm+xjaetvB/uOGFreY="
   }
 }

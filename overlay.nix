@@ -1098,4 +1098,33 @@ in {
       platforms = [ "aarch64-linux" ];
     };
   };
+  # credentialsd 0.4.0 with the platform passkey provider series: the backend
+  # of xdg-desktop-portal's experimental Credential portal, which aurora-fido's
+  # Secure Enclave agent registers with (modules/fido.nix).
+  credentialsd = final.callPackage ./pkgs/credentialsd.nix {
+    src = source "credentialsd";
+    pin = pins.credentialsd;
+  };
+  # xdg-desktop-portal with the experimental Credential portal: PR 2036 (libdex
+  # D-Bus skeletons) and PR 1889 as openSUSE carries them on 1.22.1, plus
+  # capability properties from credentialsd's GetClientCapabilities() and
+  # backend lookup for experimental interfaces without a portals.conf entry.
+  # It starts only with XDG_DESKTOP_PORTAL_ENABLE_EXPERIMENTAL=credential.
+  xdg-desktop-portal = prev.xdg-desktop-portal.overrideAttrs (old:
+    assert final.lib.assertMsg (old.version == "1.22.1")
+      "xdg-desktop-portal ${old.version}: rebase patches/xdg-desktop-portal";
+    {
+      patches = (old.patches or [ ]) ++ map stableFile [
+        ./patches/xdg-desktop-portal/0001-xdp-pr-2036-dex-dbus-skeletons.patch
+        ./patches/xdg-desktop-portal/0002-xdp-pr-1889-credential-portal.patch
+        ./patches/xdg-desktop-portal/0003-build-use-libdex-and-its-gdbus-codegen-extension.patch
+        ./patches/xdg-desktop-portal/0004-credential-follow-the-handler-s-client-capabilities.patch
+      ];
+      # libdex and its gdbus-codegen extension (0003).
+      buildInputs = (old.buildInputs or [ ]) ++ [ final.libdex ];
+      postInstall = (old.postInstall or "") + ''
+        # The portal asks credentialsd for the capabilities (0004).
+        grep -q GetClientCapabilities $out/libexec/xdg-desktop-portal
+      '';
+    });
 }

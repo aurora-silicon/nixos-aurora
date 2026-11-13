@@ -2,7 +2,7 @@
 {
   imports = [ ./ane.nix ./firmware.nix ./platform.nix ./audio.nix ./system-fixes.nix
     ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix ./dbus.nix
-    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix ./panel-nits.nix ./btsync.nix ./fido.nix ./awdl.nix ./sep-luks.nix
+    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix ./panel-nits.nix ./btsync.nix ./fido.nix ./credentialsd.nix ./awdl.nix ./sep-luks.nix
     ./userpages.nix ./boot-splash.nix ./speakerguardd-v2.nix ./speaker-upgrade.nix ./wifi-firmware.nix ./steam.nix
     ./power-budget.nix ./diag.nix ./secure-boot.nix ];
   options.aurora.desktop = lib.mkOption {

@@ -1,0 +1,231 @@
+From 97af8d31d6e0273a1c1b4b84e066a914c00f36fd Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Fri, 13 Nov 2026 17:37:35 +1100
+Subject: [PATCH 4/5] daemon: Report client capabilities to the portal
+
+Browsers call isUserVerifyingPlatformAuthenticatorAvailable() and
+getClientCapabilities() to decide whether to offer passkey creation.
+The portal has no way to answer them from what credentialsd can do, so
+it hard-codes the values.
+
+Add GetClientCapabilities() to the handler interface. It returns an
+a{sv} of booleans with the WebAuthn client capability names in
+snake_case. user_verifying_platform_authenticator is true when a platform
+provider answers GetInfo() with at least one user verification method;
+a locked provider counts, since the user is asked to unlock it.
+passkey_platform_authenticator is true with such a provider or with the
+hybrid transport. related_origins reflects that requests are validated
+with related origin requests. Conditional mediation and the signal
+methods are not supported yet and are reported as false.
+---
+ credentialsd/src/gateway/dbus.rs |  16 ++++-
+ credentialsd/src/gateway/mod.rs  | 102 ++++++++++++++++++++++++++++++-
+ credentialsd/src/main.rs         |   4 +-
+ 3 files changed, 116 insertions(+), 6 deletions(-)
+
+diff --git a/credentialsd/src/gateway/dbus.rs b/credentialsd/src/gateway/dbus.rs
+index a39f63d..9e3a18f 100644
+--- a/credentialsd/src/gateway/dbus.rs
++++ b/credentialsd/src/gateway/dbus.rs
+@@ -19,8 +19,9 @@ use credentialsd_common::model::WindowHandle;
+ use crate::{
+     DBUS_SERVICE_NAME,
+     gateway::{
+-        CreateCredentialRequest, CreateCredentialResponse, CreatePublicKeyCredentialRequest,
+-        GetCredentialRequest, GetCredentialResponse, GetPublicKeyCredentialRequest, WebAuthnError,
++        ClientCapabilities, CreateCredentialRequest, CreateCredentialResponse,
++        CreatePublicKeyCredentialRequest, GetCredentialRequest, GetCredentialResponse,
++        GetPublicKeyCredentialRequest, WebAuthnError,
+     },
+     webauthn::AppId,
+ };
+@@ -178,6 +179,17 @@ impl CredentialPortalGateway {
+             .map_err(Error::from);
+         response.into()
+     }
++
++    /// Returns the WebAuthn client capabilities, so that the portal can answer
++    /// `getClientCapabilities()` and
++    /// `isUserVerifyingPlatformAuthenticatorAvailable()`.
++    async fn get_client_capabilities(&self) -> ClientCapabilities {
++        self.gateway_service
++            .lock()
++            .await
++            .handle_get_client_capabilities()
++            .await
++    }
+ }
+ 
+ #[derive(Debug, Deserialize, Type)]
+diff --git a/credentialsd/src/gateway/mod.rs b/credentialsd/src/gateway/mod.rs
+index 644591e..829f2fc 100644
+--- a/credentialsd/src/gateway/mod.rs
++++ b/credentialsd/src/gateway/mod.rs
+@@ -16,10 +16,11 @@ use credentialsd_common::model::WindowHandle;
+ use tokio::sync::Mutex as AsyncMutex;
+ use zbus::{
+     Connection,
+-    zvariant::{DeserializeDict, NoneValue, OwnedValue, SerializeDict, Type},
++    zvariant::{DeserializeDict, NoneValue, OwnedValue, SerializeDict, Type, Value},
+ };
+ 
+ use crate::{
++    credential_service::platform::{PlatformProviders, ProviderInfo},
+     dbus::CredentialRequestController,
+     model::{ClientDetails, CredentialRequest, CredentialResponse},
+     webauthn::{AppId, NavigationContext, Origin},
+@@ -31,9 +32,11 @@ use util::{
+ 
+ pub async fn start_gateway<C: CredentialRequestController + Send + Sync + 'static>(
+     controller: C,
++    platform_providers: Arc<PlatformProviders>,
+ ) -> Result<Connection, zbus::Error> {
+     let svc = Arc::new(AsyncMutex::new(GatewayService {
+         request_controller: Box::new(controller),
++        platform_providers,
+     }));
+     dbus::start_dbus_gateway(svc).await
+ }
+@@ -74,9 +77,26 @@ struct GatewayService {
+     /// Coordinates between user and various devices connected to the machine to
+     /// fulfill credential requests.
+     request_controller: Box<dyn CredentialRequestController + Send + Sync>,
++
++    /// Platform providers, consulted for client capabilities.
++    platform_providers: Arc<PlatformProviders>,
+ }
+ 
+ impl GatewayService {
++    async fn handle_get_client_capabilities(&self) -> ClientCapabilities {
++        let providers: Vec<ProviderInfo> = self
++            .platform_providers
++            .available()
++            .await
++            .into_iter()
++            .map(|(_, info)| info)
++            .collect();
++        let hybrid = libwebauthn::available_transports()
++            .await
++            .contains(&libwebauthn::Transport::Hybrid);
++        client_capabilities(&providers, hybrid)
++    }
++
+     async fn handle_create_credential(
+         &self,
+         request: CreateCredentialRequest,
+@@ -207,6 +227,41 @@ impl GatewayService {
+     }
+ }
+ 
++/// WebAuthn client capabilities, as returned by `getClientCapabilities()`.
++///
++/// See <https://www.w3.org/TR/webauthn-3/#enumdef-clientcapability>. Keys use
++/// snake_case on D-Bus; the portal maps them to the WebAuthn names.
++#[derive(Clone, Debug, Default, PartialEq, SerializeDict, Type, Value)]
++#[zvariant(signature = "dict")]
++pub struct ClientCapabilities {
++    pub conditional_create: bool,
++    pub conditional_get: bool,
++    pub hybrid_transport: bool,
++    pub passkey_platform_authenticator: bool,
++    pub user_verifying_platform_authenticator: bool,
++    pub related_origins: bool,
++    pub signal_all_accepted_credentials: bool,
++    pub signal_current_user_details: bool,
++    pub signal_unknown_credential: bool,
++}
++
++/// Computes client capabilities from the platform providers that answered
++/// `GetInfo()` and whether the hybrid transport is available.
++fn client_capabilities(providers: &[ProviderInfo], hybrid: bool) -> ClientCapabilities {
++    // A locked provider still counts: the user can unlock it when asked.
++    let user_verifying_platform_authenticator = providers
++        .iter()
++        .any(|info| !info.user_verification.is_empty());
++    ClientCapabilities {
++        hybrid_transport: hybrid,
++        user_verifying_platform_authenticator,
++        passkey_platform_authenticator: user_verifying_platform_authenticator || hybrid,
++        // Requests are validated with WebAuthn related origin requests.
++        related_origins: true,
++        ..Default::default()
++    }
++}
++
+ /// Verifies that the calling client is able to request credentials for the
+ /// given origin, then returns the origin.
+ fn validate_request(context: &RequestContext) -> Result<NavigationContext, WebAuthnError> {
+@@ -539,7 +594,50 @@ impl Display for WebAuthnError {
+ mod test {
+     use crate::webauthn::{NavigationContext, Origin};
+ 
+-    use super::{WebAuthnError, check_origin_from_privileged_client};
++    use super::{
++        ProviderInfo, WebAuthnError, check_origin_from_privileged_client, client_capabilities,
++    };
++
++    #[test]
++    fn capabilities_report_user_verifying_platform_authenticator() {
++        let biometric = ProviderInfo {
++            user_verification: vec!["biometric".to_string()],
++            locked: true,
++            ..Default::default()
++        };
++        let no_uv = ProviderInfo::default();
++
++        let caps = client_capabilities(&[], false);
++        assert!(!caps.user_verifying_platform_authenticator);
++        assert!(!caps.passkey_platform_authenticator);
++        assert!(!caps.hybrid_transport);
++
++        let caps = client_capabilities(&[], true);
++        assert!(!caps.user_verifying_platform_authenticator);
++        assert!(caps.passkey_platform_authenticator);
++        assert!(caps.hybrid_transport);
++
++        let caps = client_capabilities(std::slice::from_ref(&no_uv), false);
++        assert!(!caps.user_verifying_platform_authenticator);
++
++        let caps = client_capabilities(&[no_uv, biometric], false);
++        assert!(caps.user_verifying_platform_authenticator);
++        assert!(caps.passkey_platform_authenticator);
++        assert!(!caps.conditional_get);
++        assert!(!caps.conditional_create);
++    }
++
++    #[test]
++    fn capabilities_serialize_as_snake_case_dict() {
++        let caps = client_capabilities(&[], true);
++        let zbus::zvariant::Value::Dict(dict) = zbus::zvariant::Value::from(caps) else {
++            panic!("capabilities should serialize as a dict");
++        };
++        let get = |key: &str| dict.get::<&str, bool>(&key).unwrap();
++        assert_eq!(get("hybrid_transport"), Some(true));
++        assert_eq!(get("user_verifying_platform_authenticator"), Some(false));
++        assert_eq!(get("conditional_get"), Some(false));
++    }
+ 
+     fn check_same_origin(origin: &str) -> Result<NavigationContext, WebAuthnError> {
+         let origin = origin.parse().unwrap();
+diff --git a/credentialsd/src/main.rs b/credentialsd/src/main.rs
+index 7bacc76..922a7fb 100644
+--- a/credentialsd/src/main.rs
++++ b/credentialsd/src/main.rs
+@@ -35,12 +35,12 @@ async fn run() -> Result<(), Box<dyn Error>> {
+     let request_controller = CredentialRequestControllerClient {
+         initiator: incoming_request_tx,
+     };
+-    let dbus_conn = gateway::start_gateway(request_controller).await?;
++    let platform_providers = Arc::new(PlatformProviders::default());
++    let dbus_conn = gateway::start_gateway(request_controller, platform_providers.clone()).await?;
+     println!(" ✅");
+ 
+     // Platform providers are called over the gateway connection, so they can
+     // check that requests come from the owner of credentialsd's bus name.
+-    let platform_providers = Arc::new(PlatformProviders::default());
+     platform_providers.load_drop_ins(&dbus_conn);
+ 
+     // initialize client to interact with UI
+-- 
+2.50.1 (Apple Git-155)
+

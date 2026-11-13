@@ -1,0 +1,1143 @@
+From 9ee862b56f78f10178cda0b4dc91deea837b3036 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Fri, 13 Nov 2026 17:27:13 +1100
+Subject: [PATCH 2/5] daemon: Discover platform passkey providers
+
+The API already lists `internal` as a transport and talks about passkey
+providers, but there is no way for a provider to register with
+credentialsd.
+
+Providers now register with a drop-in file, `<id>.conf`, in
+/etc/credentialsd/providers, /usr/local/share/credentialsd/providers or
+/usr/share/credentialsd/providers. The file names the provider's D-Bus
+name, object path and, optionally, its interface and executable. The
+first file for an ID wins, so an administrator can override or mask
+(with an empty file) a packaged provider from /etc. Debug builds also
+read the directories in CREDSD_PROVIDER_DIRS.
+
+credentialsd calls providers over its own gateway connection, so a
+provider can check that the caller owns credentialsd's bus name. When
+the drop-in names an executable, credentialsd checks that the owner of
+the provider's bus name runs it before sending anything.
+
+Every provider that answers GetInfo() within two seconds is offered as a
+device with transport `internal`, unless the request asks for a
+cross-platform authenticator. A locked provider is still listed.
+---
+ credentialsd/src/credential_service/mod.rs    |  75 +++-
+ .../src/credential_service/platform/config.rs | 375 ++++++++++++++++
+ .../src/credential_service/platform/dbus.rs   | 124 ++++++
+ .../src/credential_service/platform/mod.rs    | 416 ++++++++++++++++++
+ credentialsd/src/main.rs                      |  13 +-
+ 5 files changed, 999 insertions(+), 4 deletions(-)
+ create mode 100644 credentialsd/src/credential_service/platform/config.rs
+ create mode 100644 credentialsd/src/credential_service/platform/dbus.rs
+ create mode 100644 credentialsd/src/credential_service/platform/mod.rs
+
+diff --git a/credentialsd/src/credential_service/mod.rs b/credentialsd/src/credential_service/mod.rs
+index 896c956..0aa42bc 100644
+--- a/credentialsd/src/credential_service/mod.rs
++++ b/credentialsd/src/credential_service/mod.rs
+@@ -1,5 +1,6 @@
+ pub mod hybrid;
+ pub mod nfc;
++pub mod platform;
+ pub mod usb;
+ 
+ use std::{
+@@ -33,6 +34,7 @@ use crate::{
+ 
+ use self::{
+     hybrid::{HybridHandler, HybridState, HybridStateInternal},
++    platform::PlatformProviders,
+     usb::{UsbHandler, UsbStateInternal},
+ };
+ 
+@@ -159,6 +161,9 @@ pub struct CredentialService<H: HybridHandler, N: NfcHandler, U: UsbHandler> {
+     hybrid_handler: Mutex<H>,
+     _nfc_handler: Mutex<N>,
+     usb_handler: Mutex<U>,
++
++    /// Platform passkey providers (transport `internal`).
++    platform_providers: Arc<PlatformProviders>,
+ }
+ 
+ impl<H: HybridHandler + Debug, N: NfcHandler + Debug, U: UsbHandler + Debug>
+@@ -171,8 +176,25 @@ impl<H: HybridHandler + Debug, N: NfcHandler + Debug, U: UsbHandler + Debug>
+             hybrid_handler: Mutex::new(hybrid_handler),
+             _nfc_handler: Mutex::new(nfc_handler),
+             usb_handler: Mutex::new(usb_handler),
++            platform_providers: Arc::new(PlatformProviders::default()),
+         }
+     }
++
++    /// Offers the given platform providers alongside the other transports.
++    pub fn with_platform_providers(mut self, providers: Arc<PlatformProviders>) -> Self {
++        self.platform_providers = providers;
++        self
++    }
++}
++
++impl<H: HybridHandler, N: NfcHandler, U: UsbHandler> CredentialService<H, N, U> {
++    /// Whether the current request may use a platform authenticator.
++    fn request_allows_platform(&self) -> bool {
++        let guard = self.ctx.lock().unwrap();
++        guard
++            .as_ref()
++            .is_some_and(|ctx| request_allows_platform(&ctx.request))
++    }
+ }
+ 
+ impl<H: HybridHandler + Send, N: NfcHandler + Send, U: UsbHandler + Send>
+@@ -314,7 +336,11 @@ impl<H: HybridHandler + Send, N: NfcHandler + Send, U: UsbHandler + Send> Manage
+     async fn get_available_public_key_devices(&self) -> Result<Vec<Device>, ()> {
+         // We create the list new for each call, in case someone plugs in
+         // an NFC-reader in the middle of an auth-flow
+-        Ok(devices_for_transports(&available_transports().await))
++        let mut devices = devices_for_transports(&available_transports().await);
++        if self.request_allows_platform() {
++            devices.extend(self.platform_providers.devices().await);
++        }
++        Ok(devices)
+     }
+ 
+     async fn start_discovery(
+@@ -602,6 +628,18 @@ impl From<GetAssertionResponse> for AuthenticatorResponse {
+     }
+ }
+ 
++/// Whether a request may be served by a platform authenticator. Requests that
++/// ask for a cross-platform (roaming) authenticator may not.
++fn request_allows_platform(request: &CredentialRequest) -> bool {
++    match request {
++        CredentialRequest::CreatePublicKeyCredentialRequest(r) => !matches!(
++            r.authenticator_attachment,
++            Some(libwebauthn::ops::webauthn::AuthenticatorAttachment::CrossPlatform)
++        ),
++        CredentialRequest::GetPublicKeyCredentialRequest(_) => true,
++    }
++}
++
+ /// The devices to offer the user for the given available transports, with a
+ /// stable ID per transport.
+ ///
+@@ -776,6 +814,41 @@ mod tests {
+         );
+     }
+ 
++    #[tokio::test]
++    async fn platform_providers_are_listed_unless_cross_platform_is_requested() {
++        use platform::{ProviderInfo, tests::StaticProvider};
++
++        let providers = Arc::new(PlatformProviders::new(vec![Arc::new(StaticProvider {
++            id: "test".to_string(),
++            info: Ok(ProviderInfo::default()),
++        })]));
++        let service = CredentialService::new(MockHybridHandler, MockNfcHandler, MockUsbHandler)
++            .with_platform_providers(providers);
++        let internal_devices = |devices: Vec<Device>| -> Vec<String> {
++            devices
++                .into_iter()
++                .filter(|d| d.transport == Transport::Internal)
++                .map(|d| d.id)
++                .collect()
++        };
++
++        let mut request = create_test_request().await;
++        let (tx, _rx) = oneshot::channel();
++        let (request_id, _) = service.init_request(&request, tx).await.unwrap();
++        let devices = service.get_available_public_key_devices().await.unwrap();
++        assert_eq!(internal_devices(devices), vec!["internal:test".to_string()]);
++        service.cancel_request(request_id).await;
++
++        if let CredentialRequest::CreatePublicKeyCredentialRequest(ref mut r) = request {
++            r.authenticator_attachment =
++                Some(libwebauthn::ops::webauthn::AuthenticatorAttachment::CrossPlatform);
++        }
++        let (tx, _rx) = oneshot::channel();
++        service.init_request(&request, tx).await.unwrap();
++        let devices = service.get_available_public_key_devices().await.unwrap();
++        assert!(internal_devices(devices).is_empty());
++    }
++
+     #[test]
+     fn devices_for_transports_does_not_offer_ble_alone() {
+         assert!(devices_for_transports(&[libwebauthn::Transport::Ble]).is_empty());
+diff --git a/credentialsd/src/credential_service/platform/config.rs b/credentialsd/src/credential_service/platform/config.rs
+new file mode 100644
+index 0000000..adf59d1
+--- /dev/null
++++ b/credentialsd/src/credential_service/platform/config.rs
+@@ -0,0 +1,375 @@
++//! Drop-in files that register platform passkey providers.
++//!
++//! A provider is registered by a file named `<id>.conf` in one of the provider
++//! directories:
++//!
++//! ```ini
++//! [Provider]
++//! Name=Example Platform Authenticator
++//! BusName=org.example.Passkeys1
++//! ObjectPath=/org/example/Passkeys1
++//! # Optional. Defaults to xyz.iinuwa.credentialsd.Provider1.
++//! Interface=org.example.Passkeys.Provider1
++//! # Optional. When set, the owner of BusName must run this executable.
++//! Executable=/usr/libexec/example-passkeyd
++//! # Optional. The only supported value is "internal".
++//! Transport=internal
++//! ```
++//!
++//! Directories are searched in order. The first file for an ID wins, so a file
++//! in `/etc` overrides one in `/usr/share`, and an empty file masks it.
++
++use std::{
++    collections::HashSet,
++    fmt::Display,
++    path::{Path, PathBuf},
++};
++
++use zbus::{
++    names::{InterfaceName, WellKnownName},
++    zvariant::ObjectPath,
++};
++
++/// The provider interface name used when a drop-in file does not set one.
++pub const DEFAULT_PROVIDER_INTERFACE: &str = "xyz.iinuwa.credentialsd.Provider1";
++
++const SECTION: &str = "Provider";
++
++/// System directories searched for provider drop-in files, highest priority
++/// first.
++const SYSTEM_PROVIDER_DIRS: [&str; 3] = [
++    "/etc/credentialsd/providers",
++    "/usr/local/share/credentialsd/providers",
++    "/usr/share/credentialsd/providers",
++];
++
++#[derive(Clone, Debug, PartialEq)]
++pub struct ProviderConfig {
++    /// File stem of the drop-in file. Used as a stable device ID.
++    pub id: String,
++    /// Human-readable name of the provider.
++    pub name: String,
++    pub bus_name: String,
++    pub object_path: String,
++    pub interface: String,
++    /// When set, credentialsd only talks to the owner of `bus_name` if that
++    /// process runs this executable.
++    pub executable: Option<PathBuf>,
++}
++
++#[derive(Debug, PartialEq)]
++pub enum ConfigError {
++    InvalidId(String),
++    Syntax { line: usize, message: String },
++    Missing(&'static str),
++    Invalid { key: &'static str, message: String },
++}
++
++impl Display for ConfigError {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        match self {
++            Self::InvalidId(id) => write!(f, "invalid provider ID {id:?}"),
++            Self::Syntax { line, message } => write!(f, "line {line}: {message}"),
++            Self::Missing(key) => write!(f, "missing required key {key}"),
++            Self::Invalid { key, message } => write!(f, "invalid value for {key}: {message}"),
++        }
++    }
++}
++
++impl std::error::Error for ConfigError {}
++
++fn is_valid_id(id: &str) -> bool {
++    !id.is_empty()
++        && id
++            .chars()
++            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
++}
++
++/// Parses the contents of a provider drop-in file.
++pub fn parse_provider_config(id: &str, contents: &str) -> Result<ProviderConfig, ConfigError> {
++    if !is_valid_id(id) {
++        return Err(ConfigError::InvalidId(id.to_string()));
++    }
++
++    let mut section: Option<&str> = None;
++    let mut name = None;
++    let mut bus_name = None;
++    let mut object_path = None;
++    let mut interface = None;
++    let mut executable = None;
++
++    for (idx, raw_line) in contents.lines().enumerate() {
++        let line_number = idx + 1;
++        let line = raw_line.trim();
++        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
++            continue;
++        }
++        if let Some(header) = line.strip_prefix('[') {
++            let Some(header) = header.strip_suffix(']') else {
++                return Err(ConfigError::Syntax {
++                    line: line_number,
++                    message: "unterminated section header".to_string(),
++                });
++            };
++            section = Some(header.trim());
++            continue;
++        }
++        let Some((key, value)) = line.split_once('=') else {
++            return Err(ConfigError::Syntax {
++                line: line_number,
++                message: "expected `Key=Value`".to_string(),
++            });
++        };
++        match section {
++            None => {
++                return Err(ConfigError::Syntax {
++                    line: line_number,
++                    message: "key outside of a section".to_string(),
++                });
++            }
++            Some(SECTION) => {}
++            // Other sections are reserved for future use.
++            Some(_) => continue,
++        }
++        let value = value.trim().to_string();
++        match key.trim() {
++            "Name" => name = Some(value),
++            "BusName" => bus_name = Some(value),
++            "ObjectPath" => object_path = Some(value),
++            "Interface" => interface = Some(value),
++            "Executable" => executable = Some(PathBuf::from(value)),
++            "Transport" => {
++                if !value.eq_ignore_ascii_case("internal") {
++                    return Err(ConfigError::Invalid {
++                        key: "Transport",
++                        message: format!("unsupported transport {value:?}"),
++                    });
++                }
++            }
++            other => tracing::debug!(id, key = other, "Ignoring unknown provider key"),
++        }
++    }
++
++    let name = name.ok_or(ConfigError::Missing("Name"))?;
++    let bus_name = bus_name.ok_or(ConfigError::Missing("BusName"))?;
++    let object_path = object_path.ok_or(ConfigError::Missing("ObjectPath"))?;
++    let interface = interface.unwrap_or_else(|| DEFAULT_PROVIDER_INTERFACE.to_string());
++
++    WellKnownName::try_from(bus_name.as_str()).map_err(|err| ConfigError::Invalid {
++        key: "BusName",
++        message: err.to_string(),
++    })?;
++    ObjectPath::try_from(object_path.as_str()).map_err(|err| ConfigError::Invalid {
++        key: "ObjectPath",
++        message: err.to_string(),
++    })?;
++    InterfaceName::try_from(interface.as_str()).map_err(|err| ConfigError::Invalid {
++        key: "Interface",
++        message: err.to_string(),
++    })?;
++    if let Some(executable) = &executable
++        && !executable.is_absolute()
++    {
++        return Err(ConfigError::Invalid {
++            key: "Executable",
++            message: "path must be absolute".to_string(),
++        });
++    }
++
++    Ok(ProviderConfig {
++        id: id.to_string(),
++        name,
++        bus_name,
++        object_path,
++        interface,
++        executable,
++    })
++}
++
++/// The directories searched for provider drop-in files, highest priority
++/// first.
++///
++/// Debug builds also search the colon-separated directories in
++/// `CREDSD_PROVIDER_DIRS` first, for development and testing.
++pub fn provider_dirs() -> Vec<PathBuf> {
++    let mut dirs = Vec::new();
++    if cfg!(debug_assertions) {
++        let custom = std::env::var("CREDSD_PROVIDER_DIRS").unwrap_or_default();
++        dirs.extend(
++            custom
++                .split(':')
++                .filter(|dir| !dir.is_empty())
++                .map(PathBuf::from),
++        );
++    }
++    dirs.extend(SYSTEM_PROVIDER_DIRS.iter().map(PathBuf::from));
++    dirs
++}
++
++/// Loads all provider drop-in files from `dirs`, highest priority first.
++///
++/// Files that fail to parse are skipped with a warning.
++pub fn load_provider_configs(dirs: &[PathBuf]) -> Vec<ProviderConfig> {
++    let mut seen = HashSet::new();
++    let mut configs = Vec::new();
++    for dir in dirs {
++        let mut files: Vec<PathBuf> = match std::fs::read_dir(dir) {
++            Ok(entries) => entries
++                .filter_map(|entry| entry.ok().map(|e| e.path()))
++                .filter(|path| path.extension().is_some_and(|ext| ext == "conf"))
++                .collect(),
++            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
++            Err(err) => {
++                tracing::warn!(?dir, %err, "Cannot read provider directory");
++                continue;
++            }
++        };
++        files.sort();
++        for path in files {
++            let Some(id) = path.file_stem().and_then(|s| s.to_str()) else {
++                continue;
++            };
++            if !seen.insert(id.to_string()) {
++                tracing::debug!(?path, "Provider overridden by a higher priority file");
++                continue;
++            }
++            match load_file(id, &path) {
++                Ok(Some(config)) => configs.push(config),
++                Ok(None) => tracing::debug!(?path, "Provider masked by an empty file"),
++                Err(err) => tracing::warn!(?path, %err, "Ignoring invalid provider file"),
++            }
++        }
++    }
++    configs
++}
++
++fn load_file(id: &str, path: &Path) -> Result<Option<ProviderConfig>, Box<dyn std::error::Error>> {
++    let contents = std::fs::read_to_string(path)?;
++    if contents.trim().is_empty() {
++        return Ok(None);
++    }
++    Ok(Some(parse_provider_config(id, &contents)?))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const EXAMPLE: &str = "
++# A comment
++[Provider]
++Name=Example Authenticator
++BusName=org.example.Passkeys1
++ObjectPath=/org/example/Passkeys1
++Transport=internal
++";
++
++    #[test]
++    fn parses_minimal_file_with_default_interface() {
++        let config = parse_provider_config("example", EXAMPLE).unwrap();
++        assert_eq!(
++            config,
++            ProviderConfig {
++                id: "example".to_string(),
++                name: "Example Authenticator".to_string(),
++                bus_name: "org.example.Passkeys1".to_string(),
++                object_path: "/org/example/Passkeys1".to_string(),
++                interface: DEFAULT_PROVIDER_INTERFACE.to_string(),
++                executable: None,
++            }
++        );
++    }
++
++    #[test]
++    fn parses_optional_keys_and_ignores_unknown_ones() {
++        let contents = format!(
++            "{EXAMPLE}Interface=org.example.Passkeys.Provider1\nExecutable=/usr/libexec/example\nIcon=example\n[X-Vendor]\nFoo=bar\n"
++        );
++        let config = parse_provider_config("example", &contents).unwrap();
++        assert_eq!(config.interface, "org.example.Passkeys.Provider1");
++        assert_eq!(
++            config.executable.as_deref(),
++            Some(Path::new("/usr/libexec/example"))
++        );
++    }
++
++    #[test]
++    fn rejects_missing_keys() {
++        let contents = "[Provider]\nName=Example\nBusName=org.example.Passkeys1\n";
++        assert_eq!(
++            parse_provider_config("example", contents),
++            Err(ConfigError::Missing("ObjectPath"))
++        );
++    }
++
++    #[test]
++    fn rejects_invalid_values() {
++        let bad_bus = EXAMPLE.replace("org.example.Passkeys1", ":1.42");
++        assert!(matches!(
++            parse_provider_config("example", &bad_bus),
++            Err(ConfigError::Invalid { key: "BusName", .. })
++        ));
++        let bad_transport = EXAMPLE.replace("internal", "usb");
++        assert!(matches!(
++            parse_provider_config("example", &bad_transport),
++            Err(ConfigError::Invalid {
++                key: "Transport",
++                ..
++            })
++        ));
++        let relative_exe = format!("{EXAMPLE}Executable=bin/example\n");
++        assert!(matches!(
++            parse_provider_config("example", &relative_exe),
++            Err(ConfigError::Invalid {
++                key: "Executable",
++                ..
++            })
++        ));
++        assert_eq!(
++            parse_provider_config("../evil", EXAMPLE),
++            Err(ConfigError::InvalidId("../evil".to_string()))
++        );
++    }
++
++    #[test]
++    fn rejects_keys_outside_a_section() {
++        assert!(matches!(
++            parse_provider_config("example", "Name=Example\n"),
++            Err(ConfigError::Syntax { line: 1, .. })
++        ));
++    }
++
++    #[test]
++    fn earlier_directories_override_and_empty_files_mask() {
++        let base = std::env::temp_dir().join(format!(
++            "credentialsd-provider-test-{}-{}",
++            std::process::id(),
++            rand::random::<u32>()
++        ));
++        let high = base.join("etc");
++        let low = base.join("usr");
++        std::fs::create_dir_all(&high).unwrap();
++        std::fs::create_dir_all(&low).unwrap();
++
++        let overridden = EXAMPLE.replace("Example Authenticator", "Override");
++        std::fs::write(high.join("a.conf"), overridden).unwrap();
++        std::fs::write(low.join("a.conf"), EXAMPLE).unwrap();
++        std::fs::write(high.join("b.conf"), "").unwrap();
++        std::fs::write(low.join("b.conf"), EXAMPLE).unwrap();
++        std::fs::write(low.join("c.conf"), EXAMPLE).unwrap();
++        std::fs::write(low.join("d.conf"), "not a provider").unwrap();
++        std::fs::write(low.join("e.txt"), EXAMPLE).unwrap();
++
++        let configs = load_provider_configs(&[high, low, base.join("missing")]);
++        std::fs::remove_dir_all(&base).unwrap();
++
++        let ids_and_names: Vec<(&str, &str)> = configs
++            .iter()
++            .map(|c| (c.id.as_str(), c.name.as_str()))
++            .collect();
++        assert_eq!(
++            ids_and_names,
++            vec![("a", "Override"), ("c", "Example Authenticator")]
++        );
++    }
++}
+diff --git a/credentialsd/src/credential_service/platform/dbus.rs b/credentialsd/src/credential_service/platform/dbus.rs
+new file mode 100644
+index 0000000..38fbb07
+--- /dev/null
++++ b/credentialsd/src/credential_service/platform/dbus.rs
+@@ -0,0 +1,124 @@
++//! Client for platform providers that implement the provider D-Bus interface.
++
++use std::collections::HashMap;
++
++use async_trait::async_trait;
++use serde::Serialize;
++use zbus::{
++    Connection,
++    fdo::{self, DBusProxy},
++    names::{BusName, WellKnownName},
++    proxy::CacheProperties,
++    zvariant::{DynamicDeserialize, DynamicType, OwnedValue},
++};
++
++use super::{PlatformProvider, ProviderError, ProviderInfo, config::ProviderConfig};
++
++/// A platform provider reached over D-Bus.
++#[derive(Debug)]
++pub struct DbusPlatformProvider {
++    conn: Connection,
++    config: ProviderConfig,
++}
++
++impl DbusPlatformProvider {
++    pub fn new(conn: Connection, config: ProviderConfig) -> Self {
++        Self { conn, config }
++    }
++
++    async fn proxy(&self) -> Result<zbus::Proxy<'static>, ProviderError> {
++        zbus::proxy::Builder::new(&self.conn)
++            .destination(self.config.bus_name.clone())
++            .and_then(|b| b.path(self.config.object_path.clone()))
++            .and_then(|b| b.interface(self.config.interface.clone()))
++            .map(|b| b.cache_properties(CacheProperties::No))
++            .map_err(|err| ProviderError::Unavailable(err.to_string()))?
++            .build()
++            .await
++            .map_err(|err| ProviderError::Unavailable(err.to_string()))
++    }
++
++    /// If the drop-in file names an executable, checks that the current owner
++    /// of the provider's bus name runs it. This keeps another process in the
++    /// session from claiming the name first and receiving requests.
++    async fn check_owner(&self) -> Result<(), ProviderError> {
++        let Some(expected) = &self.config.executable else {
++            return Ok(());
++        };
++        let unavailable = |err: fdo::Error| ProviderError::Unavailable(err.to_string());
++        let dbus = DBusProxy::new(&self.conn)
++            .await
++            .map_err(|err| ProviderError::Unavailable(err.to_string()))?;
++        let name = WellKnownName::try_from(self.config.bus_name.as_str())
++            .map_err(|err| ProviderError::Unavailable(err.to_string()))?;
++        let owner = match dbus.get_name_owner(BusName::from(name.clone())).await {
++            Ok(owner) => owner,
++            Err(fdo::Error::NameHasNoOwner(_)) => {
++                dbus.start_service_by_name(name.clone(), 0)
++                    .await
++                    .map_err(unavailable)?;
++                dbus.get_name_owner(BusName::from(name))
++                    .await
++                    .map_err(unavailable)?
++            }
++            Err(err) => return Err(unavailable(err)),
++        };
++        let credentials = dbus
++            .get_connection_credentials(BusName::from(owner))
++            .await
++            .map_err(unavailable)?;
++        let pid = credentials.process_id().ok_or_else(|| {
++            ProviderError::Unavailable("provider process ID is unknown".to_string())
++        })?;
++        let exe = tokio::fs::read_link(format!("/proc/{pid}/exe"))
++            .await
++            .map_err(|err| ProviderError::Unavailable(err.to_string()))?;
++        if &exe != expected {
++            tracing::warn!(
++                id = %self.config.id,
++                ?exe,
++                ?expected,
++                "Platform provider bus name is owned by an unexpected executable"
++            );
++            return Err(ProviderError::Unavailable(
++                "provider bus name is owned by an unexpected executable".to_string(),
++            ));
++        }
++        Ok(())
++    }
++
++    async fn call<B, R>(&self, method: &str, body: &B) -> Result<R, ProviderError>
++    where
++        B: Serialize + DynamicType,
++        R: for<'d> DynamicDeserialize<'d>,
++    {
++        self.check_owner().await?;
++        let proxy = self.proxy().await?;
++        let reply = proxy
++            .call_method(method, body)
++            .await
++            .map_err(|err| match err {
++                zbus::Error::MethodError(name, message, _) => {
++                    ProviderError::from_dbus_error(name.as_str(), message.as_deref())
++                }
++                zbus::Error::FDO(err) => ProviderError::Unavailable(err.to_string()),
++                err => ProviderError::Unavailable(err.to_string()),
++            })?;
++        reply
++            .body()
++            .deserialize::<R>()
++            .map_err(|err| ProviderError::InvalidResponse(format!("{method}: {err}")))
++    }
++}
++
++#[async_trait]
++impl PlatformProvider for DbusPlatformProvider {
++    fn id(&self) -> &str {
++        &self.config.id
++    }
++
++    async fn get_info(&self) -> Result<ProviderInfo, ProviderError> {
++        let dict: HashMap<String, OwnedValue> = self.call("GetInfo", &()).await?;
++        Ok(ProviderInfo::from_dict(&dict))
++    }
++}
+diff --git a/credentialsd/src/credential_service/platform/mod.rs b/credentialsd/src/credential_service/platform/mod.rs
+new file mode 100644
+index 0000000..07b6bc5
+--- /dev/null
++++ b/credentialsd/src/credential_service/platform/mod.rs
+@@ -0,0 +1,416 @@
++//! Platform passkey providers.
++//!
++//! A platform provider is a separate process that holds passkeys for the
++//! local machine (transport `internal`), for example an authenticator backed
++//! by a TPM or a secure element. Providers register through drop-in files
++//! (see [`config`]) and implement a small D-Bus interface (see [`dbus`]).
++
++pub mod config;
++pub mod dbus;
++
++use std::{
++    collections::HashMap,
++    fmt::{Debug, Display},
++    sync::{Arc, RwLock},
++    time::Duration,
++};
++
++use async_trait::async_trait;
++use zbus::{
++    Connection,
++    zvariant::{OwnedValue, Value},
++};
++
++use credentialsd_common::model::{Device, Transport};
++
++use self::{config::ProviderConfig, dbus::DbusPlatformProvider};
++
++/// How long credentialsd waits for a provider to answer `GetInfo` before it
++/// leaves the provider out of the device list.
++const GET_INFO_TIMEOUT: Duration = Duration::from_secs(2);
++
++/// Errors reported by a platform provider.
++///
++/// Providers report errors as D-Bus errors. The last component of the error
++/// name selects the variant, so `org.example.Error.WrongPassword` and
++/// `xyz.iinuwa.credentialsd.Provider.Error.WrongPassword` both map to
++/// [`ProviderError::WrongPassword`].
++#[derive(Clone, Debug, PartialEq)]
++pub enum ProviderError {
++    /// The user declined or the provider refused the operation.
++    NotAllowed(String),
++    /// A credential in the exclude list already exists on the provider.
++    InvalidState,
++    /// None of the requested algorithms or options is supported.
++    NotSupported,
++    /// The provider rejected the RP ID for the origin.
++    Security,
++    /// The operation was cancelled.
++    Aborted,
++    /// The provider needs the user's password before it can continue.
++    PasswordNeeded,
++    /// The provider rejected the password it was given.
++    WrongPassword,
++    /// The provider is locked until the user unlocks it.
++    Locked,
++    /// The provider could not be reached or is not trusted.
++    Unavailable(String),
++    /// The provider sent a reply that could not be understood.
++    InvalidResponse(String),
++    /// Any other error.
++    Unknown(String),
++}
++
++impl ProviderError {
++    /// Maps a D-Bus error name and message to a provider error.
++    pub fn from_dbus_error(name: &str, message: Option<&str>) -> Self {
++        let message = message.unwrap_or_default().to_string();
++        match name.rsplit('.').next().unwrap_or(name) {
++            "NotAllowedError" => Self::NotAllowed(message),
++            "InvalidStateError" => Self::InvalidState,
++            "NotSupportedError" => Self::NotSupported,
++            "SecurityError" => Self::Security,
++            "AbortError" => Self::Aborted,
++            "PasswordNeeded" => Self::PasswordNeeded,
++            "WrongPassword" => Self::WrongPassword,
++            "Locked" => Self::Locked,
++            _ if name.starts_with("org.freedesktop.DBus.Error.") => {
++                Self::Unavailable(format!("{name}: {message}"))
++            }
++            _ => Self::Unknown(format!("{name}: {message}")),
++        }
++    }
++}
++
++impl Display for ProviderError {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        match self {
++            Self::NotAllowed(msg) => write!(f, "NotAllowedError: {msg}"),
++            Self::InvalidState => f.write_str("InvalidStateError"),
++            Self::NotSupported => f.write_str("NotSupportedError"),
++            Self::Security => f.write_str("SecurityError"),
++            Self::Aborted => f.write_str("AbortError"),
++            Self::PasswordNeeded => f.write_str("PasswordNeeded"),
++            Self::WrongPassword => f.write_str("WrongPassword"),
++            Self::Locked => f.write_str("Locked"),
++            Self::Unavailable(msg) => write!(f, "provider unavailable: {msg}"),
++            Self::InvalidResponse(msg) => write!(f, "invalid provider response: {msg}"),
++            Self::Unknown(msg) => write!(f, "provider error: {msg}"),
++        }
++    }
++}
++
++impl std::error::Error for ProviderError {}
++
++/// The answer to a provider's `GetInfo()` call.
++#[derive(Clone, Debug, Default, PartialEq)]
++pub struct ProviderInfo {
++    /// Display name reported by the provider, if any.
++    pub name: Option<String>,
++    pub aaguid: Option<Vec<u8>>,
++    /// COSE algorithm identifiers the provider can create credentials for.
++    pub algorithms: Vec<i64>,
++    /// User verification methods, for example `biometric` or `password`.
++    pub user_verification: Vec<String>,
++    /// WebAuthn extension identifiers the provider supports.
++    pub extensions: Vec<String>,
++    /// Whether the provider is locked and cannot be used right now.
++    pub locked: bool,
++}
++
++impl ProviderInfo {
++    pub(crate) fn from_dict(dict: &HashMap<String, OwnedValue>) -> Self {
++        Self {
++            name: dict.get("name").and_then(|v| value_to_string(v)),
++            aaguid: dict.get("aaguid").and_then(|v| value_to_bytes(v)),
++            algorithms: dict
++                .get("algorithms")
++                .and_then(|v| value_to_ints(v))
++                .unwrap_or_default(),
++            user_verification: dict
++                .get("uv")
++                .and_then(|v| value_to_strings(v))
++                .unwrap_or_default(),
++            extensions: dict
++                .get("extensions")
++                .and_then(|v| value_to_strings(v))
++                .unwrap_or_default(),
++            locked: dict
++                .get("locked")
++                .and_then(|v| value_to_bool(v))
++                .unwrap_or(false),
++        }
++    }
++}
++
++/// A platform passkey provider.
++#[async_trait]
++pub trait PlatformProvider: Debug + Send + Sync {
++    /// Stable identifier, taken from the provider's drop-in file name.
++    fn id(&self) -> &str;
++
++    /// Returns what the provider supports and whether it is locked. This must
++    /// be cheap and must not prompt the user.
++    async fn get_info(&self) -> Result<ProviderInfo, ProviderError>;
++}
++
++/// The device ID under which a provider is offered to the user.
++pub fn device_id(provider_id: &str) -> String {
++    format!("internal:{provider_id}")
++}
++
++/// The set of platform providers known to the credential service.
++#[derive(Debug, Default)]
++pub struct PlatformProviders {
++    providers: RwLock<Vec<Arc<dyn PlatformProvider>>>,
++}
++
++impl PlatformProviders {
++    #[cfg(test)]
++    pub fn new(providers: Vec<Arc<dyn PlatformProvider>>) -> Self {
++        Self {
++            providers: RwLock::new(providers),
++        }
++    }
++
++    /// Replaces the provider list with the providers registered through
++    /// drop-in files. Calls go out over `conn`, so providers can check that
++    /// the caller owns credentialsd's bus name.
++    pub fn load_drop_ins(&self, conn: &Connection) {
++        let configs = config::load_provider_configs(&config::provider_dirs());
++        let providers: Vec<Arc<dyn PlatformProvider>> = configs
++            .into_iter()
++            .map(|config: ProviderConfig| {
++                tracing::info!(id = %config.id, name = %config.name, bus_name = %config.bus_name, "Found platform provider");
++                Arc::new(DbusPlatformProvider::new(conn.clone(), config)) as Arc<dyn PlatformProvider>
++            })
++            .collect();
++        *self.providers.write().unwrap() = providers;
++    }
++
++    pub fn all(&self) -> Vec<Arc<dyn PlatformProvider>> {
++        self.providers.read().unwrap().clone()
++    }
++
++    /// Asks every provider for its info and returns those that answered in
++    /// time.
++    pub async fn available(&self) -> Vec<(Arc<dyn PlatformProvider>, ProviderInfo)> {
++        let mut available = Vec::new();
++        for provider in self.all() {
++            match tokio::time::timeout(GET_INFO_TIMEOUT, provider.get_info()).await {
++                Ok(Ok(info)) => available.push((provider, info)),
++                Ok(Err(err)) => {
++                    tracing::warn!(id = provider.id(), %err, "Platform provider is not available")
++                }
++                Err(_) => {
++                    tracing::warn!(
++                        id = provider.id(),
++                        "Platform provider did not answer in time"
++                    )
++                }
++            }
++        }
++        available
++    }
++
++    /// The devices to offer the user for the available providers.
++    pub async fn devices(&self) -> Vec<Device> {
++        self.available()
++            .await
++            .into_iter()
++            .map(|(provider, _)| Device {
++                id: device_id(provider.id()),
++                transport: Transport::Internal,
++            })
++            .collect()
++    }
++}
++
++pub(crate) fn value_to_bool(value: &Value<'_>) -> Option<bool> {
++    match value {
++        Value::Bool(b) => Some(*b),
++        Value::Value(inner) => value_to_bool(inner),
++        _ => None,
++    }
++}
++
++/// Accepts any D-Bus integer type, since providers written in different
++/// languages pick different ones.
++pub(crate) fn value_to_int(value: &Value<'_>) -> Option<i64> {
++    match value {
++        Value::U8(n) => Some(i64::from(*n)),
++        Value::I16(n) => Some(i64::from(*n)),
++        Value::U16(n) => Some(i64::from(*n)),
++        Value::I32(n) => Some(i64::from(*n)),
++        Value::U32(n) => Some(i64::from(*n)),
++        Value::I64(n) => Some(*n),
++        Value::U64(n) => i64::try_from(*n).ok(),
++        Value::Value(inner) => value_to_int(inner),
++        _ => None,
++    }
++}
++
++pub(crate) fn value_to_string(value: &Value<'_>) -> Option<String> {
++    match value {
++        Value::Str(s) => Some(s.as_str().to_string()),
++        Value::Value(inner) => value_to_string(inner),
++        _ => None,
++    }
++}
++
++pub(crate) fn value_to_bytes(value: &Value<'_>) -> Option<Vec<u8>> {
++    match value {
++        Value::Array(array) => array
++            .iter()
++            .map(|v| match v {
++                Value::U8(b) => Some(*b),
++                _ => None,
++            })
++            .collect(),
++        Value::Value(inner) => value_to_bytes(inner),
++        _ => None,
++    }
++}
++
++pub(crate) fn value_to_strings(value: &Value<'_>) -> Option<Vec<String>> {
++    match value {
++        Value::Array(array) => array.iter().map(value_to_string).collect(),
++        Value::Value(inner) => value_to_strings(inner),
++        _ => None,
++    }
++}
++
++pub(crate) fn value_to_ints(value: &Value<'_>) -> Option<Vec<i64>> {
++    match value {
++        Value::Array(array) => array.iter().map(value_to_int).collect(),
++        Value::Value(inner) => value_to_ints(inner),
++        _ => None,
++    }
++}
++
++#[cfg(test)]
++pub(crate) mod tests {
++    use super::*;
++
++    fn owned<'a>(value: impl Into<Value<'a>>) -> OwnedValue {
++        OwnedValue::try_from(value.into()).unwrap()
++    }
++
++    #[test]
++    fn error_names_map_by_last_component() {
++        assert_eq!(
++            ProviderError::from_dbus_error("org.example.Error.WrongPassword", None),
++            ProviderError::WrongPassword
++        );
++        assert_eq!(
++            ProviderError::from_dbus_error(
++                "xyz.iinuwa.credentialsd.Provider.Error.PasswordNeeded",
++                None
++            ),
++            ProviderError::PasswordNeeded
++        );
++        assert_eq!(
++            ProviderError::from_dbus_error("org.example.Error.Locked", Some("log in")),
++            ProviderError::Locked
++        );
++        assert_eq!(
++            ProviderError::from_dbus_error("org.example.Error.NotAllowedError", Some("no")),
++            ProviderError::NotAllowed("no".to_string())
++        );
++        assert_eq!(
++            ProviderError::from_dbus_error("org.example.Error.InvalidStateError", None),
++            ProviderError::InvalidState
++        );
++        assert!(matches!(
++            ProviderError::from_dbus_error("org.freedesktop.DBus.Error.ServiceUnknown", None),
++            ProviderError::Unavailable(_)
++        ));
++        assert!(matches!(
++            ProviderError::from_dbus_error("org.example.Error.Weird", None),
++            ProviderError::Unknown(_)
++        ));
++    }
++
++    #[test]
++    fn info_accepts_any_integer_type() {
++        let dict = HashMap::from([
++            ("name".to_string(), owned("Example")),
++            ("aaguid".to_string(), owned(vec![1u8; 16])),
++            ("algorithms".to_string(), owned(vec![-7i64, -8i64])),
++            ("uv".to_string(), owned(vec!["biometric", "password"])),
++            ("extensions".to_string(), owned(vec!["credProtect"])),
++            ("locked".to_string(), owned(true)),
++            ("rk_remaining".to_string(), owned(25u32)),
++        ]);
++        let info = ProviderInfo::from_dict(&dict);
++        assert_eq!(
++            info,
++            ProviderInfo {
++                name: Some("Example".to_string()),
++                aaguid: Some(vec![1u8; 16]),
++                algorithms: vec![-7, -8],
++                user_verification: vec!["biometric".to_string(), "password".to_string()],
++                extensions: vec!["credProtect".to_string()],
++                locked: true,
++            }
++        );
++
++        let dict = HashMap::from([("algorithms".to_string(), owned(vec![-7i32]))]);
++        let info = ProviderInfo::from_dict(&dict);
++        assert_eq!(info.algorithms, vec![-7]);
++        assert!(!info.locked);
++    }
++
++    /// A provider that answers `GetInfo` from a fixed value.
++    #[derive(Debug)]
++    pub(crate) struct StaticProvider {
++        pub id: String,
++        pub info: Result<ProviderInfo, ProviderError>,
++    }
++
++    #[async_trait]
++    impl PlatformProvider for StaticProvider {
++        fn id(&self) -> &str {
++            &self.id
++        }
++
++        async fn get_info(&self) -> Result<ProviderInfo, ProviderError> {
++            self.info.clone()
++        }
++    }
++
++    #[tokio::test]
++    async fn devices_skip_unreachable_providers_and_keep_locked_ones() {
++        let providers = PlatformProviders::new(vec![
++            Arc::new(StaticProvider {
++                id: "ok".to_string(),
++                info: Ok(ProviderInfo::default()),
++            }),
++            Arc::new(StaticProvider {
++                id: "gone".to_string(),
++                info: Err(ProviderError::Unavailable("no owner".to_string())),
++            }),
++            Arc::new(StaticProvider {
++                id: "locked".to_string(),
++                info: Ok(ProviderInfo {
++                    locked: true,
++                    ..Default::default()
++                }),
++            }),
++        ]);
++        let devices = providers.devices().await;
++        assert_eq!(
++            devices,
++            vec![
++                Device {
++                    id: "internal:ok".to_string(),
++                    transport: Transport::Internal,
++                },
++                Device {
++                    id: "internal:locked".to_string(),
++                    transport: Transport::Internal,
++                },
++            ]
++        );
++    }
++}
+diff --git a/credentialsd/src/main.rs b/credentialsd/src/main.rs
+index e7241c8..7bacc76 100644
+--- a/credentialsd/src/main.rs
++++ b/credentialsd/src/main.rs
+@@ -5,14 +5,15 @@ mod model;
+ pub mod systemd;
+ mod webauthn;
+ 
+-use std::error::Error;
++use std::{error::Error, sync::Arc};
+ 
+ use credential_service::nfc::InProcessNfcHandler;
+ use tokio::sync::mpsc;
+ 
+ use crate::{
+     credential_service::{
+-        CredentialService, hybrid::InternalHybridHandler, usb::InProcessUsbHandler,
++        CredentialService, hybrid::InternalHybridHandler, platform::PlatformProviders,
++        usb::InProcessUsbHandler,
+     },
+     dbus::CredentialRequestControllerClient,
+ };
+@@ -37,12 +38,18 @@ async fn run() -> Result<(), Box<dyn Error>> {
+     let dbus_conn = gateway::start_gateway(request_controller).await?;
+     println!(" ✅");
+ 
++    // Platform providers are called over the gateway connection, so they can
++    // check that requests come from the owner of credentialsd's bus name.
++    let platform_providers = Arc::new(PlatformProviders::default());
++    platform_providers.load_drop_ins(&dbus_conn);
++
+     // initialize client to interact with UI
+     let credential_service = CredentialService::new(
+         InternalHybridHandler::new(),
+         InProcessNfcHandler {},
+         InProcessUsbHandler {},
+-    );
++    )
++    .with_platform_providers(platform_providers);
+     let flow_control_svc = dbus::start_flow_control_service(
+         dbus_conn.clone(),
+         incoming_request_rx,
+-- 
+2.50.1 (Apple Git-155)
+

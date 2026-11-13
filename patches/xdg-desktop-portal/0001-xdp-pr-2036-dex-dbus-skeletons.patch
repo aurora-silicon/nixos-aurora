@@ -1,0 +1,3304 @@
+From fc6581b2e680d7e509c9eb319a5c87c7df769db3 Mon Sep 17 00:00:00 2001
+From: Sebastian Wick <sebastian.wick@redhat.com>
+Date: Fri, 19 Jun 2026 18:38:41 +0200
+Subject: [PATCH 01/16] context: Make dispatching DBus interface skeletons in
+ threads explicit
+
+We're going to add dispatching in fibers as well, and we want to replace
+the threads with it, so a default to threads is not desired anymore.
+
+This also changes the XDP_CONTEXT_EXPORT_FLAGS_HOST_PORTAL flag which so
+far meant "run on the main thread and don't authenticate". Now that the
+default flags mean "run on the main thread" we can drop the host portal
+flag and instead add XDP_CONTEXT_EXPORT_FLAGS_SKIP_AUTH to skip
+authentication.
+
+
+NOTE (SUSE): We backported this patch and adjusted the paths of the
+             source files, since in 1.22, every file is located under src/
+Refreshed for 1.22.1 (fuzz-free).
+---
+ document-portal/document-portal.c |  42 +++-
+ document-portal/file-transfer.c   |   9 +-
+ meson.build                       |   7 +
+ src/account.c                     |   2 +-
+ src/background.c                  |   2 +-
+ src/camera.c                      |   2 +-
+ src/clipboard.c                   |   2 +-
+ src/dynamic-launcher.c            |   2 +-
+ src/email.c                       |   2 +-
+ src/file-chooser.c                |   2 +-
+ src/gamemode.c                    |   2 +-
+ src/global-shortcuts.c            |   5 +-
+ src/inhibit.c                     |   5 +-
+ src/input-capture.c               |   5 +-
+ src/location.c                    |   6 +-
+ src/memory-monitor.c              |   2 +-
+ src/meson.build                   |   3 +
+ src/network-monitor.c             |   2 +-
+ src/notification.c                |  68 +++---
+ src/open-uri.c                    |   2 +-
+ src/power-profile-monitor.c       |   2 +-
+ src/print.c                       |   2 +-
+ src/proxy-resolver.c              |   2 +-
+ src/realtime.c                    |   2 +-
+ src/registry.c                    | 154 ++++++++-----
+ src/remote-desktop.c              |   5 +-
+ src/screen-cast.c                 |   5 +-
+ src/screenshot.c                  |   2 +-
+ src/secret.c                      |  59 ++---
+ src/secret.h                      |   5 +-
+ src/settings.c                    |   2 +-
+ src/usb.c                         |  14 +-
+ src/wallpaper.c                   |   2 +-
+ src/xdp-app-info-registry.c       | 324 +++++++++++++++++++++------
+ src/xdp-app-info-registry.h       |  21 +-
+ src/xdp-app-info.c                |  23 ++
+ src/xdp-context.c                 | 122 ++++++++--
+ src/xdp-context.h                 |   4 +-
+ src/xdp-dex.c                     | 148 ++++++++++++
+ src/xdp-dex.h                     |  17 ++
+ src/xdp-permissions.c             | 121 +++++++++-
+ src/xdp-permissions.h             |  20 ++
+ src/xdp-request-dex.c             | 314 ++++++++++++++++++++++++++
+ src/xdp-request-dex.h             |  26 +++
+ src/xdp-session-dex.c             | 459 ++++++++++++++++++++++++++++++++++++++
+ src/xdp-session-dex.h             |  46 ++++
+ src/xdp-session.c                 |  49 ++--
+ src/xdp-session.h                 |   1 +
+ tests/conftest.py                 |  70 ++++--
+ tests/meson.build                 |   1 +
+ tests/test_shutdown.py            |  66 ++++++
+ tests/xdp_utils.py                |  15 ++
+ 52 files changed, 1917 insertions(+), 358 deletions(-)
+
+diff --git a/document-portal/document-portal.c b/document-portal/document-portal.c
+index 3e726b1..c27acb9 100644
+--- a/document-portal/document-portal.c
++++ b/document-portal/document-portal.c
+@@ -1322,23 +1322,41 @@ typedef void (*PortalMethod) (GDBusMethodInvocation *invocation,
+                               GVariant              *parameters,
+                               XdpAppInfo            *app_info);
+ 
+-static gboolean
+-handle_method (GCallback              method_callback,
+-               GDBusMethodInvocation *invocation)
++
++static DexFuture *
++handle_method_with_app_info (DexFuture *completed,
++                             gpointer   user_data)
+ {
+-  g_autoptr(GError) error = NULL;
++  GDBusMethodInvocation *invocation = G_DBUS_METHOD_INVOCATION (user_data);
++  PortalMethod portal_method = g_object_steal_data (G_OBJECT (invocation),
++                                                    "-xdp-portal-method");
+   g_autoptr(XdpAppInfo) app_info = NULL;
+-  PortalMethod portal_method = (PortalMethod)method_callback;
++  g_autoptr(GError) error = NULL;
+ 
+-  app_info = xdp_app_info_registry_ensure_for_invocation_sync (app_info_registry,
+-                                                               invocation,
+-                                                               NULL,
+-                                                               &error);
++  app_info = dex_await_object (dex_ref (completed), &error);
+   if (app_info == NULL)
+     g_dbus_method_invocation_return_gerror (invocation, error);
+   else
+     portal_method (invocation, g_dbus_method_invocation_get_parameters (invocation), app_info);
+ 
++  return dex_future_new_true ();
++}
++
++static gboolean
++handle_method (GCallback              method_callback,
++               GDBusMethodInvocation *invocation)
++{
++  g_autoptr(DexFuture) future = NULL;
++
++  g_object_set_data (G_OBJECT (invocation), "-xdp-portal-method", method_callback);
++
++  future = xdp_app_info_registry_ensure_future (app_info_registry, invocation);
++  future = dex_future_finally (future,
++                               handle_method_with_app_info,
++                               invocation,
++                               NULL);
++  dex_future_disown (g_steal_pointer (&future));
++
+   return TRUE;
+ }
+ 
+@@ -1631,7 +1649,9 @@ on_peer_disconnect (const char *name,
+                     gpointer    user_data)
+ {
+   stop_file_transfers_for_sender (name);
+-  xdp_app_info_registry_delete (app_info_registry, name);
++
++  dex_future_disown (xdp_app_info_registry_delete_future (app_info_registry,
++                                                          name));
+ }
+ 
+ static void
+@@ -1852,6 +1872,8 @@ main (int    argc,
+ 
+   setlocale (LC_ALL, "");
+ 
++  dex_init ();
++
+   /* Avoid even loading gvfs to avoid accidental confusion */
+   g_setenv ("GIO_USE_VFS", "local", TRUE);
+ 
+diff --git a/document-portal/file-transfer.c b/document-portal/file-transfer.c
+index 6b1571c..4f1d2b0 100644
+--- a/document-portal/file-transfer.c
++++ b/document-portal/file-transfer.c
+@@ -524,13 +524,14 @@ handle_method (GCallback              method_callback,
+                GDBusMethodInvocation *invocation)
+ {
+   g_autoptr(GError) error = NULL;
++  g_autoptr(DexFuture) future = NULL;
+   g_autoptr(XdpAppInfo) app_info = NULL;
+   PortalMethod portal_method = (PortalMethod)method_callback;
+ 
+-  app_info = xdp_app_info_registry_ensure_for_invocation_sync (app_info_registry,
+-                                                               invocation,
+-                                                               NULL,
+-                                                               &error);
++  future = xdp_app_info_registry_ensure_future (app_info_registry, invocation);
++  dex_thread_wait_for (dex_ref (future), NULL);
++
++  app_info = dex_await_object (g_steal_pointer (&future), &error);
+   if (app_info == NULL)
+     g_dbus_method_invocation_return_gerror (invocation, error);
+   else
+diff --git a/meson.build b/meson.build
+index 9ce49db..6e840a5 100644
+--- a/meson.build
++++ b/meson.build
+@@ -145,6 +145,13 @@ umockdev_dep = dependency('umockdev-1.0', required: get_option('tests'))
+ libglnx_dep = dependency('libglnx')
+ gvdb_dep = dependency('gvdb')
+ 
++have = cc.has_function(
++  'dex_scheduler_spawnv',
++  prefix: '''#include <libdex.h>''',
++  dependencies: libdex_dep
++)
++config_h.set10('HAVE_DEX_SCHEDULER_SPAWNV', have)
++
+ gst_inspect = find_program('gst-inspect-1.0', required: false)
+ if gst_inspect.found()
+   have_wav_parse = run_command(
+diff --git a/src/account.c b/src/account.c
+index f8ce0bd..ee8d089 100644
+--- a/src/account.c
++++ b/src/account.c
+@@ -310,5 +310,5 @@ init_account (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&account)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/background.c b/src/background.c
+index bc47db9..2be6c96 100644
+--- a/src/background.c
++++ b/src/background.c
+@@ -1489,5 +1489,5 @@ init_background (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&background)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/camera.c b/src/camera.c
+index f16de89..f344c22 100644
+--- a/src/camera.c
++++ b/src/camera.c
+@@ -563,5 +563,5 @@ init_camera (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&camera)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/clipboard.c b/src/clipboard.c
+index 440c6e2..1652ab6 100644
+--- a/src/clipboard.c
++++ b/src/clipboard.c
+@@ -663,5 +663,5 @@ init_clipboard (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&clipboard)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/dynamic-launcher.c b/src/dynamic-launcher.c
+index 0a5e7c5..2482505 100644
+--- a/src/dynamic-launcher.c
++++ b/src/dynamic-launcher.c
+@@ -1176,5 +1176,5 @@ init_dynamic_launcher (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&dynamic_launcher)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/email.c b/src/email.c
+index 0c4f309..702d536 100644
+--- a/src/email.c
++++ b/src/email.c
+@@ -384,5 +384,5 @@ init_email (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&email)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/file-chooser.c b/src/file-chooser.c
+index 81af98c..beb6e73 100644
+--- a/src/file-chooser.c
++++ b/src/file-chooser.c
+@@ -919,5 +919,5 @@ init_file_chooser (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&file_chooser)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/gamemode.c b/src/gamemode.c
+index 81ce557..92d5e5b 100644
+--- a/src/gamemode.c
++++ b/src/gamemode.c
+@@ -632,5 +632,5 @@ init_game_mode (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&gamemode)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/global-shortcuts.c b/src/global-shortcuts.c
+index 3eb1802..549665d 100644
+--- a/src/global-shortcuts.c
++++ b/src/global-shortcuts.c
+@@ -147,8 +147,7 @@ global_shortcuts_session_new (GlobalShortcuts  *global_shortcuts,
+   session_token = lookup_session_token (options);
+   session = g_initable_new (global_shortcuts_session_get_type (), NULL, error,
+                             "context", global_shortcuts->context,
+-                            "sender", request->sender,
+-                            "app-id", xdp_app_info_get_id (request->app_info),
++                            "app-info", request->app_info,
+                             "token", session_token,
+                             "connection", connection,
+                             "impl-connection", impl_connection,
+@@ -855,5 +854,5 @@ init_global_shortcuts (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&global_shortcuts)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/inhibit.c b/src/inhibit.c
+index 3831776..620a6bf 100644
+--- a/src/inhibit.c
++++ b/src/inhibit.c
+@@ -339,8 +339,7 @@ inhibit_session_new (Inhibit     *inhibit,
+   session_token = lookup_session_token (options);
+   session = g_initable_new (inhibit_session_get_type (), NULL, error,
+                             "context", inhibit->context,
+-                            "sender", request->sender,
+-                            "app-id", xdp_app_info_get_id (request->app_info),
++                            "app-info", request->app_info,
+                             "token", session_token,
+                             "connection", connection,
+                             "impl-connection", impl_connection,
+@@ -600,5 +599,5 @@ init_inhibit (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&inhibit)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/input-capture.c b/src/input-capture.c
+index ab64504..5385041 100644
+--- a/src/input-capture.c
++++ b/src/input-capture.c
+@@ -163,8 +163,7 @@ input_capture_session_new (InputCapture     *input_capture,
+   session_token = lookup_session_token (options);
+   session = g_initable_new (input_capture_session_get_type (), NULL, error,
+                             "context", input_capture->context,
+-                            "sender", xdp_app_info_get_sender (app_info),
+-                            "app-id", xdp_app_info_get_id (app_info),
++                            "app-info", app_info,
+                             "token", session_token,
+                             "connection", connection,
+                             "impl-connection", impl_connection,
+@@ -1709,5 +1708,5 @@ init_input_capture (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&input_capture)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/location.c b/src/location.c
+index be8d480..b54d7ec 100644
+--- a/src/location.c
++++ b/src/location.c
+@@ -168,14 +168,12 @@ location_session_new (Location               *location,
+                       GError                **error)
+ {
+   GDBusConnection *connection = g_dbus_method_invocation_get_connection (invocation);
+-  const gchar *sender = g_dbus_method_invocation_get_sender (invocation);
+   XdpAppInfo *app_info = xdp_invocation_get_app_info (invocation);
+   XdpSession *session;
+ 
+   session = g_initable_new (location_session_get_type (), NULL, error,
+                             "context", location->context,
+-                            "sender", sender,
+-                            "app-id", xdp_app_info_get_id (app_info),
++                            "app-info", app_info,
+                             "token", lookup_session_token (options),
+                             "connection", connection,
+                             NULL);
+@@ -798,5 +796,5 @@ init_location (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&location)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/memory-monitor.c b/src/memory-monitor.c
+index 841cae3..2a17ac9 100644
+--- a/src/memory-monitor.c
++++ b/src/memory-monitor.c
+@@ -133,5 +133,5 @@ init_memory_monitor (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&memory_monitor)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/meson.build b/src/meson.build
+index 7e06400..0a98b85 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -72,6 +72,7 @@ xdp_utils_sources = enums_sources + files(
+   'xdp-app-info-registry.c',
+   'xdp-app-info-snap.c',
+   'xdp-app-info-linyaps.c',
++  'xdp-dex.c',
+   'xdp-sealed-fd.c',
+   'xdp-usb-query.c',
+   'xdp-utils.c',
+@@ -120,7 +121,9 @@ xdg_desktop_portal_sources = files(
+   'xdp-permissions.c',
+   'xdp-portal-config.c',
+   'xdp-request.c',
++  'xdp-request-dex.c',
+   'xdp-session.c',
++  'xdp-session-dex.c',
+   'xdp-session-persistence.c',
+ )
+ 
+diff --git a/src/network-monitor.c b/src/network-monitor.c
+index 1e84622..7810155 100644
+--- a/src/network-monitor.c
++++ b/src/network-monitor.c
+@@ -278,5 +278,5 @@ init_network_monitor (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&network_monitor)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/notification.c b/src/notification.c
+index a19d332..3417fab 100644
+--- a/src/notification.c
++++ b/src/notification.c
+@@ -187,6 +187,27 @@ G_DEFINE_TYPE_WITH_CODE (Notification, notification,
+ 
+ G_DEFINE_AUTOPTR_CLEANUP_FUNC (Notification, g_object_unref)
+ 
++static void
++on_app_info_destroyed (XdpAppInfo *app_info,
++                       gpointer    user_data)
++{
++  Notification *notification = user_data;
++  const char *sender_app_id;
++  GHashTableIter iter;
++  Pair *p;
++
++  G_MUTEX_AUTO_LOCK (&notification->active_mutex, locker);
++
++  sender_app_id = xdp_app_info_get_id (app_info);
++
++  g_hash_table_iter_init (&iter, notification->active);
++  while (g_hash_table_iter_next (&iter, (gpointer *)&p, NULL))
++    {
++      if (g_strcmp0 (p->app_id, sender_app_id) == 0)
++        g_hash_table_iter_remove (&iter);
++    }
++}
++
+ static void
+ add_done (GObject *source,
+           GAsyncResult *result,
+@@ -214,6 +235,14 @@ add_done (GObject *source,
+       g_hash_table_insert (notification->active,
+                            pair_copy (&p),
+                            g_strdup (call_data->sender));
++
++      g_signal_handlers_disconnect_by_data (call_data->app_info,
++                                            notification);
++      g_signal_connect_object (call_data->app_info,
++                               "destroyed",
++                               G_CALLBACK (on_app_info_destroyed),
++                               notification,
++                               G_CONNECT_DEFAULT);
+     }
+ }
+ 
+@@ -1218,38 +1247,6 @@ action_invoked_cb (XdpDbusImplNotification *impl,
+                                              arg_parameter);
+ }
+ 
+-static void
+-on_peer_disconnect (XdpContext *context,
+-                    const char *sender,
+-                    gpointer    user_data)
+-{
+-  Notification *notification = user_data;
+-  XdpAppInfoRegistry *registry;
+-  g_autoptr(XdpAppInfo) sender_app_info = NULL;
+-  const char *sender_app_id;
+-
+-  registry = xdp_context_get_app_info_registry (context);
+-  sender_app_info = xdp_app_info_registry_lookup_sender (registry, sender);
+-  if (!sender_app_info)
+-    return;
+-
+-  sender_app_id = xdp_app_info_get_id (sender_app_info);
+-
+-  {
+-    GHashTableIter iter;
+-    Pair *p;
+-
+-    G_MUTEX_AUTO_LOCK (&notification->active_mutex, locker);
+-
+-    g_hash_table_iter_init (&iter, notification->active);
+-    while (g_hash_table_iter_next (&iter, (gpointer *)&p, NULL))
+-      {
+-        if (g_strcmp0 (p->app_id, sender_app_id) == 0)
+-          g_hash_table_iter_remove (&iter);
+-      }
+-  }
+-}
+-
+ static void
+ notification_iface_init (XdpDbusNotificationIface *iface)
+ {
+@@ -1317,11 +1314,6 @@ notification_new (XdpContext              *context,
+                            notification,
+                            G_CONNECT_DEFAULT);
+ 
+-  g_signal_connect_object (context, "peer-disconnect",
+-                           G_CALLBACK (on_peer_disconnect),
+-                           notification,
+-                           G_CONNECT_DEFAULT);
+-
+   return notification;
+ }
+ 
+@@ -1354,5 +1346,5 @@ init_notification (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&notification)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/open-uri.c b/src/open-uri.c
+index b54ba88..33f84c9 100644
+--- a/src/open-uri.c
++++ b/src/open-uri.c
+@@ -1202,5 +1202,5 @@ init_open_uri (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&open_uri)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/power-profile-monitor.c b/src/power-profile-monitor.c
+index 1a8b5c5..c5730af 100644
+--- a/src/power-profile-monitor.c
++++ b/src/power-profile-monitor.c
+@@ -136,5 +136,5 @@ init_power_profile_monitor (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&power_profile_monitor)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/print.c b/src/print.c
+index 87e49f5..50f0b4c 100644
+--- a/src/print.c
++++ b/src/print.c
+@@ -404,5 +404,5 @@ init_print (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&print)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/proxy-resolver.c b/src/proxy-resolver.c
+index 7ede957..5db89f3 100644
+--- a/src/proxy-resolver.c
++++ b/src/proxy-resolver.c
+@@ -140,5 +140,5 @@ init_proxy_resolver (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&proxy_resolver)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/realtime.c b/src/realtime.c
+index 62f478a..f4c3e93 100644
+--- a/src/realtime.c
++++ b/src/realtime.c
+@@ -341,5 +341,5 @@ init_realtime (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&realtime)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/registry.c b/src/registry.c
+index 75310cb..ad24eb4 100644
+--- a/src/registry.c
++++ b/src/registry.c
+@@ -57,53 +57,6 @@ G_DEFINE_TYPE_WITH_CODE (Registry, registry,
+ 
+ G_DEFINE_AUTOPTR_CLEANUP_FUNC (Registry, g_object_unref)
+ 
+-static XdpAppInfo *
+-register_host_app_info_sync (Registry               *registry,
+-                             GDBusMethodInvocation  *invocation,
+-                             const char             *app_id,
+-                             GCancellable           *cancellable,
+-                             GError                **error)
+-{
+-  XdpAppInfoRegistry *app_info_registry = registry->app_info_registry;
+-  const char *sender = g_dbus_method_invocation_get_sender (invocation);
+-  g_autoptr(XdpAppInfo) detected_app_info = NULL;
+-  g_autoptr(XdpAppInfo) app_info = NULL;
+-
+-  if (xdp_app_info_registry_has_sender (app_info_registry, sender))
+-    {
+-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+-                   "Connection already associated with an application ID");
+-      return NULL;
+-    }
+-
+-  detected_app_info = xdp_app_info_new_for_invocation_sync (invocation,
+-                                                            cancellable,
+-                                                            error);
+-  if (!detected_app_info)
+-    return NULL;
+-
+-  if (!xdp_app_info_is_host (detected_app_info))
+-    {
+-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+-                   "Can't manually register a %s application",
+-                   xdp_app_info_get_engine_display_name (detected_app_info));
+-      return NULL;
+-    }
+-
+-  app_info = xdp_app_info_new_for_registered_sync (invocation,
+-                                                   app_id,
+-                                                   cancellable,
+-                                                   error);
+-  if (!app_info)
+-    return NULL;
+-
+-  g_debug ("Adding registered host app '%s'", xdp_app_info_get_id (app_info));
+-
+-  xdp_app_info_registry_insert (app_info_registry, app_info);
+-
+-  return g_steal_pointer (&app_info);
+-}
+-
+ static gboolean
+ handle_register (XdpDbusHostRegistry   *object,
+                  GDBusMethodInvocation *invocation,
+@@ -111,34 +64,105 @@ handle_register (XdpDbusHostRegistry   *object,
+                  GVariant              *arg_options)
+ {
+   Registry *registry = (Registry *) object;
+-  g_autoptr(XdpAppInfo) app_info = NULL;
++  const char *sender = g_dbus_method_invocation_get_sender (invocation);
++  g_autoptr(XdpAppInfo) new_app_info = NULL;
++  g_autoptr(DexFuture) insert_future = NULL;
++  g_autoptr(DexPromise) app_info_promise = NULL;
++  gboolean success;
+   g_autoptr(GError) error = NULL;
+ 
+-  app_info = register_host_app_info_sync (registry,
+-                                          invocation,
+-                                          arg_app_id,
+-                                          NULL,
+-                                          &error);
+-  if (!app_info)
++  /* First, let's add an insert operation, that way we block any further
++   * app info activity on the connection, until the promise is resolved. */
++  app_info_promise = dex_promise_new ();
++  insert_future =
++    xdp_app_info_registry_insert_future (registry->app_info_registry,
++                                         invocation,
++                                         DEX_FUTURE (dex_ref (app_info_promise)));
++
++  /* Then we check if we actually should allow the caller to update the
++   * app id */
++  {
++    g_autoptr(XdpAppInfo) detected_app_info = NULL;
++
++    /* FIXME convert to future */
++    detected_app_info = xdp_app_info_new_for_invocation_sync (invocation,
++                                                              NULL,
++                                                              &error);
++    if (!detected_app_info)
++      {
++        g_debug ("Failed to detect app info for %s: %s",
++                 sender, error->message);
++        dex_promise_reject (app_info_promise, g_steal_pointer (&error));
++        g_dbus_method_invocation_return_error (g_steal_pointer (&invocation),
++                                               XDG_DESKTOP_PORTAL_ERROR,
++                                               XDG_DESKTOP_PORTAL_ERROR_NOT_ALLOWED,
++                                               "Can't manually register unknown application");
++        return G_DBUS_METHOD_INVOCATION_HANDLED;
++      }
++
++    if (!xdp_app_info_is_host (detected_app_info))
++      {
++        const char *engine = xdp_app_info_get_engine_display_name (detected_app_info);
++
++        g_debug ("Non-host (%s) sender %s tried to register a new app id",
++                 engine, sender);
++        dex_promise_reject (app_info_promise,
++                            g_error_new_literal (G_IO_ERROR,
++                                                 G_IO_ERROR_PERMISSION_DENIED,
++                                                 "Not a host app"));
++        g_dbus_method_invocation_return_error (g_steal_pointer (&invocation),
++                                               XDG_DESKTOP_PORTAL_ERROR,
++                                               XDG_DESKTOP_PORTAL_ERROR_NOT_ALLOWED,
++                                               "Can't manually register a %s application",
++                                               engine);
++        return G_DBUS_METHOD_INVOCATION_HANDLED;
++      }
++  }
++
++  /* FIXME convert to future */
++  new_app_info = xdp_app_info_new_for_registered_sync (invocation,
++                                                       arg_app_id,
++                                                       NULL,
++                                                       &error);
++  if (!new_app_info)
+     {
++      g_debug ("Can't create registered app for %s: %s",
++               sender, error->message);
+       g_dbus_method_invocation_return_error (invocation,
+                                              XDG_DESKTOP_PORTAL_ERROR,
+                                              XDG_DESKTOP_PORTAL_ERROR_FAILED,
+-                                             "Could not register app ID: %s",
+-                                             error->message);
++                                             "Can't create registered app");
+       return G_DBUS_METHOD_INVOCATION_HANDLED;
+     }
+ 
+-  if (g_strcmp0 (xdp_app_info_get_id (app_info), arg_app_id) != 0)
++  /* And finally we can resolve the promise and wait for it to get applied */
++  dex_promise_resolve_object (app_info_promise, g_object_ref (new_app_info));
++  success = dex_await_boolean (g_steal_pointer (&insert_future), &error);
++
++  if (!success && error)
+     {
+-      g_dbus_method_invocation_return_error (invocation,
++      g_debug ("Can't create registered app for %s: %s",
++               sender, error->message);
++      g_dbus_method_invocation_return_error (g_steal_pointer (&invocation),
+                                              XDG_DESKTOP_PORTAL_ERROR,
+-                                             XDG_DESKTOP_PORTAL_ERROR_INVALID_ARGUMENT,
+-                                             "Registered too late");
++                                             XDG_DESKTOP_PORTAL_ERROR_FAILED,
++                                             "Can't register app");
+       return G_DBUS_METHOD_INVOCATION_HANDLED;
+     }
+ 
+-  xdp_dbus_host_registry_complete_register (object, invocation);
++  if (!success)
++    {
++      g_debug ("Connection %s already associated with an application ID", sender);
++      g_dbus_method_invocation_return_error (g_steal_pointer (&invocation),
++                                             XDG_DESKTOP_PORTAL_ERROR,
++                                             XDG_DESKTOP_PORTAL_ERROR_FAILED,
++                                             "Connection already associated with an application ID");
++      return G_DBUS_METHOD_INVOCATION_HANDLED;
++    }
++
++  g_debug ("Added registered host app %s", xdp_app_info_get_id (new_app_info));
++
++  xdp_dbus_host_registry_complete_register (object, g_steal_pointer (&invocation));
+ 
+   return G_DBUS_METHOD_INVOCATION_HANDLED;
+ }
+@@ -194,7 +218,13 @@ init_registry (XdpContext *context)
+ 
+   registry = registry_new (app_info_registry);
+ 
++  /* We must ensure that method dispatches which modify the XdpAppInfo do so
++   * before any other method call is dispatched. We do this by running in a
++   * fiber on the main thread, and inserting our modification operation before
++   * we yield (to the dbus main loop or the fiber scheduler via dex_await).
++   */
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&registry)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_HOST_PORTAL);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_FIBER |
++                                      XDP_CONTEXT_EXPORT_FLAGS_SKIP_AUTH);
+ }
+diff --git a/src/remote-desktop.c b/src/remote-desktop.c
+index cea512c..b39c744 100644
+--- a/src/remote-desktop.c
++++ b/src/remote-desktop.c
+@@ -270,8 +270,7 @@ remote_desktop_session_new (RemoteDesktop  *remote_desktop,
+   session_token = lookup_session_token (options);
+   session = g_initable_new (remote_desktop_session_get_type (), NULL, error,
+                             "context", remote_desktop->context,
+-                            "sender", request->sender,
+-                            "app-id", xdp_app_info_get_id (request->app_info),
++                            "app-info", request->app_info,
+                             "token", session_token,
+                             "connection", connection,
+                             "impl-connection", impl_connection,
+@@ -1713,5 +1712,5 @@ init_remote_desktop (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&remote_desktop)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/screen-cast.c b/src/screen-cast.c
+index 1037137..9d65d19 100644
+--- a/src/screen-cast.c
++++ b/src/screen-cast.c
+@@ -195,8 +195,7 @@ screen_cast_session_new (ScreenCast  *screen_cast,
+   session_token = lookup_session_token (options);
+   session = g_initable_new (screen_cast_session_get_type (), NULL, error,
+                             "context", screen_cast->context,
+-                            "sender", request->sender,
+-                            "app-id", xdp_app_info_get_id (request->app_info),
++                            "app-info", request->app_info,
+                             "token", session_token,
+                             "connection", connection,
+                             "impl-connection", impl_connection,
+@@ -1181,5 +1180,5 @@ init_screen_cast (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&screen_cast)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/screenshot.c b/src/screenshot.c
+index 0165f6c..fdaa21c 100644
+--- a/src/screenshot.c
++++ b/src/screenshot.c
+@@ -668,5 +668,5 @@ init_screenshot (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&screenshot)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/secret.c b/src/secret.c
+index ba11461..73eec9f 100644
+--- a/src/secret.c
++++ b/src/secret.c
+@@ -224,50 +224,37 @@ secret_new (XdpDbusImplSecret *impl)
+   return secret;
+ }
+ 
+-static void
+-proxy_created_cb (GObject      *source_object,
+-                  GAsyncResult *result,
+-                  gpointer      user_data)
++DexFuture *
++init_secret (gpointer user_data)
+ {
+-  XdpContext *context;
++  XdpContext *context = XDP_CONTEXT (user_data);
++  g_autoptr(Secret) secret = NULL;
++  GDBusConnection *connection = xdp_context_get_connection (context);
++  XdpPortalConfig *config = xdp_context_get_config (context);
++  XdpImplConfig *impl_config;
+   g_autoptr(XdpDbusImplSecret) impl = NULL;
+   g_autoptr(GError) error = NULL;
+-  g_autoptr(Secret) secret = NULL;
+ 
+-  impl = xdp_dbus_impl_secret_proxy_new_finish (result, &error);
+-  if (!impl)
++  impl_config = xdp_portal_config_find (config, SECRET_DBUS_IMPL_IFACE);
++  if (impl_config == NULL)
++    return dex_future_new_true ();
++
++  impl = dex_await_object (xdp_dbus_impl_secret_proxy_new_future (
++      connection,
++      G_DBUS_PROXY_FLAGS_NONE,
++      impl_config->dbus_name,
++      "/org/freedesktop/portal/desktop"),
++    &error);
++
++  if (impl == NULL)
+     {
+-      if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+-        g_warning ("Failed to create secret proxy: %s", error->message);
+-      return;
++      g_warning ("Failed to create secret proxy: %s", error->message);
++      return dex_future_new_false ();
+     }
+ 
+-  context = XDP_CONTEXT (user_data);
+-
+   secret = secret_new (impl);
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&secret)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
+-}
+-
+-void
+-init_secret (XdpContext   *context,
+-             GCancellable *cancellable)
+-{
+-  GDBusConnection *connection = xdp_context_get_connection (context);
+-  XdpPortalConfig *config = xdp_context_get_config (context);
+-  XdpImplConfig *impl_config;
+-  g_autoptr(GError) error = NULL;
+-
+-  impl_config = xdp_portal_config_find (config, SECRET_DBUS_IMPL_IFACE);
+-  if (impl_config == NULL)
+-    return;
+-
+-  xdp_dbus_impl_secret_proxy_new (connection,
+-                                  G_DBUS_PROXY_FLAGS_NONE,
+-                                  impl_config->dbus_name,
+-                                  DESKTOP_DBUS_PATH,
+-                                  cancellable,
+-                                  proxy_created_cb,
+-                                  context);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
++  return dex_future_new_true ();
+ }
+diff --git a/src/secret.h b/src/secret.h
+index 8bc42fd..0cadfb7 100644
+--- a/src/secret.h
++++ b/src/secret.h
+@@ -22,7 +22,8 @@
+ 
+ #pragma once
+ 
++#include <libdex.h>
++
+ #include "xdp-types.h"
+ 
+-void init_secret (XdpContext   *context,
+-                  GCancellable *cancellable);
++DexFuture * init_secret (gpointer user_data);
+diff --git a/src/settings.c b/src/settings.c
+index cc40fd6..651439f 100644
+--- a/src/settings.c
++++ b/src/settings.c
+@@ -353,5 +353,5 @@ init_settings (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&settings)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/usb.c b/src/usb.c
+index 4b8255d..cf18685 100644
+--- a/src/usb.c
++++ b/src/usb.c
+@@ -41,7 +41,6 @@
+ #include <glib/gi18n.h>
+ #include <gudev/gudev.h>
+ 
+-#include "xdp-app-info-registry.h"
+ #include "xdp-context.h"
+ #include "xdp-dbus.h"
+ #include "xdp-impl-dbus.h"
+@@ -478,9 +477,8 @@ xdp_usb_session_new (XdpUsb           *usb,
+   session = g_initable_new (XDP_TYPE_USB_SESSION,
+                             NULL, error,
+                             "context", usb->context,
++                            "app-info", app_info,
+                             "connection", connection,
+-                            "sender", xdp_app_info_get_sender (app_info),
+-                            "app-id", xdp_app_info_get_id (app_info),
+                             "token", lookup_session_token (options),
+                             NULL);
+   if (!session)
+@@ -607,8 +605,6 @@ handle_session_event (XdpUsb        *self,
+                       const char    *action,
+                       gboolean       removing)
+ {
+-  XdpAppInfoRegistry *registry;
+-  g_autoptr(XdpAppInfo) app_info = NULL;
+   g_autoptr(GVariant) device_variant = NULL;
+   GVariantBuilder devices_builder;
+   UsbSenderInfo *sender_info;
+@@ -617,10 +613,8 @@ handle_session_event (XdpUsb        *self,
+   g_assert (G_UDEV_IS_DEVICE (device));
+   g_assert (g_strcmp0 (g_udev_device_get_subsystem (device), "usb") == 0);
+ 
+-  registry = xdp_context_get_app_info_registry (self->context);
+-  app_info = xdp_app_info_registry_lookup_sender (registry, session->sender);
+-  g_assert (app_info != NULL);
+-  sender_info = usb_sender_info_from_app_info (app_info);
++  g_assert (session->app_info != NULL);
++  sender_info = usb_sender_info_from_app_info (session->app_info);
+   g_assert (sender_info != NULL);
+ 
+   /* We can't use usb_sender_info_match_device() when a device is being removed because,
+@@ -1575,5 +1569,5 @@ init_usb (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&usb)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/wallpaper.c b/src/wallpaper.c
+index a7a50a7..e1a1847 100644
+--- a/src/wallpaper.c
++++ b/src/wallpaper.c
+@@ -451,5 +451,5 @@ init_wallpaper (XdpContext *context)
+ 
+   xdp_context_take_and_export_portal (context,
+                                       G_DBUS_INTERFACE_SKELETON (g_steal_pointer (&wallpaper)),
+-                                      XDP_CONTEXT_EXPORT_FLAGS_NONE);
++                                      XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD);
+ }
+diff --git a/src/xdp-app-info-registry.c b/src/xdp-app-info-registry.c
+index fb02f9d..96d4eca 100644
+--- a/src/xdp-app-info-registry.c
++++ b/src/xdp-app-info-registry.c
+@@ -22,29 +22,85 @@
+ #include "xdp-app-info-registry.h"
+ 
+ #include "xdp-app-info.h"
++#include "xdp-dex.h"
+ 
+ struct _XdpAppInfoRegistry
+ {
+   GObject parent_instance;
+ 
+-  GHashTable *app_infos; /* unique dbus name -> app info */
+-  GMutex app_infos_mutex;
++  GHashTable *app_infos; /* unique dbus name -> XdpAppInfo* */
++  GHashTable *channels; /* unique dbus name -> DexChannel* */
++  GMutex channels_lock; /* protects channels */
+ };
+ 
+ G_DEFINE_FINAL_TYPE (XdpAppInfoRegistry,
+                      xdp_app_info_registry,
+                      G_TYPE_OBJECT);
+ 
++typedef enum _QueueDataKind {
++  QUEUE_DATA_KIND_ENSURE,
++  QUEUE_DATA_KIND_INSERT,
++  QUEUE_DATA_KIND_DELETE,
++} QueueDataKind;
++
++typedef struct _QueueData
++{
++  DexPromise *promise;
++  QueueDataKind kind;
++
++  /* ensure, insert */
++  GDBusMethodInvocation *invocation;
++  DexFuture *app_info_future;
++
++  /* delete */
++  char *sender;
++} QueueData;
++
++static QueueData *
++queue_data_copy (QueueData *data)
++{
++  QueueData *copy = g_new0 (QueueData, 1);
++
++  copy->kind = data->kind;
++  copy->promise = data->promise ? dex_ref (data->promise) : NULL;
++  copy->invocation = data->invocation ? g_object_ref (data->invocation) : NULL;
++  copy->app_info_future = data->app_info_future ? dex_ref (data->app_info_future) : NULL;
++  copy->sender = g_strdup (data->sender);
++
++  return copy;
++}
++
++static void
++queue_data_free (QueueData *data)
++{
++  g_clear_pointer (&data->promise, dex_unref);
++  g_clear_object (&data->invocation);
++  g_clear_pointer (&data->app_info_future, dex_unref);
++  g_clear_pointer (&data->sender, g_free);
++  g_free (data);
++}
++
++G_DEFINE_AUTOPTR_CLEANUP_FUNC (QueueData, queue_data_free)
++G_DEFINE_BOXED_TYPE (QueueData, queue_data, queue_data_copy, queue_data_free)
++
++static void
++channel_unref_and_close (DexChannel *channel)
++{
++  dex_channel_close_send (channel);
++  dex_unref (channel);
++}
++
+ static void
+ xdp_app_info_registry_dispose (GObject *object)
+ {
+   XdpAppInfoRegistry *registry = XDP_APP_INFO_REGISTRY (object);
+ 
+-  if (registry->app_infos)
+-    {
+-      g_mutex_clear (&registry->app_infos_mutex);
+-      g_clear_pointer (&registry->app_infos, g_hash_table_unref);
+-    }
++  if (registry->channels)
++    g_mutex_clear (&registry->channels_lock);
++
++  g_clear_pointer (&registry->app_infos, g_hash_table_unref);
++  g_clear_pointer (&registry->channels, g_hash_table_unref);
++
+ 
+   G_OBJECT_CLASS (xdp_app_info_registry_parent_class)->dispose (object);
+ }
+@@ -70,101 +126,225 @@ xdp_app_info_registry_new (void)
+   registry->app_infos = g_hash_table_new_full (g_str_hash, g_str_equal,
+                                                g_free,
+                                                g_object_unref);
+-  g_mutex_init (&registry->app_infos_mutex);
++
++  registry->channels = g_hash_table_new_full (g_str_hash, g_str_equal,
++                                              g_free,
++                                              (GDestroyNotify) channel_unref_and_close);
++
++  g_mutex_init (&registry->channels_lock);
+ 
+   return registry;
+ }
+ 
+-XdpAppInfo *
+-xdp_app_info_registry_lookup_sender (XdpAppInfoRegistry *registry,
+-                                     const char         *sender)
++static DexFuture *
++work_fiber (XdpAppInfoRegistry *registry,
++            const char         *sender)
+ {
+-  XdpAppInfo *app_info = NULL;
++  g_autoptr(DexChannel) channel = NULL;
+ 
+-  G_MUTEX_AUTO_LOCK (&registry->app_infos_mutex, locker);
++  g_mutex_lock (&registry->channels_lock);
++  channel = dex_ref (g_hash_table_lookup (registry->channels, sender));
++  g_mutex_unlock (&registry->channels_lock);
++
++  while (TRUE)
++    {
++      g_autoptr(QueueData) data = NULL;
++      g_autoptr(DexFuture) future = NULL;
++
++      future = dex_channel_receive (channel);
++
++      /* if we have to wait, the queue is empty and we shut down the channel */
++      if (dex_future_is_pending (future))
++        break;
++
++      /* also shut down if the other side closed */
++      data = dex_await_boxed (g_steal_pointer (&future), NULL);
++      if (!data)
++        break;
++
++      switch (data->kind)
++        {
++        case QUEUE_DATA_KIND_ENSURE:
++          {
++            XdpAppInfo *app_info;
++
++            app_info = g_hash_table_lookup (registry->app_infos, sender);
++            if (!app_info)
++              {
++                g_autoptr(XdpAppInfo) app_info_owned = NULL;
++                g_autoptr(GError) error = NULL;
++
++                /* FIXME convert to future */
++                app_info_owned = app_info =
++                  xdp_app_info_new_for_invocation_sync (data->invocation,
++                                                        NULL,
++                                                        &error);
++                if (!app_info_owned)
++                  {
++                    dex_promise_reject (data->promise, g_steal_pointer (&error));
++                    break;
++                  }
++
++                g_hash_table_insert (registry->app_infos,
++                                     g_strdup (sender),
++                                     g_steal_pointer (&app_info_owned));
++              }
++
++            dex_promise_resolve_object (data->promise, g_object_ref (app_info));
++          }
++          break;
++        case QUEUE_DATA_KIND_INSERT:
++          {
++            g_autoptr(GError) error = NULL;
++            g_autoptr(XdpAppInfo) app_info = NULL;
++
++            if (g_hash_table_contains (registry->app_infos, sender))
++              {
++                dex_promise_resolve_boolean (data->promise, FALSE);
++                break;
++              }
++
++            app_info = dex_await_object (g_steal_pointer (&data->app_info_future),
++                                         &error);
++            if (!app_info)
++              {
++                g_debug ("Could not await app info for sender %s: %s",
++                         sender, error->message);
++                dex_promise_resolve_boolean (data->promise, FALSE);
++                break;
++              }
++
++            g_debug ("Inserted app info %s for sender %s",
++                     xdp_app_info_get_id (app_info), sender);
++            g_hash_table_insert (registry->app_infos,
++                                 g_strdup (sender),
++                                 g_steal_pointer (&app_info));
++            dex_promise_resolve_boolean (data->promise, TRUE);
++          }
++          break;
++        case QUEUE_DATA_KIND_DELETE:
++          {
++            dex_promise_resolve_boolean (data->promise,
++                                         g_hash_table_remove (registry->app_infos,
++                                                              sender));
++          }
++          break;
++        default:
++          g_assert_not_reached ();
++        }
++    }
+ 
+-  app_info = g_hash_table_lookup (registry->app_infos, sender);
+-  if (!app_info)
+-    return NULL;
++  g_mutex_lock (&registry->channels_lock);
++  g_hash_table_remove (registry->channels, sender);
++  g_mutex_unlock (&registry->channels_lock);
+ 
+-  return g_object_ref (app_info);
++  return dex_future_new_true ();
+ }
+ 
+-gboolean
+-xdp_app_info_registry_has_sender (XdpAppInfoRegistry *registry,
+-                                  const char         *sender)
++/* all callers must hold the registry->channels_lock lock */
++static DexFuture *
++queue_work (XdpAppInfoRegistry *registry,
++            const char         *sender,
++            QueueData          *data)
+ {
+-  G_MUTEX_AUTO_LOCK (&registry->app_infos_mutex, locker);
++  g_autoptr(QueueData) owned_data = data;
++  DexChannel *channel = g_hash_table_lookup (registry->channels, sender);
++  g_autoptr(DexChannel) channel_owned = NULL;
++  g_autoptr(DexPromise) promise = dex_promise_new ();
++  g_autoptr(DexFuture) future = NULL;
++
++  if (!channel)
++    channel = channel_owned = dex_channel_new (0);
++
++  if (!dex_channel_can_send (channel))
++    {
++      dex_promise_reject (promise,
++                          g_error_new (G_IO_ERROR,
++                                       G_IO_ERROR_FAILED,
++                                       "Channel closed"));
++      return DEX_FUTURE (g_steal_pointer (&promise));
++    }
++
++  data->promise = dex_ref (promise);
++  future = dex_channel_send (channel,
++                             dex_future_new_take_boxed (queue_data_get_type (),
++                                                        g_steal_pointer (&owned_data)));
+ 
+-  return g_hash_table_contains (registry->app_infos, sender);
++  if (channel_owned)
++    {
++      g_autoptr(DexFuture) spawn_future = NULL;
++
++      g_hash_table_insert (registry->channels,
++                           g_strdup (sender),
++                           g_steal_pointer (&channel_owned));
++
++      spawn_future = dex_scheduler_spawnv (NULL, 0,
++                                           G_CALLBACK (work_fiber),
++                                           2,
++                                           XDP_TYPE_APP_INFO_REGISTRY, registry,
++                                           G_TYPE_STRING, sender);
++    }
++
++  return DEX_FUTURE (g_steal_pointer (&promise));
+ }
+ 
+-void
+-xdp_app_info_registry_insert (XdpAppInfoRegistry *registry,
+-                              XdpAppInfo         *app_info)
++DexFuture *
++xdp_app_info_registry_insert_future (XdpAppInfoRegistry    *registry,
++                                     GDBusMethodInvocation *invocation,
++                                     DexFuture             *app_info_future)
+ {
+-  const char *sender = xdp_app_info_get_sender (app_info);
++  g_autoptr(QueueData) data = NULL;
++  const char *sender = g_dbus_method_invocation_get_sender (invocation);
+ 
+-  G_MUTEX_AUTO_LOCK (&registry->app_infos_mutex, locker);
++  G_MUTEX_AUTO_LOCK (&registry->channels_lock, locker);
+ 
+-  g_debug ("Adding XdpAppInfo: %s app '%s' for %s",
+-           xdp_app_info_get_engine_display_name (app_info),
+-           xdp_app_info_get_id (app_info),
+-           sender);
++  data = g_new0 (QueueData, 1);
++  data->kind = QUEUE_DATA_KIND_INSERT;
++  data->invocation = g_object_ref (invocation);
++  data->app_info_future = g_steal_pointer (&app_info_future);
+ 
+-  g_hash_table_insert (registry->app_infos,
+-                       g_strdup (sender),
+-                       g_object_ref (app_info));
++  return queue_work (registry, sender, g_steal_pointer (&data));
+ }
+ 
+-void
+-xdp_app_info_registry_delete (XdpAppInfoRegistry *registry,
+-                              const char         *sender)
++DexFuture *
++xdp_app_info_registry_delete_future (XdpAppInfoRegistry *registry,
++                                     const char         *sender)
+ {
+-  XdpAppInfo *app_info = NULL;
++  g_autoptr(QueueData) data = NULL;
+ 
+-  G_MUTEX_AUTO_LOCK (&registry->app_infos_mutex, locker);
++  G_MUTEX_AUTO_LOCK (&registry->channels_lock, locker);
+ 
+-  app_info = g_hash_table_lookup (registry->app_infos, sender);
+-  if (!app_info)
+-    return;
++  /* Shortcut if we have no active channel (i.e. no in-flight changes) */
++  if (!g_hash_table_contains (registry->channels, sender))
++    {
++      return dex_future_new_for_boolean (g_hash_table_remove (registry->app_infos,
++                                                              sender));
++    }
+ 
+-  g_debug ("Deleting XdpAppInfo: %s app '%s' for %s",
+-           xdp_app_info_get_engine_display_name (app_info),
+-           xdp_app_info_get_id (app_info),
+-           sender);
++  data = g_new0 (QueueData, 1);
++  data->kind = QUEUE_DATA_KIND_DELETE;
++  data->sender = g_strdup (sender);
+ 
+-  g_hash_table_remove (registry->app_infos, sender);
++  return queue_work (registry, sender, g_steal_pointer (&data));
+ }
+ 
+-XdpAppInfo *
+-xdp_app_info_registry_ensure_for_invocation_sync (XdpAppInfoRegistry     *registry,
+-                                                  GDBusMethodInvocation  *invocation,
+-                                                  GCancellable           *cancellable,
+-                                                  GError                **error)
++DexFuture *
++xdp_app_info_registry_ensure_future (XdpAppInfoRegistry    *registry,
++                                     GDBusMethodInvocation *invocation)
+ {
+-  g_autoptr(XdpAppInfo) app_info = NULL;
+-  const char *sender;
++  g_autoptr(QueueData) data = NULL;
++  const char *sender = g_dbus_method_invocation_get_sender (invocation);
++  XdpAppInfo *existing = g_hash_table_lookup (registry->app_infos, sender);
+ 
+-  sender = g_dbus_method_invocation_get_sender (invocation);
+-  app_info = xdp_app_info_registry_lookup_sender (registry, sender);
+-  if (app_info)
+-    {
+-      g_debug ("Found XdpAppInfo in cache: %s app '%s' for %s",
+-               xdp_app_info_get_engine_display_name (app_info),
+-               xdp_app_info_get_id (app_info),
+-               sender);
+-
+-      return g_steal_pointer (&app_info);
+-    }
++  G_MUTEX_AUTO_LOCK (&registry->channels_lock, locker);
+ 
+-  app_info = xdp_app_info_new_for_invocation_sync (invocation,
+-                                                   cancellable,
+-                                                   error);
+-  if (!app_info)
+-    return NULL;
++  /* Shortcut if we have no active channel (i.e. no in-flight changes) */
++  if (existing && !g_hash_table_contains (registry->channels, sender))
++    return dex_future_new_take_object (g_object_ref (existing));
+ 
+-  xdp_app_info_registry_insert (registry, app_info);
++  data = g_new0 (QueueData, 1);
++  data->kind = QUEUE_DATA_KIND_ENSURE;
++  data->invocation = g_object_ref (invocation);
+ 
+-  return g_steal_pointer (&app_info);
++  return queue_work (registry, sender, g_steal_pointer (&data));
+ }
+diff --git a/src/xdp-app-info-registry.h b/src/xdp-app-info-registry.h
+index 5c5f41c..766d324 100644
+--- a/src/xdp-app-info-registry.h
++++ b/src/xdp-app-info-registry.h
+@@ -21,6 +21,7 @@
+ 
+ #include <gio/gio.h>
+ #include <glib-object.h>
++#include <libdex.h>
+ 
+ #include "xdp-types.h"
+ 
+@@ -32,19 +33,13 @@ G_DECLARE_FINAL_TYPE (XdpAppInfoRegistry,
+ 
+ XdpAppInfoRegistry * xdp_app_info_registry_new (void);
+ 
+-XdpAppInfo * xdp_app_info_registry_lookup_sender (XdpAppInfoRegistry *registry,
+-                                                  const char         *sender);
++DexFuture * xdp_app_info_registry_ensure_future (XdpAppInfoRegistry    *registry,
++                                                 GDBusMethodInvocation *invocation);
+ 
+-gboolean xdp_app_info_registry_has_sender (XdpAppInfoRegistry *registry,
+-                                           const char         *sender);
++DexFuture * xdp_app_info_registry_insert_future (XdpAppInfoRegistry    *registry,
++                                                 GDBusMethodInvocation *invocation,
++                                                 DexFuture             *app_info_future);
+ 
+-void xdp_app_info_registry_insert (XdpAppInfoRegistry *registry,
+-                                   XdpAppInfo         *app_info);
++DexFuture * xdp_app_info_registry_delete_future (XdpAppInfoRegistry *registry,
++                                                 const char         *sender);
+ 
+-void xdp_app_info_registry_delete (XdpAppInfoRegistry *registry,
+-                                   const char         *sender);
+-
+-XdpAppInfo * xdp_app_info_registry_ensure_for_invocation_sync (XdpAppInfoRegistry     *registry,
+-                                                               GDBusMethodInvocation  *invocation,
+-                                                               GCancellable           *cancellable,
+-                                                               GError                **error);
+diff --git a/src/xdp-app-info.c b/src/xdp-app-info.c
+index a518c39..5d5f2b3 100644
+--- a/src/xdp-app-info.c
++++ b/src/xdp-app-info.c
+@@ -76,6 +76,8 @@ typedef struct _XdpAppInfoPrivate
+ 
+   /* misc */
+   XdpAppInfoFlags flags;
++
++  gboolean disposed;
+ } XdpAppInfoPrivate;
+ 
+ static void g_initable_init_iface (GInitableIface *iface);
+@@ -97,6 +99,14 @@ typedef enum
+ 
+ static GParamSpec *properties [PROP_SENDER + 1];
+ 
++enum
++{
++  DESTROYED,
++  N_SIGNALS,
++};
++
++static guint signals[N_SIGNALS] = { 0 };
++
+ static gboolean
+ xdp_app_info_initable_init (GInitable     *initable,
+                             GCancellable  *cancellable,
+@@ -144,6 +154,12 @@ xdp_app_info_dispose (GObject *object)
+     xdp_app_info_get_instance_private (XDP_APP_INFO (object));
+   g_autoptr(GError) error = NULL;
+ 
++  if (!priv->disposed)
++    {
++      g_signal_emit (object, signals[DESTROYED], 0);
++      priv->disposed = TRUE;
++    }
++
+   g_clear_pointer (&priv->engine, g_free);
+   g_clear_pointer (&priv->id, g_free);
+   g_clear_pointer (&priv->instance, g_free);
+@@ -306,6 +322,13 @@ xdp_app_info_class_init (XdpAppInfoClass *klass)
+                          G_PARAM_STATIC_STRINGS);
+ 
+   g_object_class_install_properties (object_class, G_N_ELEMENTS (properties), properties);
++
++  signals[DESTROYED] = g_signal_new ("destroyed",
++                                     G_TYPE_FROM_CLASS (klass),
++                                     G_SIGNAL_RUN_LAST,
++                                     0,
++                                     NULL, NULL, NULL,
++                                     G_TYPE_NONE, 0);
+ }
+ 
+ static void
+diff --git a/src/xdp-context.c b/src/xdp-context.c
+index 1a5d59b..d6c4917 100644
+--- a/src/xdp-context.c
++++ b/src/xdp-context.c
+@@ -105,14 +105,38 @@ xdp_context_dispose (GObject *object)
+       context->peer_disconnect_handle_id = 0;
+     }
+ 
++  g_debug ("Shutting down portal context");
++
++  /* Cancel in-flight fibers and unexport all portals, then drain the main
++   * context so cancelled fibers can run their cleanup (e.g. unclaiming
++   * object paths) before we free the remaining resources. */
++  if (context->exported_portals)
++    {
++      GHashTableIter iter;
++      GDBusInterfaceSkeleton *skeleton;
++
++      g_hash_table_iter_init (&iter, context->exported_portals);
++      while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &skeleton))
++        {
++          if (DEX_IS_DBUS_INTERFACE_SKELETON (skeleton))
++            dex_dbus_interface_skeleton_cancel (DEX_DBUS_INTERFACE_SKELETON (skeleton));
++          g_dbus_interface_skeleton_unexport (skeleton);
++        }
++
++      g_clear_pointer (&context->exported_portals, g_hash_table_unref);
++    }
++
+   g_cancellable_cancel (context->cancellable);
+   g_clear_object (&context->cancellable);
++
++  while (g_main_context_iteration (NULL, FALSE))
++    ;
++
+   g_clear_object (&context->portal_config);
+   g_clear_object (&context->connection);
+   g_clear_object (&context->lockdown_impl);
+   g_clear_object (&context->access_impl);
+   g_clear_object (&context->app_info_registry);
+-  g_clear_pointer (&context->exported_portals, g_hash_table_unref);
+ 
+   if (context->registered_object_paths)
+     {
+@@ -218,19 +242,49 @@ method_needs_request (GDBusMethodInvocation *invocation)
+   return method_info ?  method_info->uses_request : TRUE;
+ }
+ 
++static gboolean
++authorize_callback_fiber (GDBusInterfaceSkeleton *interface,
++                          GDBusMethodInvocation  *invocation,
++                          gpointer                user_data)
++{
++  XdpContext *context = XDP_CONTEXT (user_data);
++  g_autoptr(XdpAppInfo) app_info = NULL;
++  g_autoptr(GError) error = NULL;
++
++  app_info = dex_await_object (xdp_app_info_registry_ensure_future (
++      context->app_info_registry,
++      invocation),
++    &error);
++
++  if (app_info == NULL)
++    {
++      g_dbus_method_invocation_return_error (invocation,
++                                             G_DBUS_ERROR,
++                                             G_DBUS_ERROR_ACCESS_DENIED,
++                                             "Portal operation not allowed: %s", error->message);
++      return FALSE;
++    }
++
++  g_object_set_data (G_OBJECT (invocation), "xdp-app-info", app_info);
++
++  return TRUE;
++}
++
+ static gboolean
+ authorize_callback (GDBusInterfaceSkeleton *interface,
+                     GDBusMethodInvocation  *invocation,
+                     gpointer                user_data)
+ {
+   XdpContext *context = XDP_CONTEXT (user_data);
++  g_autoptr(DexFuture) future = NULL;
+   g_autoptr(XdpAppInfo) app_info = NULL;
+   g_autoptr(GError) error = NULL;
+ 
+-  app_info = xdp_app_info_registry_ensure_for_invocation_sync (context->app_info_registry,
+-                                                               invocation,
+-                                                               NULL,
+-                                                               &error);
++  future = xdp_app_info_registry_ensure_future (context->app_info_registry,
++                                                invocation);
++  dex_thread_wait_for (dex_ref (future), NULL);
++
++  app_info = dex_await_object (g_steal_pointer (&future), &error);
+   if (app_info == NULL)
+     {
+       g_dbus_method_invocation_return_error (invocation,
+@@ -268,24 +322,36 @@ xdp_context_take_and_export_portal (XdpContext             *context,
+ 
+   name = g_dbus_interface_skeleton_get_info (skeleton)->name;
+ 
+-  if (!(flags & XDP_CONTEXT_EXPORT_FLAGS_HOST_PORTAL))
++  if (flags & XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD)
+     {
+-      /* Host portal dbus method invocations run in the main thread without yielding
+-       * to the main loop. This means that any later method call of any portal will
+-       * see the effects of the host portal method call.
+-       *
+-       * This is important because the Registry modifies the XdpAppInfo and later
+-       * method calls must see the modified value.
+-       */
+-
+       g_dbus_interface_skeleton_set_flags (
+         skeleton,
+         G_DBUS_INTERFACE_SKELETON_FLAGS_HANDLE_METHOD_INVOCATIONS_IN_THREAD);
++    }
+ 
+-      g_signal_connect_object (skeleton, "g-authorize-method",
+-                               G_CALLBACK (authorize_callback),
+-                               context,
+-                               G_CONNECT_DEFAULT);
++  if (flags & XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_FIBER)
++    {
++      dex_dbus_interface_skeleton_set_flags (
++        DEX_DBUS_INTERFACE_SKELETON (skeleton),
++        DEX_DBUS_INTERFACE_SKELETON_FLAGS_HANDLE_METHOD_INVOCATIONS_IN_FIBER);
++    }
++
++  if (!(flags & XDP_CONTEXT_EXPORT_FLAGS_SKIP_AUTH))
++    {
++      if (flags & XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_FIBER)
++        {
++          g_signal_connect_object (skeleton, "g-authorize-method",
++                                   G_CALLBACK (authorize_callback_fiber),
++                                   context,
++                                   G_CONNECT_DEFAULT);
++        }
++      else
++        {
++          g_signal_connect_object (skeleton, "g-authorize-method",
++                                   G_CALLBACK (authorize_callback),
++                                   context,
++                                   G_CONNECT_DEFAULT);
++        }
+     }
+ 
+   if (g_dbus_interface_skeleton_export (skeleton,
+@@ -316,7 +382,23 @@ on_peer_disconnect (const char *name,
+ 
+   g_signal_emit (context, signals[PEER_DISCONNECT], 0, name);
+ 
+-  xdp_app_info_registry_delete (context->app_info_registry, name);
++  dex_future_disown (xdp_app_info_registry_delete_future (context->app_info_registry,
++                                                          name));
++}
++
++static void
++init_portal_in_fiber (XdpContext   *context,
++                      DexFiberFunc  portal_init_func)
++{
++  g_autoptr(DexFuture) f = NULL;
++  GCancellable *cancellable = context->cancellable;
++
++  f = dex_future_first (dex_scheduler_spawn (NULL, 0,
++                                             portal_init_func,
++                                             context, NULL),
++                        dex_cancellable_new_from_cancellable (cancellable),
++                        NULL);
++  dex_future_disown (g_steal_pointer (&f));
+ }
+ 
+ gboolean
+@@ -382,6 +464,7 @@ xdp_context_register (XdpContext       *context,
+                                           G_MAXINT);
+     }
+ 
++  init_portal_in_fiber (context, init_secret);
+   init_memory_monitor (context);
+   init_power_profile_monitor (context);
+   init_network_monitor (context);
+@@ -404,7 +487,6 @@ xdp_context_register (XdpContext       *context,
+   init_wallpaper (context);
+   init_account (context);
+   init_email (context);
+-  init_secret (context, context->cancellable);
+   init_global_shortcuts (context);
+   init_dynamic_launcher (context);
+   init_screen_cast (context);
+diff --git a/src/xdp-context.h b/src/xdp-context.h
+index 20d23b0..b17430e 100644
+--- a/src/xdp-context.h
++++ b/src/xdp-context.h
+@@ -26,7 +26,9 @@
+ typedef enum _XdpContextExportFlags
+ {
+   XDP_CONTEXT_EXPORT_FLAGS_NONE = 0,
+-  XDP_CONTEXT_EXPORT_FLAGS_HOST_PORTAL = (1 << 0),
++  XDP_CONTEXT_EXPORT_FLAGS_SKIP_AUTH = (1 << 0),
++  XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_THREAD = (1 << 1),
++  XDP_CONTEXT_EXPORT_FLAGS_RUN_IN_FIBER = (1 << 2),
+ } XdpContextExportFlags;
+ 
+ #define XDP_TYPE_CONTEXT (xdp_context_get_type())
+diff --git a/src/xdp-dex.c b/src/xdp-dex.c
+new file mode 100644
+index 0000000..7fc69f3
+--- /dev/null
++++ b/src/xdp-dex.c
+@@ -0,0 +1,148 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * SPDX-FileCopyrightText: Copyright © the xdg-desktop-portal contributors
++ */
++
++#include "config.h"
++
++#include "xdp-dex.h"
++
++#include <gobject/gvaluecollector.h>
++
++#if !HAVE_DEX_SCHEDULER_SPAWNV
++typedef struct _DexSchedulerSpawnTrampoline
++{
++  GCallback callback;
++  GArray *values;
++} DexSchedulerSpawnTrampoline;
++
++static void
++dex_scheduler_spawn_trampoline_free (DexSchedulerSpawnTrampoline *state)
++{
++  state->callback = NULL;
++  g_clear_pointer (&state->values, g_array_unref);
++  g_free (state);
++}
++
++G_DEFINE_AUTOPTR_CLEANUP_FUNC (DexSchedulerSpawnTrampoline,
++                               dex_scheduler_spawn_trampoline_free);
++
++static inline DexFuture *
++dex_scheduler_spawn_trampoline_fiber (gpointer data)
++{
++  DexSchedulerSpawnTrampoline *state = data;
++  g_autoptr(GClosure) closure = NULL;
++  g_auto(GValue) return_value = G_VALUE_INIT;
++  gpointer res;
++
++  g_assert (state != NULL);
++  g_assert (state->callback != NULL);
++  g_assert (state->values != NULL);
++
++  g_value_init (&return_value, G_TYPE_POINTER);
++  closure = g_cclosure_new (state->callback, NULL, NULL);
++  g_closure_set_marshal (closure, g_cclosure_marshal_generic);
++  g_closure_invoke (closure,
++                    &return_value,
++                    state->values->len,
++                    (const GValue *)(gpointer)state->values->data,
++                    NULL);
++  res = g_value_get_pointer (&return_value);
++
++  return res;
++}
++
++/**
++ * dex_scheduler_spawnv: (skip)
++ * @scheduler: (nullable): a [class@Dex.Scheduler]
++ * @stack_size: stack size in bytes or 0
++ * @callback: the fiber to spawn
++ * @n_params: number of arguments of the fiber
++ * @...: arguments, pairs of #GType followed by the value
++ *
++ * Same as dex_scheduler_spawn() but trampolines into a fiber without having to
++ * create special structures on the way there.
++ *
++ * ```c
++ * static DexFuture *
++ * fiber_func (GInputStream *stream,
++ *             int           num)
++ * {
++ *   ...
++ *
++ *   return dex_future_new_true ();
++ * }
++ *
++ * DexFuture *
++ * spawn_fiber (GInputStream *stream)
++ * {
++ *   return dex_scheduler_spawnv (NULL, 0,
++ *                                G_CALLBACK (fiber_func),
++ *                                2,
++ *                                G_TYPE_POINTER, stream,
++ *                                G_TYPE_INT, 42);
++ * }
++ * ```
++ *
++ * Returns: (transfer full): a [class@Dex.Future] that will resolve or reject when
++ *   @callback completes (or its resulting `DexFuture` completes).
++ */
++DexFuture *
++dex_scheduler_spawnv (DexScheduler *scheduler,
++                      gsize         stack_size,
++                      GCallback     callback,
++                      guint         n_params,
++                      ...)
++{
++  g_autofree char *errmsg = NULL;
++  g_autoptr(GArray) values = NULL;
++  g_autoptr(DexFuture) future = NULL;
++  va_list args;
++
++  values = g_array_new (FALSE, TRUE, sizeof (GValue));
++  g_array_set_clear_func (values, (GDestroyNotify)g_value_unset);
++  g_array_set_size (values, n_params);
++
++  va_start (args, n_params);
++
++  for (guint i = 0; i < n_params; i++)
++    {
++      GType gtype = va_arg (args, GType);
++      GValue *dest = &g_array_index (values, GValue, i);
++      GValue value = G_VALUE_INIT;
++
++      G_VALUE_COLLECT_INIT (&value, gtype, args, 0, &errmsg);
++
++      if (errmsg != NULL)
++        break;
++
++      g_value_init (dest, gtype);
++      g_value_copy (&value, dest);
++      g_value_unset (&value);
++    }
++
++  va_end (args);
++
++  if (errmsg != NULL)
++    {
++      future = dex_future_new_reject (DEX_ERROR,
++                                      DEX_ERROR_TYPE_MISMATCH,
++                                      "Failed to trampoline to fiber: %s",
++                                      errmsg);
++    }
++  else
++    {
++      g_autoptr(DexSchedulerSpawnTrampoline) state = NULL;
++
++      state = g_new0 (DexSchedulerSpawnTrampoline, 1);
++      state->values = g_steal_pointer (&values);
++      state->callback = callback;
++
++      future = dex_scheduler_spawn (scheduler, stack_size,
++                                    dex_scheduler_spawn_trampoline_fiber,
++                                    g_steal_pointer (&state),
++                                    (GDestroyNotify) dex_scheduler_spawn_trampoline_free);
++    }
++
++  return g_steal_pointer (&future);
++}
++#endif /* !HAVE_DEX_SCHEDULER_SPAWNV */
+diff --git a/src/xdp-dex.h b/src/xdp-dex.h
+new file mode 100644
+index 0000000..e5f759d
+--- /dev/null
++++ b/src/xdp-dex.h
+@@ -0,0 +1,17 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * SPDX-FileCopyrightText: Copyright © the xdg-desktop-portal contributors
++ */
++
++#pragma once
++
++#include <glib-object.h>
++#include <libdex.h>
++
++#if !HAVE_DEX_SCHEDULER_SPAWNV
++DexFuture *
++dex_scheduler_spawnv (DexScheduler *scheduler,
++                      gsize         stack_size,
++                      GCallback     callback,
++                      guint         n_params,
++                      ...);
++#endif /* !HAVE_DEX_SCHEDULER_SPAWNV */
+diff --git a/src/xdp-permissions.c b/src/xdp-permissions.c
+index b992ccc..ccf9c1a 100644
+--- a/src/xdp-permissions.c
++++ b/src/xdp-permissions.c
+@@ -39,7 +39,7 @@ xdp_get_permissions_sync (XdpAppInfo *app_info,
+   g_autoptr(GError) error = NULL;
+   g_autoptr(GVariant) out_perms = NULL;
+   g_autoptr(GVariant) out_data = NULL;
+-  g_autofree char **permissions = NULL;
++  g_auto(GStrv) permissions = NULL;
+   const char *app_id;
+ 
+   if (!xdp_dbus_impl_permission_store_call_lookup_sync (permission_store,
+@@ -56,14 +56,49 @@ xdp_get_permissions_sync (XdpAppInfo *app_info,
+     }
+ 
+   app_id = xdp_app_info_get_id (app_info);
+-  if (!g_variant_lookup (out_perms, app_id, "^a&s", &permissions))
++  if (!g_variant_lookup (out_perms, app_id, "^as", &permissions))
+     {
+       g_debug ("No permissions stored for: %s %s, app %s", table, id, app_id);
+ 
+       return NULL;
+     }
+ 
+-  return g_strdupv (permissions);
++  return (char **) g_steal_pointer (&permissions);
++}
++
++static DexFuture *
++xdp_permissions_get_future_finally_cb (DexFuture *future,
++                                       gpointer   user_data)
++{
++  const char *app_id = user_data;
++  g_autoptr(XdpDbusImplPermissionStoreLookupResult) result = NULL;
++  g_auto(GStrv) permissions = NULL;
++
++  result = dex_await_boxed (dex_ref (future), NULL);
++
++  if (result)
++    g_variant_lookup (result->permissions, app_id, "^as", &permissions);
++
++  return dex_future_new_take_boxed (G_TYPE_STRV, g_steal_pointer (&permissions));
++}
++
++DexFuture *
++xdp_permissions_get_future (XdpAppInfo *app_info,
++                            const char *table,
++                            const char *id)
++{
++  DexFuture *future;
++
++  future = xdp_dbus_impl_permission_store_call_lookup_future (permission_store,
++                                                              table,
++                                                              id);
++
++  future = dex_future_finally (future,
++                               xdp_permissions_get_future_finally_cb,
++                               g_strdup (xdp_app_info_get_id (app_info)),
++                               g_free);
++
++  return future;
+ }
+ 
+ XdpPermission
+@@ -145,6 +180,41 @@ xdp_set_permissions_sync (XdpAppInfo         *app_info,
+     }
+ }
+ 
++static DexFuture *
++xdp_permissions_set_future_catch_cb (DexFuture *future,
++                                     gpointer   user_data)
++{
++  g_autoptr(GError) error = NULL;
++
++  dex_future_get_value (future, &error);
++  g_dbus_error_strip_remote_error (error);
++
++  return dex_future_new_for_error (g_steal_pointer (&error));
++}
++
++DexFuture *
++xdp_permissions_set_future (XdpAppInfo         *app_info,
++                            const char         *table,
++                            const char         *id,
++                            const char * const *permissions)
++{
++  DexFuture *future;
++
++  future = xdp_dbus_impl_permission_store_call_set_permission_future (
++    permission_store,
++    table,
++    TRUE,
++    id,
++    xdp_app_info_get_id (app_info),
++    permissions);
++
++  future = dex_future_catch (future,
++                             xdp_permissions_set_future_catch_cb,
++                             NULL, NULL);
++
++  return future;
++}
++
+ XdpPermission
+ xdp_get_permission_sync (XdpAppInfo *app_info,
+                          const char *table,
+@@ -159,6 +229,35 @@ xdp_get_permission_sync (XdpAppInfo *app_info,
+   return XDP_PERMISSION_UNSET;
+ }
+ 
++static DexFuture *
++xdp_permission_get_future_then_cb (DexFuture *future,
++                                   gpointer   user_data)
++{
++  g_auto(GStrv) perms = NULL;
++  XdpPermission permission = XDP_PERMISSION_UNSET;
++
++  perms = dex_await_boxed (dex_ref (future), NULL);
++  if (perms)
++    permission = xdp_permissions_to_tristate (perms);
++
++  return dex_future_new_for_uint (permission);
++}
++
++DexFuture *
++xdp_permission_get_future (XdpAppInfo *app_info,
++                           const char *table,
++                           const char *id)
++{
++  DexFuture *future;
++
++  future = xdp_permissions_get_future (app_info, table, id);
++  future = dex_future_then (future,
++                            xdp_permission_get_future_then_cb,
++                            NULL, NULL);
++
++  return future;
++}
++
+ void
+ xdp_set_permission_sync (XdpAppInfo    *app_info,
+                          const char    *table,
+@@ -171,6 +270,22 @@ xdp_set_permission_sync (XdpAppInfo    *app_info,
+   xdp_set_permissions_sync (app_info, table, id, (const char * const *)perms);
+ }
+ 
++DexFuture *
++xdp_permission_set_future (XdpAppInfo    *app_info,
++                           const char    *table,
++                           const char    *id,
++                           XdpPermission  permission)
++{
++  g_auto(GStrv) perms = NULL;
++
++  perms = xdp_permissions_from_tristate (permission);
++
++  return xdp_permissions_set_future (app_info,
++                                     table,
++                                     id,
++                                     (const char * const *) perms);
++}
++
+ gboolean
+ xdp_init_permission_store (GDBusConnection  *connection,
+                            GError          **error)
+diff --git a/src/xdp-permissions.h b/src/xdp-permissions.h
+index dad5ec0..ef88442 100644
+--- a/src/xdp-permissions.h
++++ b/src/xdp-permissions.h
+@@ -23,6 +23,8 @@
+ #pragma once
+ 
+ #include <gio/gio.h>
++#include <libdex.h>
++
+ #include "xdp-app-info.h"
+ #include "xdp-impl-dbus.h"
+ 
+@@ -38,20 +40,38 @@ char **xdp_get_permissions_sync (XdpAppInfo *app_info,
+                                  const char *table,
+                                  const char *id);
+ 
++DexFuture * xdp_permissions_get_future (XdpAppInfo *app_info,
++                                        const char *table,
++                                        const char *id);
++
+ void xdp_set_permissions_sync (XdpAppInfo         *app_info,
+                                const char         *table,
+                                const char         *id,
+                                const char * const *permissions);
+ 
++DexFuture * xdp_permissions_set_future (XdpAppInfo         *app_info,
++                                        const char         *table,
++                                        const char         *id,
++                                        const char * const *permissions);
++
+ XdpPermission xdp_get_permission_sync (XdpAppInfo *app_info,
+                                        const char *table,
+                                        const char *id);
+ 
++DexFuture * xdp_permission_get_future (XdpAppInfo *app_info,
++                                       const char *table,
++                                       const char *id);
++
+ void xdp_set_permission_sync (XdpAppInfo    *app_info,
+                               const char    *table,
+                               const char    *id,
+                               XdpPermission  permission);
+ 
++DexFuture * xdp_permission_set_future (XdpAppInfo    *app_info,
++                                       const char    *table,
++                                       const char    *id,
++                                       XdpPermission  permission);
++
+ char **xdp_permissions_from_tristate (XdpPermission permission);
+ 
+ XdpPermission xdp_permissions_to_tristate (char **permissions);
+diff --git a/src/xdp-request-dex.c b/src/xdp-request-dex.c
+new file mode 100644
+index 0000000..f445329
+--- /dev/null
++++ b/src/xdp-request-dex.c
+@@ -0,0 +1,314 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * SPDX-FileCopyrightText: Copyright © the xdg-desktop-portal contributors
++ */
++
++#include "config.h"
++
++#include "xdp-request-dex.h"
++
++#include "xdp-app-info.h"
++#include "xdp-context.h"
++#include "xdp-impl-dbus.h"
++#include "xdp-utils.h"
++
++typedef struct _XdpRequestDex
++{
++  XdpDbusRequestSkeleton parent_instance;
++
++  XdpContext *context;
++  XdpAppInfo *app_info;
++  XdpDbusImplRequest *impl_request;
++  GDBusInterfaceSkeleton *skeleton;
++  char *id;
++  gboolean exported;
++} XdpRequestDex;
++
++static void xdp_request_skeleton_iface_init (XdpDbusRequestIface *iface);
++
++G_DEFINE_FINAL_TYPE_WITH_CODE (XdpRequestDex,
++                               xdp_request_dex,
++                               XDP_DBUS_TYPE_REQUEST_SKELETON,
++                               G_IMPLEMENT_INTERFACE (XDP_DBUS_TYPE_REQUEST,
++                                                      xdp_request_skeleton_iface_init))
++
++static void
++xdp_request_dex_on_signal_response (XdpDbusRequest *object,
++                                    guint           arg_response,
++                                    GVariant       *arg_results)
++{
++  XdpRequestDex *request = XDP_REQUEST_DEX (object);
++  GDBusConnection *connection;
++
++  connection = g_dbus_interface_skeleton_get_connection (request->skeleton);
++  if (!connection)
++    return;
++
++  g_dbus_connection_emit_signal (connection,
++                                 xdp_app_info_get_sender (request->app_info),
++                                 request->id,
++                                 DESKTOP_DBUS_IFACE ".Request",
++                                 "Response",
++                                 g_variant_new ("(u@a{sv})",
++                                                arg_response,
++                                                arg_results),
++                                 NULL);
++}
++
++static gboolean
++xdp_request_dex_handle_close (XdpDbusRequest        *object,
++                              GDBusMethodInvocation *invocation)
++{
++  XdpRequestDex *request = XDP_REQUEST_DEX (object);
++  g_autoptr(GError) error = NULL;
++
++  if (!request->exported)
++    {
++      xdp_dbus_request_complete_close (XDP_DBUS_REQUEST (request), invocation);
++      return G_DBUS_METHOD_INVOCATION_HANDLED;
++    }
++
++  g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (request));
++  request->exported = FALSE;
++  xdp_context_unclaim_object_path (request->context, request->id);
++
++  dex_await (xdp_dbus_impl_request_call_close_future (request->impl_request),
++             &error);
++  if (error)
++    {
++      g_dbus_method_invocation_return_gerror (invocation, error);
++      return G_DBUS_METHOD_INVOCATION_HANDLED;
++    }
++
++  xdp_dbus_request_complete_close (XDP_DBUS_REQUEST (request), invocation);
++  return G_DBUS_METHOD_INVOCATION_HANDLED;
++}
++
++static void
++xdp_request_skeleton_iface_init (XdpDbusRequestIface *iface)
++{
++  iface->handle_close = xdp_request_dex_handle_close;
++  iface->response = xdp_request_dex_on_signal_response;
++}
++
++static void
++xdp_request_dex_dispose (GObject *object)
++{
++  XdpRequestDex *request = XDP_REQUEST_DEX (object);
++
++  if (request->exported)
++    {
++      xdp_dbus_impl_request_call_close (request->impl_request, NULL, NULL, NULL),
++
++      g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (request));
++      request->exported = FALSE;
++      xdp_context_unclaim_object_path (request->context, request->id);
++    }
++
++  g_clear_object (&request->app_info);
++  g_clear_object (&request->impl_request);
++  g_clear_object (&request->skeleton);
++  g_clear_pointer (&request->id, g_free);
++
++  G_OBJECT_CLASS (xdp_request_dex_parent_class)->dispose (object);
++}
++
++static void
++xdp_request_dex_init (XdpRequestDex *request)
++{
++}
++
++static void
++xdp_request_dex_class_init (XdpRequestDexClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++
++  object_class->dispose = xdp_request_dex_dispose;
++}
++
++static gboolean
++request_authorize_callback (GDBusInterfaceSkeleton *interface,
++                            GDBusMethodInvocation  *invocation,
++                            gpointer                user_data)
++{
++  XdpRequestDex *request = XDP_REQUEST_DEX (user_data);
++  const char *request_sender = xdp_app_info_get_sender (request->app_info);
++  const char *sender = g_dbus_method_invocation_get_sender (invocation);
++
++  if (g_strcmp0 (sender, request_sender) != 0)
++    {
++      g_dbus_method_invocation_return_error (invocation,
++                                             G_DBUS_ERROR,
++                                             G_DBUS_ERROR_ACCESS_DENIED,
++                                             "Portal operation not allowed: Unmatched caller");
++      return FALSE;
++    }
++
++  return TRUE;
++}
++
++typedef struct _RequestImplProxyCreateData {
++  XdpContext *context;
++  XdpAppInfo *app_info;
++  GDBusInterfaceSkeleton *skeleton;
++  char *id;
++} RequestImplProxyCreateData;
++
++static void
++request_impl_proxy_create_data_free (RequestImplProxyCreateData *data)
++{
++  g_clear_object (&data->app_info);
++  g_clear_object (&data->skeleton);
++  g_clear_pointer (&data->id, g_free);
++  free (data);
++}
++
++static void
++on_peer_disconnect (XdpContext *context,
++                    const char *peer,
++                    gpointer    user_data)
++{
++  XdpRequestDex *request = XDP_REQUEST_DEX (user_data);
++
++  if (g_strcmp0 (xdp_app_info_get_sender (request->app_info), peer) != 0)
++    return;
++
++  if (!request->exported)
++    return;
++
++  xdp_dbus_impl_request_call_close (request->impl_request, NULL, NULL, NULL),
++
++  g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (request));
++  request->exported = FALSE;
++  xdp_context_unclaim_object_path (request->context, request->id);
++}
++
++static DexFuture *
++on_impl_request_proxy_created (DexFuture *future,
++                               gpointer   user_data)
++{
++  RequestImplProxyCreateData *data = user_data;
++  g_autoptr(XdpRequestDex) request = NULL;
++  g_autoptr(XdpDbusImplRequest) impl_request = NULL;
++  g_autoptr(GError) error = NULL;
++
++  impl_request = dex_await_object (dex_ref (future), NULL);
++  g_assert (impl_request);
++
++  request = g_object_new (XDP_TYPE_REQUEST_DEX, NULL);
++  request->context = g_steal_pointer (&data->context);
++  request->app_info = g_steal_pointer (&data->app_info);
++  request->impl_request = g_steal_pointer (&impl_request);
++  request->skeleton = g_steal_pointer (&data->skeleton);
++  request->id = g_steal_pointer (&data->id);
++  request->exported = TRUE;
++
++  g_signal_connect_object (request->context, "peer-disconnect",
++                           G_CALLBACK (on_peer_disconnect),
++                           request,
++                           G_CONNECT_DEFAULT);
++
++  dex_dbus_interface_skeleton_set_flags (DEX_DBUS_INTERFACE_SKELETON (request),
++                                         DEX_DBUS_INTERFACE_SKELETON_FLAGS_HANDLE_METHOD_INVOCATIONS_IN_FIBER);
++  g_signal_connect (request, "g-authorize-method",
++                    G_CALLBACK (request_authorize_callback),
++                    request);
++
++  if (!g_dbus_interface_skeleton_export (G_DBUS_INTERFACE_SKELETON (request),
++                                         g_dbus_interface_skeleton_get_connection (request->skeleton),
++                                         request->id,
++                                         &error))
++      return dex_future_new_for_error (g_steal_pointer (&error));
++
++  return dex_future_new_for_object (request);
++}
++
++DexFuture *
++xdp_request_dex_new (XdpContext             *context,
++                     XdpAppInfo             *app_info,
++                     GDBusInterfaceSkeleton *skeleton,
++                     GDBusProxy             *proxy_impl,
++                     GVariant               *arg_options)
++{
++  g_autoptr(DexFuture) future = NULL;
++  RequestImplProxyCreateData *data;
++  const char *token = NULL;
++  g_autofree char *sender = NULL;
++  g_autofree char *id = NULL;
++
++  g_variant_lookup (arg_options, "handle_token", "&s", &token);
++  token = token ? token : "t";
++  if (!xdp_is_valid_token (token))
++    {
++      return dex_future_new_for_error (g_error_new (XDG_DESKTOP_PORTAL_ERROR,
++                                                    XDG_DESKTOP_PORTAL_ERROR_INVALID_ARGUMENT,
++                                                    "Invalid token: %s", token));
++    }
++
++  sender = g_strdup (xdp_app_info_get_sender (app_info) + 1);
++  for (size_t i = 0; sender[i]; i++)
++    {
++      if (sender[i] == '.')
++        sender[i] = '_';
++    }
++
++  id = g_strdup_printf (DESKTOP_DBUS_PATH "/request/%s/%s", sender, token);
++
++  while (!xdp_context_claim_object_path (context, id))
++    {
++      uint32_t r = g_random_int ();
++      g_free (id);
++      id = g_strdup_printf (DESKTOP_DBUS_PATH "/request/%s/%s/%u",
++                            sender,
++                            token,
++                            r);
++    }
++
++  future = xdp_dbus_impl_request_proxy_new_future (
++    g_dbus_proxy_get_connection (proxy_impl),
++    G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES,
++    g_dbus_proxy_get_name (proxy_impl),
++    id);
++
++  data = g_new0 (RequestImplProxyCreateData, 1);
++  data->context = context;
++  data->app_info = g_object_ref (app_info);
++  data->skeleton = g_object_ref (skeleton);
++  data->id = g_steal_pointer (&id);
++
++  future = dex_future_then (future,
++                            on_impl_request_proxy_created,
++                            g_steal_pointer (&data),
++                            (GDestroyNotify) request_impl_proxy_create_data_free);
++
++  return g_steal_pointer (&future);
++}
++
++void
++xdp_request_dex_emit_response (XdpRequestDex                *request,
++                               XdgDesktopPortalResponseEnum  response,
++                               GVariant                     *results)
++{
++  if (!request->exported)
++    return;
++
++  if (!g_dbus_interface_skeleton_get_connection (request->skeleton))
++    return;
++
++  if (!results)
++    {
++      g_auto(GVariantBuilder) empty_results_builder =
++        G_VARIANT_BUILDER_INIT (G_VARIANT_TYPE_VARDICT);
++
++      results = g_variant_builder_end (&empty_results_builder);
++    }
++
++  xdp_dbus_request_emit_response (XDP_DBUS_REQUEST (request),
++                                  response,
++                                  results);
++}
++
++const char *
++xdp_request_dex_get_object_path (XdpRequestDex *request)
++{
++  return request->id;
++}
+diff --git a/src/xdp-request-dex.h b/src/xdp-request-dex.h
+new file mode 100644
+index 0000000..2b862c4
+--- /dev/null
++++ b/src/xdp-request-dex.h
+@@ -0,0 +1,26 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * SPDX-FileCopyrightText: Copyright © the xdg-desktop-portal contributors
++ */
++
++#pragma once
++
++#include "xdp-dbus.h"
++#include "xdp-types.h"
++
++#define XDP_TYPE_REQUEST_DEX (xdp_request_dex_get_type ())
++G_DECLARE_FINAL_TYPE (XdpRequestDex,
++                      xdp_request_dex,
++                      XDP, REQUEST_DEX,
++                      XdpDbusRequestSkeleton)
++
++DexFuture * xdp_request_dex_new (XdpContext             *context,
++                                 XdpAppInfo             *app_info,
++                                 GDBusInterfaceSkeleton *skeleton,
++                                 GDBusProxy             *proxy_impl,
++                                 GVariant               *arg_options);
++
++void xdp_request_dex_emit_response (XdpRequestDex                *request,
++                                    XdgDesktopPortalResponseEnum  response,
++                                    GVariant                     *results);
++
++const char * xdp_request_dex_get_object_path (XdpRequestDex *request);
+diff --git a/src/xdp-session-dex.c b/src/xdp-session-dex.c
+new file mode 100644
+index 0000000..bccdd16
+--- /dev/null
++++ b/src/xdp-session-dex.c
+@@ -0,0 +1,459 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * SPDX-FileCopyrightText: Copyright © the xdg-desktop-portal contributors
++ */
++
++#include "config.h"
++
++#include "xdp-session-dex.h"
++
++#include "xdp-app-info.h"
++#include "xdp-context.h"
++#include "xdp-impl-dbus.h"
++#include "xdp-utils.h"
++
++enum
++{
++  SESSION_CLOSED,
++  N_SIGNALS,
++};
++
++static guint signals[N_SIGNALS] = { 0 };
++
++typedef struct _XdpSessionDex
++{
++  XdpDbusSessionSkeleton parent_instance;
++
++  XdpContext *context;
++  XdpAppInfo *app_info;
++  XdpDbusImplSession *impl_session;
++  GDBusInterfaceSkeleton *skeleton;
++  char *id;
++  gboolean exported;
++} XdpSessionDex;
++
++static void xdp_session_skeleton_iface_init (XdpDbusSessionIface *iface);
++
++G_DEFINE_FINAL_TYPE_WITH_CODE (XdpSessionDex,
++                               xdp_session_dex,
++                               XDP_DBUS_TYPE_SESSION_SKELETON,
++                               G_IMPLEMENT_INTERFACE (XDP_DBUS_TYPE_SESSION,
++                                                      xdp_session_skeleton_iface_init))
++
++static void
++xdp_session_dex_emit_closed (XdpSessionDex *session)
++{
++  g_signal_emit (session, signals[SESSION_CLOSED], 0);
++}
++
++static void
++xdp_session_dex_on_signal_closed (XdpDbusSession *object,
++                                  GVariant       *arg_details)
++{
++  XdpSessionDex *session = XDP_SESSION_DEX (object);
++  GDBusConnection *connection;
++
++  connection = g_dbus_interface_skeleton_get_connection (session->skeleton);
++  if (!connection)
++    return;
++
++  g_dbus_connection_emit_signal (connection,
++                                 xdp_app_info_get_sender (session->app_info),
++                                 session->id,
++                                 DESKTOP_DBUS_IFACE ".Session",
++                                 "Closed",
++                                 g_variant_new ("(@a{sv})", arg_details),
++                                 NULL);
++}
++
++static gboolean
++xdp_session_dex_handle_close (XdpDbusSession        *object,
++                              GDBusMethodInvocation *invocation)
++{
++  XdpSessionDex *session = XDP_SESSION_DEX (object);
++  g_autoptr(GError) error = NULL;
++
++  if (!session->exported)
++    {
++      xdp_dbus_session_complete_close (XDP_DBUS_SESSION (session), invocation);
++      return G_DBUS_METHOD_INVOCATION_HANDLED;
++    }
++
++  g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (session));
++  session->exported = FALSE;
++  xdp_context_unclaim_object_path (session->context, session->id);
++
++  dex_await (xdp_dbus_impl_session_call_close_future (session->impl_session),
++             &error);
++
++  xdp_session_dex_emit_closed (session);
++
++  if (error)
++    {
++      g_dbus_method_invocation_return_gerror (invocation, error);
++      return G_DBUS_METHOD_INVOCATION_HANDLED;
++    }
++
++  xdp_dbus_session_complete_close (XDP_DBUS_SESSION (object), invocation);
++  return G_DBUS_METHOD_INVOCATION_HANDLED;
++}
++
++static void
++xdp_session_skeleton_iface_init (XdpDbusSessionIface *iface)
++{
++  iface->handle_close = xdp_session_dex_handle_close;
++  iface->closed = xdp_session_dex_on_signal_closed;
++}
++
++static void
++xdp_session_dex_dispose (GObject *object)
++{
++  XdpSessionDex *session = XDP_SESSION_DEX (object);
++
++  if (session->exported)
++    {
++      g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (session));
++      session->exported = FALSE;
++      xdp_context_unclaim_object_path (session->context, session->id);
++
++      xdp_dbus_impl_session_call_close (session->impl_session, NULL, NULL, NULL);
++    }
++
++  g_clear_object (&session->app_info);
++  g_clear_object (&session->impl_session);
++  g_clear_object (&session->skeleton);
++  g_clear_pointer (&session->id, g_free);
++
++  G_OBJECT_CLASS (xdp_session_dex_parent_class)->dispose (object);
++}
++
++static void
++xdp_session_dex_init (XdpSessionDex *session)
++{
++}
++
++static void
++xdp_session_dex_class_init (XdpSessionDexClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++
++  object_class->dispose = xdp_session_dex_dispose;
++
++  signals[SESSION_CLOSED] =
++    g_signal_new ("session-closed",
++                  G_TYPE_FROM_CLASS (object_class),
++                  G_SIGNAL_RUN_LAST,
++                  0, NULL, NULL, NULL,
++                  G_TYPE_NONE, 0);
++}
++
++static void
++on_peer_disconnect (XdpContext *context,
++                    const char *peer,
++                    gpointer    user_data)
++{
++  XdpSessionDex *session = XDP_SESSION_DEX (user_data);
++
++  if (g_strcmp0 (xdp_app_info_get_sender (session->app_info), peer) != 0)
++    return;
++
++  if (!session->exported)
++    return;
++
++  g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (session));
++  session->exported = FALSE;
++  xdp_context_unclaim_object_path (session->context, session->id);
++
++  xdp_dbus_impl_session_call_close (session->impl_session, NULL, NULL, NULL);
++  xdp_session_dex_emit_closed (session);
++}
++
++static void
++on_impl_closed (XdpDbusImplSession *object,
++                gpointer            user_data)
++{
++  XdpSessionDex *session = XDP_SESSION_DEX (user_data);
++  g_auto(GVariantBuilder) details_builder =
++    G_VARIANT_BUILDER_INIT (G_VARIANT_TYPE_VARDICT);
++
++  if (!session->exported)
++    return;
++
++  xdp_dbus_session_emit_closed (XDP_DBUS_SESSION (session),
++                                g_variant_builder_end (&details_builder));
++
++  g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (session));
++  session->exported = FALSE;
++  xdp_context_unclaim_object_path (session->context, session->id);
++
++  xdp_session_dex_emit_closed (session);
++}
++
++static gboolean
++session_authorize_callback (GDBusInterfaceSkeleton *interface,
++                            GDBusMethodInvocation  *invocation,
++                            gpointer                user_data)
++{
++  XdpSessionDex *session = XDP_SESSION_DEX (user_data);
++  const char *sender = g_dbus_method_invocation_get_sender (invocation);
++
++  if (g_strcmp0 (sender, xdp_app_info_get_sender (session->app_info)) != 0)
++    {
++      g_dbus_method_invocation_return_error (invocation,
++                                             G_DBUS_ERROR,
++                                             G_DBUS_ERROR_ACCESS_DENIED,
++                                             "Portal operation not allowed, Unmatched caller");
++      return FALSE;
++    }
++
++  return TRUE;
++}
++
++typedef struct _SessionImplProxyCreateData {
++  XdpContext *context;
++  XdpAppInfo *app_info;
++  GDBusInterfaceSkeleton *skeleton;
++  char *id;
++} SessionImplProxyCreateData;
++
++static void
++session_impl_proxy_create_data_free (SessionImplProxyCreateData *data)
++{
++  g_clear_object (&data->app_info);
++  g_clear_object (&data->skeleton);
++  g_clear_pointer (&data->id, g_free);
++  free (data);
++}
++
++static DexFuture *
++on_impl_session_proxy_created (DexFuture *future,
++                               gpointer   user_data)
++{
++  SessionImplProxyCreateData *data = user_data;
++  g_autoptr(XdpSessionDex) session = NULL;
++  g_autoptr(XdpDbusImplSession) impl_session = NULL;
++  g_autoptr(GError) error = NULL;
++
++  impl_session = dex_await_object (dex_ref (future), NULL);
++  g_assert (impl_session);
++
++  session = g_object_new (XDP_TYPE_SESSION_DEX, NULL);
++  session->context = g_steal_pointer (&data->context);
++  session->app_info = g_steal_pointer (&data->app_info);
++  session->impl_session = g_steal_pointer (&impl_session);
++  session->skeleton = g_steal_pointer (&data->skeleton);
++  session->id = g_steal_pointer (&data->id);
++  session->exported = TRUE;
++
++  g_signal_connect_object (session->context, "peer-disconnect",
++                           G_CALLBACK (on_peer_disconnect),
++                           session,
++                           G_CONNECT_DEFAULT);
++
++  g_signal_connect_object (session->impl_session, "closed",
++                           G_CALLBACK (on_impl_closed),
++                           session,
++                           G_CONNECT_DEFAULT);
++
++  dex_dbus_interface_skeleton_set_flags (DEX_DBUS_INTERFACE_SKELETON (session),
++                                         DEX_DBUS_INTERFACE_SKELETON_FLAGS_HANDLE_METHOD_INVOCATIONS_IN_FIBER);
++  g_signal_connect (session, "g-authorize-method",
++                    G_CALLBACK (session_authorize_callback),
++                    session);
++
++  if (!g_dbus_interface_skeleton_export (G_DBUS_INTERFACE_SKELETON (session),
++                                         g_dbus_interface_skeleton_get_connection (session->skeleton),
++                                         session->id,
++                                         &error))
++      return dex_future_new_for_error (g_steal_pointer (&error));
++
++  return dex_future_new_for_object (session);
++}
++
++DexFuture *
++xdp_session_dex_new (XdpContext             *context,
++                     XdpAppInfo             *app_info,
++                     GDBusInterfaceSkeleton *skeleton,
++                     GDBusProxy             *proxy_impl,
++                     GVariant               *arg_options)
++{
++  g_autoptr(DexFuture) future = NULL;
++  SessionImplProxyCreateData *data;
++  const char *token = NULL;
++  g_autofree char *sender = NULL;
++  g_autofree char *id = NULL;
++
++  g_variant_lookup (arg_options, "session_handle_token", "&s", &token);
++  token = token ? token : "t";
++  if (!xdp_is_valid_token (token))
++    {
++      return dex_future_new_for_error (g_error_new (XDG_DESKTOP_PORTAL_ERROR,
++                                                    XDG_DESKTOP_PORTAL_ERROR_INVALID_ARGUMENT,
++                                                    "Invalid token: %s", token));
++    }
++
++  sender = g_strdup (xdp_app_info_get_sender (app_info) + 1);
++  for (size_t i = 0; sender[i]; i++)
++    {
++      if (sender[i] == '.')
++        sender[i] = '_';
++    }
++
++  id = g_strdup_printf (DESKTOP_DBUS_PATH "/session/%s/%s", sender, token);
++
++  while (!xdp_context_claim_object_path (context, id))
++    {
++      uint32_t r = g_random_int ();
++      g_free (id);
++      id = g_strdup_printf (DESKTOP_DBUS_PATH "/session/%s/%s/%u",
++                            sender,
++                            token,
++                            r);
++    }
++
++  future = xdp_dbus_impl_session_proxy_new_future (
++    g_dbus_proxy_get_connection (proxy_impl),
++    G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES,
++    g_dbus_proxy_get_name (proxy_impl),
++    id);
++
++  data = g_new0 (SessionImplProxyCreateData, 1);
++  data->context = context;
++  data->app_info = g_object_ref (app_info);
++  data->skeleton = g_object_ref (skeleton);
++  data->id = g_steal_pointer (&id);
++
++  future = dex_future_then (future,
++                            on_impl_session_proxy_created,
++                            g_steal_pointer (&data),
++                            (GDestroyNotify) session_impl_proxy_create_data_free);
++
++  return g_steal_pointer (&future);
++}
++
++gboolean
++xdp_session_dex_is_closed (XdpSessionDex *session)
++{
++  return !session->exported;
++}
++
++XdpAppInfo *
++xdp_session_dex_get_app_info (XdpSessionDex *session)
++{
++  return session->app_info;
++}
++
++const char *
++xdp_session_dex_get_object_path (XdpSessionDex *session)
++{
++  return session->id;
++}
++
++typedef struct _XdpSessionDexStore
++{
++  GObject parent_instance;
++
++  size_t session_offset;
++  GHashTable *sessions; /* char *session_handle -> XdpSessionDex *session */
++} XdpSessionDexStore;
++
++G_DEFINE_FINAL_TYPE (XdpSessionDexStore,
++                     xdp_session_dex_store,
++                     G_TYPE_OBJECT)
++
++static void
++on_session_closed (XdpSessionDex *session,
++                   gpointer       user_data)
++{
++  XdpSessionDexStore *store = XDP_SESSION_DEX_STORE (user_data);
++
++  g_hash_table_remove (store->sessions,
++                       xdp_session_dex_get_object_path (session));
++}
++
++void
++xdp_session_dex_store_take_session (XdpSessionDexStore *store,
++                                    gpointer            session_wrapper)
++{
++  g_autoptr(GObject) owned_wrapper = G_OBJECT (session_wrapper);
++  XdpSessionDex *session;
++
++  session = XDP_SESSION_DEX (G_STRUCT_MEMBER_P (owned_wrapper,
++                                                store->session_offset));
++
++  if (!session || xdp_session_dex_is_closed (session))
++    return;
++
++  g_signal_connect_object (session, "session-closed",
++                           G_CALLBACK (on_session_closed),
++                           store,
++                           G_CONNECT_DEFAULT);
++
++  g_hash_table_insert (store->sessions,
++                       g_strdup (xdp_session_dex_get_object_path (session)),
++                       g_steal_pointer (&owned_wrapper));
++}
++
++gpointer
++xdp_session_dex_store_lookup_session (XdpSessionDexStore *store,
++                                      const char         *session_handle,
++                                      XdpAppInfo         *app_info)
++{
++  GObject *session_wrapper =
++    g_hash_table_lookup (store->sessions, session_handle);
++  XdpSessionDex *session;
++
++  if (!session_wrapper)
++    return NULL;
++
++  session = XDP_SESSION_DEX (G_STRUCT_MEMBER_P (session_wrapper,
++                                                store->session_offset));
++
++  if (app_info && xdp_session_dex_get_app_info (session) != app_info)
++    return NULL;
++
++  return session_wrapper;
++}
++
++static void
++xdp_session_dex_store_dispose (GObject *object)
++{
++  XdpSessionDexStore *store = XDP_SESSION_DEX_STORE (object);
++
++  g_clear_pointer (&store->sessions, g_hash_table_unref);
++
++  G_OBJECT_CLASS (xdp_session_dex_store_parent_class)->dispose (object);
++}
++
++static void
++xdp_session_dex_store_init (XdpSessionDexStore *store)
++{
++}
++
++static void
++xdp_session_dex_store_class_init (XdpSessionDexStoreClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++
++  object_class->dispose = xdp_session_dex_store_dispose;
++}
++
++XdpSessionDexStore *
++xdp_session_dex_store_new (void)
++{
++  return xdp_session_dex_store_new_with_offset (0);
++}
++
++XdpSessionDexStore *
++xdp_session_dex_store_new_with_offset (size_t session_offset)
++{
++  XdpSessionDexStore *store;
++
++  store = g_object_new (XDP_TYPE_SESSION_DEX_STORE, NULL);
++  store->session_offset = session_offset;
++  store->sessions =
++    g_hash_table_new_full (g_str_hash, g_str_equal,
++                           g_free,
++                           (GDestroyNotify) g_object_unref);
++
++  return store;
++}
+diff --git a/src/xdp-session-dex.h b/src/xdp-session-dex.h
+new file mode 100644
+index 0000000..995ba89
+--- /dev/null
++++ b/src/xdp-session-dex.h
+@@ -0,0 +1,46 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * SPDX-FileCopyrightText: Copyright © the xdg-desktop-portal contributors
++ */
++
++#pragma once
++
++#include "xdp-dbus.h"
++#include "xdp-types.h"
++
++#define XDP_TYPE_SESSION_DEX (xdp_session_dex_get_type ())
++G_DECLARE_FINAL_TYPE (XdpSessionDex,
++                      xdp_session_dex,
++                      XDP, SESSION_DEX,
++                      XdpDbusSessionSkeleton)
++
++DexFuture * xdp_session_dex_new (XdpContext             *context,
++                                 XdpAppInfo             *app_info,
++                                 GDBusInterfaceSkeleton *skeleton,
++                                 GDBusProxy             *proxy_impl,
++                                 GVariant               *arg_options);
++
++gboolean xdp_session_dex_is_closed (XdpSessionDex *session);
++
++XdpAppInfo * xdp_session_dex_get_app_info (XdpSessionDex *session);
++
++const char * xdp_session_dex_get_object_path (XdpSessionDex *session);
++
++#define XDP_TYPE_SESSION_DEX_STORE (xdp_session_dex_store_get_type ())
++G_DECLARE_FINAL_TYPE (XdpSessionDexStore,
++                      xdp_session_dex_store,
++                      XDP, SESSION_DEX_STORE,
++                      GObject)
++
++XdpSessionDexStore * xdp_session_dex_store_new (void);
++
++XdpSessionDexStore * xdp_session_dex_store_new_with_offset (size_t session_offset);
++
++#define xdp_session_dex_store_new_wrapped(MySessionWrapper, session) \
++  xdp_session_dex_store_new_with_offset (G_STRUCT_OFFSET (MySessionWrapper, session))
++
++gpointer xdp_session_dex_store_lookup_session (XdpSessionDexStore *store,
++                                               const char         *session_handle,
++                                               XdpAppInfo         *app_info);
++
++void xdp_session_dex_store_take_session (XdpSessionDexStore *store,
++                                         gpointer            session_wrapper);
+diff --git a/src/xdp-session.c b/src/xdp-session.c
+index 5489c37..0e1f82c 100644
+--- a/src/xdp-session.c
++++ b/src/xdp-session.c
+@@ -30,8 +30,7 @@
+ typedef enum
+ {
+   PROP_CONTEXT = 1,
+-  PROP_SENDER,
+-  PROP_APP_ID,
++  PROP_APP_INFO,
+   PROP_TOKEN,
+   PROP_CONNECTION,
+   PROP_IMPL_CONNECTION,
+@@ -80,10 +79,7 @@ xdp_session_from_request (const char *session_handle,
+   if (!session)
+     return NULL;
+ 
+-  if (g_strcmp0 (session->sender, request->sender) != 0)
+-    return NULL;
+-
+-  if (g_strcmp0 (session->app_id, xdp_app_info_get_id (request->app_info)) != 0)
++  if (request->app_info != session->app_info)
+     return NULL;
+ 
+   return g_steal_pointer (&session);
+@@ -104,10 +100,7 @@ xdp_session_from_app_info (const char *session_handle,
+   if (!session)
+     return NULL;
+ 
+-  if (g_strcmp0 (session->sender, xdp_app_info_get_sender (app_info)) != 0)
+-    return NULL;
+-
+-  if (g_strcmp0 (session->app_id, xdp_app_info_get_id (app_info)) != 0)
++  if (app_info != session->app_info)
+     return NULL;
+ 
+   return g_steal_pointer (&session);
+@@ -292,10 +285,13 @@ xdp_session_initable_init (GInitable     *initable,
+   g_autoptr(XdpDbusImplSession) impl_session = NULL;
+   int i;
+ 
+-  g_assert (session->sender != NULL);
++  g_assert (session->app_info != NULL);
+   g_assert (session->token != NULL);
+   g_assert (session->context != NULL);
+ 
++  session->sender = g_strdup (xdp_app_info_get_sender (session->app_info));
++  session->app_id = g_strdup (xdp_app_info_get_id (session->app_info));
++
+   sender_escaped = g_strdup (session->sender + 1);
+   for (i = 0; sender_escaped[i]; i++)
+     {
+@@ -386,12 +382,8 @@ xdp_session_set_property (GObject      *object,
+       session->context = g_value_get_object (value);
+       break;
+ 
+-    case PROP_SENDER:
+-      session->sender = g_strdup (g_value_get_string (value));
+-      break;
+-
+-    case PROP_APP_ID:
+-      session->app_id = g_strdup (g_value_get_string (value));
++    case PROP_APP_INFO:
++      g_set_object (&session->app_info, g_value_get_object (value));
+       break;
+ 
+     case PROP_TOKEN:
+@@ -426,12 +418,8 @@ xdp_session_get_property (GObject    *object,
+       g_value_set_object (value, session->context);
+       break;
+ 
+-    case PROP_SENDER:
+-      g_value_set_string (value, session->sender);
+-      break;
+-
+-    case PROP_APP_ID:
+-      g_value_set_string (value, session->app_id);
++    case PROP_APP_INFO:
++      g_value_set_object (value, session->app_info);
+       break;
+ 
+     case PROP_TOKEN:
+@@ -466,6 +454,7 @@ xdp_session_finalize (GObject *object)
+   g_free (session->impl_dbus_name);
+   g_clear_object (&session->impl_session);
+ 
++  g_clear_object (&session->app_info);
+   g_free (session->app_id);
+   g_free (session->id);
+   g_free (session->token);
+@@ -502,18 +491,10 @@ xdp_session_class_init (XdpSessionClass *klass)
+                          G_PARAM_CONSTRUCT_ONLY |
+                          G_PARAM_STATIC_STRINGS);
+ 
+-  obj_props[PROP_SENDER] =
+-    g_param_spec_string ("sender",
+-                         NULL, NULL,
+-                         NULL,
+-                         G_PARAM_READWRITE |
+-                         G_PARAM_CONSTRUCT_ONLY |
+-                         G_PARAM_STATIC_STRINGS);
+-
+-  obj_props[PROP_APP_ID] =
+-    g_param_spec_string ("app-id",
++  obj_props[PROP_APP_INFO] =
++    g_param_spec_object ("app-info",
+                          NULL, NULL,
+-                         NULL,
++                         XDP_TYPE_APP_INFO,
+                          G_PARAM_READWRITE |
+                          G_PARAM_CONSTRUCT_ONLY |
+                          G_PARAM_STATIC_STRINGS);
+diff --git a/src/xdp-session.h b/src/xdp-session.h
+index 2e482a3..2fe58d7 100644
+--- a/src/xdp-session.h
++++ b/src/xdp-session.h
+@@ -36,6 +36,7 @@ typedef struct _XdpSession
+   gboolean exported;
+   gboolean closed;
+ 
++  XdpAppInfo *app_info;
+   char *app_id;
+   char *id;
+   char *token;
+diff --git a/tests/conftest.py b/tests/conftest.py
+index a59feb9..b98084a 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -563,12 +563,18 @@ def xdp_valgrind_args() -> list[str]:
+     ]
+ 
+ 
++@pytest.fixture
++def xdg_desktop_portal_options() -> xdp.PortalProcessOptions:
++    return xdp.PortalProcessOptions()
++
++
+ @pytest.fixture
+ def xdg_desktop_portal(
+     dbus_con: dbus.Bus,
+     xdg_desktop_portal_path: Path,
+     xdp_env: dict[str, str],
+     xdp_valgrind_args: list[str],
++    xdg_desktop_portal_options: xdp.PortalProcessOptions,
+ ) -> Iterator[subprocess.Popen]:
+     """
+     Fixture which starts and eventually stops xdg-desktop-portal
+@@ -580,7 +586,10 @@ def xdg_desktop_portal(
+     _maybe_add_asan_preload(xdg_desktop_portal_path, env)
+ 
+     xdg_desktop_portal = subprocess.Popen(
+-        xdp_valgrind_args + [xdg_desktop_portal_path], env=env
++        xdp_valgrind_args + [xdg_desktop_portal_path],
++        env=env,
++        stdout=subprocess.PIPE if xdg_desktop_portal_options.capture_stdout else None,
++        stderr=subprocess.PIPE if xdg_desktop_portal_options.capture_stderr else None,
+     )
+ 
+     while not dbus_con.name_has_owner("org.freedesktop.portal.Desktop"):
+@@ -593,14 +602,23 @@ def xdg_desktop_portal(
+ 
+     yield xdg_desktop_portal
+ 
+-    xdg_desktop_portal.send_signal(signal.SIGHUP)
+-    returncode = xdg_desktop_portal.wait()
+-    assert returncode == 0
++    if xdg_desktop_portal.poll() is None:
++        xdg_desktop_portal.send_signal(signal.SIGHUP)
++        returncode = xdg_desktop_portal.wait()
++        assert returncode == 0
++
++
++@pytest.fixture
++def xdg_permission_store_options() -> xdp.PortalProcessOptions:
++    return xdp.PortalProcessOptions()
+ 
+ 
+ @pytest.fixture
+ def xdg_permission_store(
+-    dbus_con: dbus.Bus, xdg_permission_store_path: Path, xdp_env: dict[str, str]
++    dbus_con: dbus.Bus,
++    xdg_permission_store_path: Path,
++    xdp_env: dict[str, str],
++    xdg_permission_store_options: xdp.PortalProcessOptions,
+ ) -> Iterator[subprocess.Popen]:
+     """
+     Fixture which starts and eventually stops xdg-permission-store
+@@ -611,7 +629,12 @@ def xdg_permission_store(
+     env = xdp_env.copy()
+     _maybe_add_asan_preload(xdg_permission_store_path, env)
+ 
+-    permission_store = subprocess.Popen([xdg_permission_store_path], env=env)
++    permission_store = subprocess.Popen(
++        [xdg_permission_store_path],
++        env=env,
++        stdout=subprocess.PIPE if xdg_permission_store_options.capture_stdout else None,
++        stderr=subprocess.PIPE if xdg_permission_store_options.capture_stderr else None,
++    )
+ 
+     while not dbus_con.name_has_owner("org.freedesktop.impl.portal.PermissionStore"):
+         returncode = permission_store.poll()
+@@ -623,16 +646,25 @@ def xdg_permission_store(
+ 
+     yield permission_store
+ 
+-    permission_store.send_signal(signal.SIGHUP)
+-    permission_store.wait()
+-    # The permission store does not shut down cleanly currently
+-    # returncode = permission_store.wait()
+-    # assert returncode == 0
++    if permission_store.poll() is None:
++        permission_store.send_signal(signal.SIGHUP)
++        permission_store.wait()
++        # The permission store does not shut down cleanly currently
++        # returncode = permission_store.wait()
++        # assert returncode == 0
++
++
++@pytest.fixture
++def xdg_document_portal_options() -> xdp.PortalProcessOptions:
++    return xdp.PortalProcessOptions()
+ 
+ 
+ @pytest.fixture
+ def xdg_document_portal(
+-    dbus_con: dbus.Bus, xdg_document_portal_path: Path, xdp_env: dict[str, str]
++    dbus_con: dbus.Bus,
++    xdg_document_portal_path: Path,
++    xdp_env: dict[str, str],
++    xdg_document_portal_options: xdp.PortalProcessOptions,
+ ) -> Iterator[subprocess.Popen]:
+     """
+     Fixture which starts and eventually stops xdg-document-portal
+@@ -656,7 +688,12 @@ def xdg_document_portal(
+     # better solution here.
+     env.pop("XDG_DESKTOP_PORTAL_TEST_APP_INFO_KIND", None)
+ 
+-    document_portal = subprocess.Popen([xdg_document_portal_path], env=env)
++    document_portal = subprocess.Popen(
++        [xdg_document_portal_path],
++        env=env,
++        stdout=subprocess.PIPE if xdg_document_portal_options.capture_stdout else None,
++        stderr=subprocess.PIPE if xdg_document_portal_options.capture_stderr else None,
++    )
+ 
+     while not dbus_con.name_has_owner("org.freedesktop.portal.Documents"):
+         returncode = document_portal.poll()
+@@ -668,9 +705,10 @@ def xdg_document_portal(
+ 
+     yield document_portal
+ 
+-    document_portal.send_signal(signal.SIGHUP)
+-    returncode = document_portal.wait()
+-    assert returncode == 0
++    if document_portal.poll() is None:
++        document_portal.send_signal(signal.SIGHUP)
++        returncode = document_portal.wait()
++        assert returncode == 0
+ 
+     fuse_mount = Path(os.environ["XDG_RUNTIME_DIR"]) / "doc"
+ 
+diff --git a/tests/meson.build b/tests/meson.build
+index ae5a7bf..626929f 100644
+--- a/tests/meson.build
++++ b/tests/meson.build
+@@ -102,6 +102,7 @@ pytest_files = [
+   'test_remotedesktop.py',
+   'test_settings.py',
+   'test_screenshot.py',
++  'test_shutdown.py',
+   'test_trash.py',
+   'test_usb.py',
+   'test_wallpaper.py',
+diff --git a/tests/test_shutdown.py b/tests/test_shutdown.py
+new file mode 100644
+index 0000000..637e8b7
+--- /dev/null
++++ b/tests/test_shutdown.py
+@@ -0,0 +1,66 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++# SPDX-FileCopyrightText: Copyright © the xdg-desktop-portal contributors
++#
++# This file is formatted with Python Black
++
++import signal
++
++import dbus
++import pytest
++
++import tests.xdp_utils as xdp
++
++
++@pytest.fixture
++def xdp_app_info():
++    return xdp.AppInfoHost()
++
++
++@pytest.fixture
++def required_templates():
++    return {"email": {"delay": 30000}}
++
++
++@pytest.fixture
++def xdg_desktop_portal_options():
++    return xdp.PortalProcessOptions(capture_stderr=True)
++
++
++class TestShutdown:
++    def test_shutdown_with_inflight_call(self, portals, dbus_con, xdg_desktop_portal):
++        """
++        Test that the portal shuts down cleanly with an in-flight backend call.
++
++        Send a ComposeEmail call with a very long backend delay so the call
++        is still pending when SIGHUP arrives. Verify the portal exits cleanly.
++        """
++        email_intf = xdp.get_portal_iface(dbus_con, "Email")
++        mock_intf = xdp.get_mock_iface(dbus_con)
++
++        email_intf.ComposeEmail(
++            "",
++            dbus.Dictionary(
++                {
++                    "addresses": dbus.Array(["test@example.com"], signature="s"),
++                    "subject": "shutdown test",
++                    "handle_token": dbus.String("request_shutdown", variant_level=1),
++                },
++                signature="sv",
++            ),
++            reply_handler=lambda *args: None,
++            error_handler=lambda *args: None,
++        )
++
++        # Wait for the call to reach the backend, confirming it is
++        # in-flight before we send SIGHUP.
++        xdp.wait_for(lambda: len(mock_intf.GetMethodCalls("ComposeEmail")) > 0)
++
++        xdg_desktop_portal.send_signal(signal.SIGHUP)
++        xdg_desktop_portal.communicate(timeout=10)
++
++        assert xdg_desktop_portal.returncode == 0, "Portal did not exit cleanly"
++
++        # TODO: once portals use fiber dispatch, verify that cancelled fibers
++        # actually unwind through the error path:
++        # stderr_text = stderr.decode("utf-8", errors="replace")
++        # assert "Backend call failed: Fiber cancelled" in stderr_text
+diff --git a/tests/xdp_utils.py b/tests/xdp_utils.py
+index 75d6383..ff704d4 100644
+--- a/tests/xdp_utils.py
++++ b/tests/xdp_utils.py
+@@ -910,3 +910,18 @@ class SessionPersistenceMode(IntEnum):
+     NONE = 0
+     TRANSIENT = 1
+     PERSISTENT = 2
++
++class SessionPersistenceModeError(TypeError):
++    """Exception raised when the session persistence mode is unknown."""
++
++    def __init__(self, persist_mode: SessionPersistenceMode) -> None:
++        self.persist_mode = persist_mode
++
++    def __str__(self) -> str:
++        return f"Unknown session persistence mode: {self.persist_mode}"
++
++
++@dataclass
++class PortalProcessOptions:
++    capture_stderr: bool = False
++    capture_stdout: bool = False

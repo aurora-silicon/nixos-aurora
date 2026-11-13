@@ -1,0 +1,477 @@
+From: credentialsd upstream <noreply@github.com>
+Subject: [PATCH] Backport credentialsd main v0.4.0..ca77b3e
+
+Upstream commits after the 0.4.0 release that the platform provider
+series builds on, as one diff (git diff v0.4.0 ca77b3e):
+
+  457e48b daemon: Offer devices based on libwebauthn's available transports
+  00ee5da daemon: rename internal SelectCredential states to SelectingCredential
+  20103a8 common: rename Credential.username to display_name
+  8881596 docs: fix webext dev instructions and mention Brave
+
+https://github.com/linux-credentials/credentialsd/compare/v0.4.0...ca77b3e
+---
+ BUILDING.md                                        |  2 +-
+ CHANGELOG.md                                       | 10 +++
+ credentialsd-common/src/model.rs                   | 25 ++++++-
+ .../src/gui/view_model/gtk/credential.rs           | 43 ++++++++++--
+ credentialsd-ui/src/gui/view_model/gtk/mod.rs      |  4 +-
+ credentialsd/src/credential_service/mod.rs         | 81 +++++++++++++++++-----
+ credentialsd/src/credential_service/nfc.rs         | 10 +--
+ credentialsd/src/credential_service/usb.rs         | 10 +--
+ doc/api.md                                         | 10 +--
+ webext/README.md                                   | 13 ++--
+ 10 files changed, 160 insertions(+), 48 deletions(-)
+
+diff --git a/BUILDING.md b/BUILDING.md
+index 5b00db2..e5ec3c7 100644
+--- a/BUILDING.md
++++ b/BUILDING.md
+@@ -181,7 +181,7 @@ $CREDSD_REPO/build/credentialsd/src/credentialsd &
+ 
+ # Run the backend UI
+ export RUST_LOG=debug
+-export GSETTINGS_SCHEMA_DIR=$CREDS_REPO/build/credentialsd-ui/data
++export GSETTINGS_SCHEMA_DIR=$CREDSD_REPO/build/credentialsd-ui/data
+ $CREDSD_REPO/build/credentialsd-ui/src/credentialsd-ui
+ ```
+ 
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 08bd8ac..2ca43de 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,15 @@
+ # [unreleased]
+ 
++## Breaking Changes
++
++### UI Controller API
++
++- Renamed the `username` field of `Credential` to `display_name`, matching WebAuthn's `user.displayName`.
++
++## Improvements
++
++- daemon: Build the list of devices offered to the user from libwebauthn's `available_transports()`, the same source discovery uses (#32)
++
+ # 0.4.0 [2026-11-05]
+ 
+ ## Improvements
+diff --git a/credentialsd-common/src/model.rs b/credentialsd-common/src/model.rs
+index 1c74184..38e245c 100644
+--- a/credentialsd-common/src/model.rs
++++ b/credentialsd-common/src/model.rs
+@@ -82,7 +82,7 @@ pub struct SetDevicePinOptions {}
+ pub struct Credential {
+     pub id: String,
+     pub name: String,
+-    pub username: Option<String>,
++    pub display_name: Option<String>,
+ }
+ 
+ /// Emitted when an an authenticator presents multiple matching credentials, and
+@@ -373,3 +373,26 @@ impl Display for WindowHandle {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use zvariant::Value;
++
++    use super::Credential;
++
++    #[test]
++    fn credential_dict_uses_webauthn_field_names() {
++        let cred = Credential {
++            id: String::from("abc"),
++            name: String::from("alice@example.com"),
++            display_name: Some(String::from("Alice")),
++        };
++        let Value::Dict(dict) = Value::from(cred) else {
++            panic!("Credential should serialize as a dict");
++        };
++        let get = |key: &str| dict.get::<&str, String>(&key).unwrap();
++        assert_eq!(get("name").as_deref(), Some("alice@example.com"));
++        assert_eq!(get("display_name").as_deref(), Some("Alice"));
++        assert_eq!(get("username"), None);
++    }
++}
+diff --git a/credentialsd-ui/src/gui/view_model/gtk/credential.rs b/credentialsd-ui/src/gui/view_model/gtk/credential.rs
+index ca8e54f..a1c6186 100644
+--- a/credentialsd-ui/src/gui/view_model/gtk/credential.rs
++++ b/credentialsd-ui/src/gui/view_model/gtk/credential.rs
+@@ -18,7 +18,7 @@ mod imp {
+         pub name: RefCell<String>,
+ 
+         #[property(get, set)]
+-        pub username: RefCell<Option<String>>,
++        pub display_name: RefCell<Option<String>>,
+     }
+ 
+     // The central trait for subclassing a GObject
+@@ -38,10 +38,10 @@ glib::wrapper! {
+ }
+ 
+ impl CredentialObject {
+-    pub fn new(id: &str, name: &str, username: &Option<String>) -> Self {
++    pub fn new(id: &str, name: &str, display_name: &Option<String>) -> Self {
+         let mut builder = Object::builder().property("id", id).property("name", name);
+-        if let Some(username) = username {
+-            builder = builder.property("username", username);
++        if let Some(display_name) = display_name {
++            builder = builder.property("display-name", display_name);
+         }
+         builder.build()
+     }
+@@ -49,13 +49,13 @@ impl CredentialObject {
+ 
+ impl From<crate::gui::view_model::Credential> for CredentialObject {
+     fn from(value: crate::gui::view_model::Credential) -> Self {
+-        Self::new(&value.id, &value.name, &value.username)
++        Self::new(&value.id, &value.name, &value.display_name)
+     }
+ }
+ 
+ impl From<&crate::gui::view_model::Credential> for CredentialObject {
+     fn from(value: &crate::gui::view_model::Credential) -> Self {
+-        Self::new(&value.id, &value.name, &value.username)
++        Self::new(&value.id, &value.name, &value.display_name)
+     }
+ }
+ 
+@@ -64,7 +64,36 @@ impl From<CredentialObject> for crate::gui::view_model::Credential {
+         Self {
+             id: value.id(),
+             name: value.name(),
+-            username: value.username(),
++            display_name: value.display_name(),
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::CredentialObject;
++    use crate::gui::view_model::Credential;
++
++    #[test]
++    fn credential_object_round_trips_display_name() {
++        let cred = Credential {
++            id: String::from("abc"),
++            name: String::from("alice@example.com"),
++            display_name: Some(String::from("Alice")),
++        };
++        let obj = CredentialObject::from(&cred);
++        assert_eq!(obj.name(), "alice@example.com");
++        assert_eq!(obj.display_name().as_deref(), Some("Alice"));
++        assert_eq!(Credential::from(obj), cred);
++    }
++
++    #[test]
++    fn credential_object_allows_missing_display_name() {
++        let cred = Credential {
++            id: String::from("abc"),
++            name: String::from("alice@example.com"),
++            display_name: None,
++        };
++        assert_eq!(Credential::from(CredentialObject::from(&cred)), cred);
++    }
++}
+diff --git a/credentialsd-ui/src/gui/view_model/gtk/mod.rs b/credentialsd-ui/src/gui/view_model/gtk/mod.rs
+index 76afc9e..6e8356d 100644
+--- a/credentialsd-ui/src/gui/view_model/gtk/mod.rs
++++ b/credentialsd-ui/src/gui/view_model/gtk/mod.rs
+@@ -309,8 +309,8 @@ impl ViewModel {
+                 .build();
+             let icon = gtk::Image::builder().icon_name(icon_name).build();
+             let mut display_label = credential.name().to_string();
+-            if let Some(username) = credential.username() {
+-                display_label += &format!(" ({username})");
++            if let Some(display_name) = credential.display_name() {
++                display_label += &format!(" ({display_name})");
+             }
+             let label = gtk::Label::builder().label(display_label).build();
+             b.append(&icon);
+diff --git a/credentialsd/src/credential_service/mod.rs b/credentialsd/src/credential_service/mod.rs
+index 38ec879..896c956 100644
+--- a/credentialsd/src/credential_service/mod.rs
++++ b/credentialsd/src/credential_service/mod.rs
+@@ -314,23 +314,7 @@ impl<H: HybridHandler + Send, N: NfcHandler + Send, U: UsbHandler + Send> Manage
+     async fn get_available_public_key_devices(&self) -> Result<Vec<Device>, ()> {
+         // We create the list new for each call, in case someone plugs in
+         // an NFC-reader in the middle of an auth-flow
+-        let mut devices = vec![Device {
+-            id: String::from("0"),
+-            transport: Transport::Usb,
+-        }];
+-        if libwebauthn::transport::hybrid::is_available().await {
+-            devices.push(Device {
+-                id: String::from("1"),
+-                transport: Transport::HybridQr,
+-            });
+-        }
+-        if libwebauthn::transport::nfc::is_nfc_available() {
+-            devices.push(Device {
+-                id: String::from("2"),
+-                transport: Transport::Nfc,
+-            });
+-        }
+-        Ok(devices)
++        Ok(devices_for_transports(&available_transports().await))
+     }
+ 
+     async fn start_discovery(
+@@ -618,6 +602,26 @@ impl From<GetAssertionResponse> for AuthenticatorResponse {
+     }
+ }
+ 
++/// The devices to offer the user for the given available transports, with a
++/// stable ID per transport.
++///
++/// libwebauthn reports Bluetooth availability as both `Ble` and `Hybrid`; only
++/// hybrid (QR code) flows are offered for now.
++fn devices_for_transports(available: &[libwebauthn::Transport]) -> Vec<Device> {
++    [
++        (libwebauthn::Transport::Usb, "0", Transport::Usb),
++        (libwebauthn::Transport::Hybrid, "1", Transport::HybridQr),
++        (libwebauthn::Transport::Nfc, "2", Transport::Nfc),
++    ]
++    .into_iter()
++    .filter(|(available_transport, _, _)| available.contains(available_transport))
++    .map(|(_, id, transport)| Device {
++        id: String::from(id),
++        transport,
++    })
++    .collect()
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -735,6 +739,49 @@ mod tests {
+         CredentialRequest::CreatePublicKeyCredentialRequest(make_credentials_request)
+     }
+ 
++    #[test]
++    fn devices_for_transports_follow_available_transports() {
++        let ids_and_transports =
++            |available: &[libwebauthn::Transport]| -> Vec<(String, Transport)> {
++                devices_for_transports(available)
++                    .into_iter()
++                    .map(|d| (d.id, d.transport))
++                    .collect()
++            };
++
++        assert_eq!(
++            ids_and_transports(&[libwebauthn::Transport::Usb]),
++            vec![(String::from("0"), Transport::Usb)]
++        );
++        assert_eq!(
++            ids_and_transports(&[
++                libwebauthn::Transport::Usb,
++                libwebauthn::Transport::Ble,
++                libwebauthn::Transport::Hybrid,
++                libwebauthn::Transport::Nfc,
++            ]),
++            vec![
++                (String::from("0"), Transport::Usb),
++                (String::from("1"), Transport::HybridQr),
++                (String::from("2"), Transport::Nfc),
++            ]
++        );
++        // IDs stay the same when a transport in between is unavailable.
++        assert_eq!(
++            ids_and_transports(&[libwebauthn::Transport::Nfc, libwebauthn::Transport::Usb]),
++            vec![
++                (String::from("0"), Transport::Usb),
++                (String::from("2"), Transport::Nfc),
++            ]
++        );
++    }
++
++    #[test]
++    fn devices_for_transports_does_not_offer_ble_alone() {
++        assert!(devices_for_transports(&[libwebauthn::Transport::Ble]).is_empty());
++        assert!(devices_for_transports(&[]).is_empty());
++    }
++
+     #[tokio::test]
+     async fn test_init_request_returns_token_and_id() {
+         let service = CredentialService::new(MockHybridHandler, MockNfcHandler, MockUsbHandler);
+diff --git a/credentialsd/src/credential_service/nfc.rs b/credentialsd/src/credential_service/nfc.rs
+index 438a632..daabffa 100644
+--- a/credentialsd/src/credential_service/nfc.rs
++++ b/credentialsd/src/credential_service/nfc.rs
+@@ -151,7 +151,7 @@ impl InProcessNfcHandler {
+                                 ),
+                             ))
+                         } else {
+-                            Ok(NfcStateInternal::SelectCredential {
++                            Ok(NfcStateInternal::SelectingCredential {
+                                 response: get_assertion_response,
+                                 cred_tx: cred_tx.clone(),
+                             })
+@@ -203,7 +203,7 @@ impl InProcessNfcHandler {
+                     | NfcStateInternal::NeedsUserVerification { .. } => {
+                         Self::process_user_interaction(&mut signal_rx, &cred_tx).await
+                     }
+-                    NfcStateInternal::SelectCredential {
++                    NfcStateInternal::SelectingCredential {
+                         ref response,
+                         cred_tx: _,
+                     } => Self::process_select_credential(response, &mut cred_rx).await,
+@@ -449,7 +449,7 @@ pub(super) enum NfcStateInternal {
+     NeedsUserVerification { attempts_left: Option<u32> },
+ 
+     /// Multiple credentials have been found and the user has to select which to use
+-    SelectCredential {
++    SelectingCredential {
+         response: GetAssertionResponse,
+         cred_tx: mpsc::Sender<String>,
+     },
+@@ -532,7 +532,7 @@ impl From<NfcStateInternal> for NfcState {
+             }
+             NfcStateInternal::Completed(_) => NfcState::Completed,
+             NfcStateInternal::Restarting => NfcState::Restarting,
+-            NfcStateInternal::SelectCredential { response, cred_tx } => {
++            NfcStateInternal::SelectingCredential { response, cred_tx } => {
+                 NfcState::SelectingCredential {
+                     creds: response
+                         .assertions
+@@ -554,7 +554,7 @@ impl From<NfcStateInternal> for NfcState {
+                                 .as_ref()
+                                 .and_then(|u| u.name.clone())
+                                 .unwrap_or_else(|| String::from("<unknown>")),
+-                            username: x
++                            display_name: x
+                                 .user
+                                 .as_ref()
+                                 .map(|u| u.display_name.clone())
+diff --git a/credentialsd/src/credential_service/usb.rs b/credentialsd/src/credential_service/usb.rs
+index 1207833..b69b04f 100644
+--- a/credentialsd/src/credential_service/usb.rs
++++ b/credentialsd/src/credential_service/usb.rs
+@@ -254,7 +254,7 @@ impl InProcessUsbHandler {
+                                 ),
+                             ))
+                         } else {
+-                            Ok(UsbStateInternal::SelectCredential {
++                            Ok(UsbStateInternal::SelectingCredential {
+                                 response: get_assertion_response,
+                                 cred_tx: cred_tx.clone(),
+                             })
+@@ -310,7 +310,7 @@ impl InProcessUsbHandler {
+                     | UsbStateInternal::NeedsUserPresence => {
+                         Self::process_user_interaction(&mut signal_rx, &cred_tx).await
+                     }
+-                    UsbStateInternal::SelectCredential {
++                    UsbStateInternal::SelectingCredential {
+                         ref response,
+                         cred_tx: _,
+                     } => Self::process_select_credential(response, &mut cred_rx).await,
+@@ -559,7 +559,7 @@ pub(super) enum UsbStateInternal {
+     NeedsUserPresence,
+ 
+     /// Multiple credentials have been found and the user has to select which to use
+-    SelectCredential {
++    SelectingCredential {
+         response: GetAssertionResponse,
+         cred_tx: mpsc::Sender<String>,
+     },
+@@ -652,7 +652,7 @@ impl From<UsbStateInternal> for UsbState {
+             UsbStateInternal::NeedsUserPresence => UsbState::NeedsUserPresence,
+             UsbStateInternal::Completed(_) => UsbState::Completed,
+             UsbStateInternal::SelectingDevice(_) => UsbState::SelectingDevice,
+-            UsbStateInternal::SelectCredential { response, cred_tx } => {
++            UsbStateInternal::SelectingCredential { response, cred_tx } => {
+                 UsbState::SelectingCredential {
+                     creds: response
+                         .assertions
+@@ -674,7 +674,7 @@ impl From<UsbStateInternal> for UsbState {
+                                 .as_ref()
+                                 .and_then(|u| u.name.clone())
+                                 .unwrap_or_else(|| String::from("<unknown>")),
+-                            username: x
++                            display_name: x
+                                 .user
+                                 .as_ref()
+                                 .map(|u| u.display_name.clone())
+diff --git a/doc/api.md b/doc/api.md
+index d445b61..b1812c9 100644
+--- a/doc/api.md
++++ b/doc/api.md
+@@ -54,6 +54,7 @@ sequenceDiagram
+ - (Gateway): Make `origin` and `type` a required method parameter.
+ - (Gateway): Flatten nested D-Bus struct with `request_json` on CreateCredential and GetCredential
+ - (Gateway): Remove Client Capabilities method from Gateway API until further notice.
++- (UI Controller): Renamed the `username` field of `Credential` to `display_name`, matching WebAuthn's `user.displayName`.
+ 
+ ### Improvements
+ 
+@@ -509,9 +510,6 @@ The device needs evidence of user presence (e.g. touch) to release the credentia
+ 
+ ### BackgroundEvent::SelectingCredential
+ 
+-> TODO: field names of Credential type are confusing: "name" is an ID, and
+-> "username" is a name. We should flip them.
+-
+ Multiple credentials have been found and the user has to select which to use
+ 
+ `tag`: `0x13`
+@@ -521,8 +519,10 @@ Multiple credentials have been found and the user has to select which to use
+ ```
+ Credential [a{sv}] {
+     id: string. An opaque ID referring to the credential on the device.
+-    name: string. A human-readable identifier for the account.
+-    username: string. A human-readable name for the account, intended for display. May be empty.
++    name: string. A human-readable identifier for the account, from the WebAuthn
++        `user.name` field, for example, "alice@example.com".
++    display_name: string. A human-readable name for the account, intended for
++        display, from the WebAuthn `user.displayName` field. May be empty.
+ }
+ ```
+ 
+diff --git a/webext/README.md b/webext/README.md
+index a03ccb2..48ad128 100644
+--- a/webext/README.md
++++ b/webext/README.md
+@@ -66,8 +66,8 @@ couple of options:
+ 5. Open Firefox and go to `about:debugging`
+ 6. Click "This Firefox" > Load Temporary Extension. Select `webext/add-on/manifest.json`
+ 7. Build with `ninja -C ./build` and run the D-Bus services:
+-   - `GSCHEMA_SCHEMA_DIR=build/credentialsd-ui/data ./build/credentialsd-ui/target/debug/credentialsd-ui`
+-   - `./build/credentialsd/target/debug/credentialsd`
++   - `GSETTINGS_SCHEMA_DIR=build/credentialsd-ui/data ./build/credentialsd-ui/src/credentialsd-ui`
++   - `./build/credentialsd/src/credentialsd`
+ 8. Navigate to [https://webauthn.io]().
+ 9. Run through the registration and creation process.
+ 
+@@ -82,7 +82,8 @@ couple of options:
+    ```shell
+    cp webext/add-on/manifest.chromium.json webext/add-on/manifest.json
+    ```
+-3. Open Edge and go to `edge://extensions` (or `chrome://extensions` for Chrome).
++3. Open Edge and go to `edge://extensions` (or `chrome://extensions` for Chrome,
++   `brave://extensions` for Brave).
+ 4. Enable "Developer mode" (toggle in top right).
+ 5. Click "Load unpacked" and select the `webext/add-on/` directory.
+ 6. Note the extension ID shown on the extensions page (e.g., `abcdefghijklmnop...`).
+@@ -94,6 +95,8 @@ couple of options:
+    # mkdir -p ~/.config/google-chrome/NativeMessagingHosts
+    # For Chromium:
+    # mkdir -p ~/.config/chromium/NativeMessagingHosts
++   # For Brave:
++   # mkdir -p ~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts
+ 
+    cat > ~/.config/microsoft-edge/NativeMessagingHosts/xyz.iinuwa.credentialsd_helper.json << EOF
+    {
+@@ -107,7 +110,7 @@ couple of options:
+    ```
+    Replace `YOUR_EXTENSION_ID` with the extension ID from step 6.
+ 8. Build with `ninja -C ./build` and run the D-Bus services:
+-   - `GSCHEMA_SCHEMA_DIR=build/credentialsd-ui/data ./build/credentialsd-ui/target/debug/credentialsd-ui`
+-   - `./build/credentialsd/target/debug/credentialsd`
++   - `GSETTINGS_SCHEMA_DIR=build/credentialsd-ui/data ./build/credentialsd-ui/src/credentialsd-ui`
++   - `./build/credentialsd/src/credentialsd`
+ 9. Navigate to [https://webauthn.io]().
+ 10. Run through the registration and creation process.

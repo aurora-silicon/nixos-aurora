@@ -1,0 +1,114 @@
+From 46b7386e355cc883637f862145cbb9e9c8bc4255 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Fri, 13 Nov 2026 18:20:39 +1100
+Subject: [PATCH] build: Use libdex and its gdbus-codegen extension on 1.22
+
+The libdex D-Bus skeletons (PR 2036) and the credential portal (PR 1889)
+were written against main, which already depends on libdex, passes its
+gdbus-codegen extension to every interface it generates and calls
+dex_init() in main(). 1.22 has none of that: add the libdex-1 dependency
+(>= 1.1, built with gdbus support), link it into the portal, generate
+the portal, host, impl and background interfaces with the extension, and
+initialize libdex at startup (libdex 1.2 registers its types there; with
+1.2 and no dex_init() every skeleton is an invalid type).
+---
+ meson.build     | 5 +++++
+ src/meson.build | 9 +++++++++
+ src/xdp-main.c  | 5 +++++
+ 3 files changed, 19 insertions(+)
+
+diff --git a/meson.build b/meson.build
+index 6e840a5..fc48757 100644
+--- a/meson.build
++++ b/meson.build
+@@ -144,6 +144,11 @@ gudev_dep = dependency('gudev-1.0', required: get_option('gudev'))
+ umockdev_dep = dependency('umockdev-1.0', required: get_option('tests'))
+ libglnx_dep = dependency('libglnx')
+ gvdb_dep = dependency('gvdb')
++libdex_dep = dependency('libdex-1', version: '>= 1.1')
++libdex_codegen_ext = libdex_dep.get_variable('gdbus_codegen_extension', default_value: '')
++if libdex_codegen_ext == ''
++  error('libdex needs to be built with gdbus support enabled')
++endif
+ 
+ have = cc.has_function(
+   'dex_scheduler_spawnv',
+diff --git a/src/meson.build b/src/meson.build
+index b176fb7..79f0bf7 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -1,11 +1,16 @@
+ ###### xdg-desktop-portal
+ 
++gdbus_codegen_extra_args = [
++  f'--extension-path=@libdex_codegen_ext@',
++]
++
+ portal_built_sources = gnome.gdbus_codegen(
+   'xdp-dbus',
+   sources: portal_sources + flatpak_intf_sources,
+   interface_prefix: 'org.freedesktop.portal',
+   namespace: 'XdpDbus',
+   docbook: 'portal',
++  extra_args: gdbus_codegen_extra_args,
+ )
+ portal_experimental_built_sources = gnome.gdbus_codegen(
+   'xdp-experimental-dbus',
+@@ -21,6 +26,7 @@ host_built_sources = gnome.gdbus_codegen(
+   interface_prefix: 'org.freedesktop.host.portal',
+   namespace: 'XdpDbusHost',
+   docbook: 'portal',
++  extra_args: gdbus_codegen_extra_args,
+ )
+ impl_built_sources = gnome.gdbus_codegen(
+   'xdp-impl-dbus',
+@@ -28,6 +34,7 @@ impl_built_sources = gnome.gdbus_codegen(
+   interface_prefix: 'org.freedesktop.impl.portal',
+   namespace: 'XdpDbusImpl',
+   docbook: 'portal',
++  extra_args: gdbus_codegen_extra_args,
+ )
+ impl_experimental_built_sources = gnome.gdbus_codegen(
+   'xdp-impl-experimental-dbus',
+@@ -51,6 +58,7 @@ background_monitor_built_sources = gnome.gdbus_codegen(
+   interface_prefix: 'org.freedesktop.background',
+   namespace: 'XdpDbusBackground',
+   docbook: 'portal',
++  extra_args: gdbus_codegen_extra_args,
+ )
+ if have_geoclue
+   geoclue_built_sources = gnome.gdbus_codegen(
+@@ -183,6 +191,7 @@ common_deps = [
+   gio_unix_dep,
+   json_glib_dep,
+   libglnx_dep,
++  libdex_dep,
+ ]
+ 
+ if gudev_dep.found()
+diff --git a/src/xdp-main.c b/src/xdp-main.c
+index 8001754..73bd018 100644
+--- a/src/xdp-main.c
++++ b/src/xdp-main.c
+@@ -29,6 +29,7 @@
+ 
+ #include <glib-unix.h>
+ #include <glib/gi18n.h>
++#include <libdex.h>
+ 
+ #include "xdp-context.h"
+ 
+@@ -142,6 +143,10 @@ main (int argc, char *argv[])
+     { NULL }
+   };
+ 
++  /* Fibers and the libdex D-Bus skeletons need libdex initialized
++   * (libdex >= 1.2 registers its types here). */
++  dex_init ();
++
+   if (g_getenv ("XDG_DESKTOP_PORTAL_WAIT_FOR_DEBUGGER") != NULL)
+     {
+       g_printerr ("\ndesktop portal (PID %d) is waiting for a debugger. "
+-- 
+2.50.1 (Apple Git-155)
+

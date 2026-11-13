@@ -1,0 +1,427 @@
+From ada7cf943199d14b2da945718ea0eadb5b197bf4 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Fri, 13 Nov 2026 17:38:45 +1100
+Subject: [PATCH 5/5] doc: Document the platform provider API
+
+Describe the drop-in file, the provider D-Bus interface, the dictionary
+keys, the password round trip and the error names, and add introspection
+XML for xyz.iinuwa.credentialsd.Provider1. Document GetClientCapabilities(),
+the NeedsPassword and InternalLocked events, and add changelog entries.
+---
+ ARCHITECTURE.md                             |   5 +-
+ CHANGELOG.md                                |   7 +
+ doc/api.md                                  | 229 +++++++++++++++++++-
+ doc/meson.build                             |   1 +
+ doc/xyz.iinuwa.credentialsd.Credentials.xml |   8 +
+ doc/xyz.iinuwa.credentialsd.Provider1.xml   |  46 ++++
+ 6 files changed, 294 insertions(+), 2 deletions(-)
+ create mode 100644 doc/xyz.iinuwa.credentialsd.Provider1.xml
+
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index f9551e7..7d8d001 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -112,7 +112,10 @@ also holds request context to return back to the Gateway for request completion
+ or when the Flow Controller notifies it that the request is cancelled.
+ 
+ Various authenticator transports are handled in sub-modules, called _handlers_,
+-for now USB and hybrid transports are supported. Each handler starts a `Stream`
++for now USB, hybrid and internal transports are supported. The internal
++handler (`internal.rs`) talks to platform passkey providers, separate
++processes that register through drop-in files and implement a D-Bus
++interface; the client for them lives in `platform/`. Each handler starts a `Stream`
+ of events that represents requests from the authenticator for user interaction.
+ If a response is required from the user, the event should contain a channel for
+ the credential service to send the response after it receives user input.
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 2ca43de..c335ac8 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,9 +6,16 @@
+ 
+ - Renamed the `username` field of `Credential` to `display_name`, matching WebAuthn's `user.displayName`.
+ 
++### UI Controller API
++
++- Added `NotifyNeedsPassword()` and `NotifyInternalLocked()`, and the `PasswordEntered` signal, for platform providers.
++
+ ## Improvements
+ 
+ - daemon: Build the list of devices offered to the user from libwebauthn's `available_transports()`, the same source discovery uses (#32)
++- daemon: Add platform passkey providers. A provider registers with a drop-in file in `/usr/share/credentialsd/providers` and is offered as a device with the `internal` transport.
++- daemon: Add `GetClientCapabilities()` to the handler interface, so the portal can answer `isUserVerifyingPlatformAuthenticatorAvailable()`.
++- ui: Prompt for the password of a platform provider and show when it is locked.
+ 
+ # 0.4.0 [2026-11-05]
+ 
+diff --git a/doc/api.md b/doc/api.md
+index b1812c9..61dcfc4 100644
+--- a/doc/api.md
++++ b/doc/api.md
+@@ -1,10 +1,11 @@
+ # API Overview
+ 
+-There are three main API defined by this specification:
++There are four main API defined by this specification:
+ 
+ - [Gateway API](#gateway-api)
+ - [Flow Control API](#flow-control-api)
+ - [UI Control API](#ui-control-api)
++- [Platform Provider API](#platform-provider-api)
+ 
+ The **Gateway** is the entrypoint for clients to interact with. The Flow
+ Controller and UI Controller work together to guide the user through the
+@@ -59,6 +60,9 @@ sequenceDiagram
+ ### Improvements
+ 
+ - Document errors returned to gateway requests
++- (Gateway): Add `GetClientCapabilities()` to the handler interface.
++- (UI Controller): Add `NotifyNeedsPassword()`, `NotifyInternalLocked()` and the `PasswordEntered` signal for platform providers.
++- (Platform Provider): Add an API for platform passkey providers, offered as devices with the `internal` transport.
+ 
+ ## [0.1.0] - 2025-08-14
+ 
+@@ -403,6 +407,26 @@ denoted by `type: "publicKey"`:
+ - `TypeError`: An invalid request is made.
+ - `NotAllowedError`: catch-all error.
+ 
++## `GetClientCapabilities() -> a{sv}`
++
++Returns the WebAuthn [client capabilities][def-client-capability], so that
++the portal can answer `getClientCapabilities()` and
++`isUserVerifyingPlatformAuthenticatorAvailable()`. Each value is a boolean,
++and the keys are the capability names in snake_case:
++
++- `conditional_create`, `conditional_get`: always false for now.
++- `hybrid_transport`: the hybrid transport is available.
++- `passkey_platform_authenticator`: a user-verifying platform provider or
++  the hybrid transport is available.
++- `user_verifying_platform_authenticator`: a platform provider answered
++  `GetInfo()` with at least one user verification method. A locked
++  provider counts, since the user is asked to unlock it.
++- `related_origins`: requests are validated with related origin requests.
++- `signal_all_accepted_credentials`, `signal_current_user_details`,
++  `signal_unknown_credential`: always false for now.
++
++[def-client-capability]: https://www.w3.org/TR/webauthn-3/#enumdef-clientcapability
++
+ # Flow Control API
+ 
+ The Flow Control API is used by the UI to pass user interactions through the
+@@ -442,6 +466,7 @@ BackgroundEvent[(uv)] [
+     (0x11) NeedsUserVerification: u
+     (0x12) NeedsUserPresence
+     (0x13) SelectingCredential: aa{sv} u32 = 0x13;
++    (0x14) NeedsPassword: b
+ 
+     (0x20) HybridIdle
+     (0x21) HybridStarted: s
+@@ -457,6 +482,8 @@ BackgroundEvent[(uv)] [
+     (0x42) UsbSelectingDevice: aa{sv}
+     (0x43) UsbConnected
+ 
++    (0x50) InternalLocked
++
+     (0x80000001) ErrorInternal
+     (0x80000002) ErrorTimedOut
+     (0x80000003) ErrorCancelled
+@@ -684,6 +711,28 @@ locks out the device.
+ 
+ `value`: No associated value.
+ 
++### BackgroundEvent::NeedsPassword
++
++A platform provider needs the user's password. Prompt the user and send the
++password back in a memfd_secret with the `PasswordEntered` signal. The UI
++Control API sends this as `NotifyNeedsPassword(session_handle, incorrect,
++options)`.
++
++`tag`: `0x14`
++
++`value`: `[b]`, true when the provider rejected the previous password.
++
++### BackgroundEvent::InternalLocked
++
++A platform provider is locked, for example because the user has not
++unlocked their key store yet. Tell the user to unlock it or to choose
++another device. The UI Control API sends this as
++`NotifyInternalLocked(session_handle, options)`.
++
++`tag`: `0x50`
++
++`value`: No associated value.
++
+ ## GetAvailablePublicKeyDevices() -> CredentialMetadata[]
+ 
+ > TODO: Should we add displayName and username as optional fields for
+@@ -855,6 +904,184 @@ None.
+ 
+ TBD.
+ 
++# Platform Provider API
++
++A platform provider is a process that holds passkeys for the local machine,
++for example an authenticator backed by a TPM or a secure element.
++credentialsd offers each provider to the user as a device with the
++`internal` transport and forwards create and get requests to it.
++
++credentialsd builds `clientDataJSON` and checks the origin and RP ID as it
++does for every other transport. The provider receives the hash of
++`clientDataJSON`, the RP ID and the origin, and returns authenticator data
++and signatures. It never sees the request JSON.
++
++## Registration
++
++A provider registers with a drop-in file named `<id>.conf`. credentialsd
++reads these directories, highest priority first:
++
++1. `/etc/credentialsd/providers`
++2. `/usr/local/share/credentialsd/providers`
++3. `/usr/share/credentialsd/providers`
++
++The first file for an ID wins, so a file in `/etc` overrides a packaged
++one, and an empty file disables it. Debug builds also read the
++colon-separated directories in `CREDSD_PROVIDER_DIRS` first. The file stem
++must only contain ASCII letters, digits, `.`, `-` and `_`.
++
++```ini
++[Provider]
++# Shown in logs. Required.
++Name=Example Platform Authenticator
++# Well-known name on the session bus. Required.
++BusName=org.example.Passkeys1
++# Object that implements the interface. Required.
++ObjectPath=/org/example/Passkeys1
++# Defaults to xyz.iinuwa.credentialsd.Provider1.
++Interface=org.example.Passkeys.Provider1
++# Optional. When set, credentialsd only sends requests to the owner of
++# BusName if that process runs this executable.
++Executable=/usr/libexec/example-passkeyd
++# Optional. The only supported value is "internal".
++Transport=internal
++```
++
++The provider should also ship a D-Bus service file for `BusName`, so that it
++is started on demand.
++
++credentialsd calls providers from the connection that owns
++`xyz.iinuwa.credentialsd.Credentials`. A provider should answer only that
++connection: check that the sender of each call is the current owner of that
++name and that it runs as the same user.
++
++## Interface
++
++```
++GetInfo() -> a{sv}
++ListCredentials(s rp_id, aay allow) -> aa{sv}
++MakeCredential(u request_id, ay client_data_hash, a{sv} rp, a{sv} user,
++               ai algorithms, aay exclude, a{sv} options) -> a{sv}
++GetAssertion(u request_id, ay client_data_hash, s rp_id, ay credential_id,
++             a{sv} options) -> a{sv}
++Cancel(u request_id)
++signal UserActionNeeded(u request_id, s kind, a{sv} details)
++```
++
++Integer values in dictionaries may use any D-Bus integer type.
++
++### GetInfo() -> a{sv}
++
++Returns what the provider supports. This must be cheap and must not prompt
++the user. credentialsd calls it to build the device list, before each
++request and for `GetClientCapabilities()`. A provider that does not answer
++within two seconds is left out.
++
++- `name` `s`: display name.
++- `aaguid` `ay`: the provider's AAGUID.
++- `algorithms` `ax`: supported COSE algorithm identifiers.
++- `uv` `as`: user verification methods, for example `biometric` or
++  `password`. An empty list means the provider cannot verify the user.
++- `extensions` `as`: supported WebAuthn extension identifiers.
++- `locked` `b`: the provider cannot be used until the user unlocks it, for
++  example by logging in. The UI is told with `NotifyInternalLocked`.
++
++### ListCredentials(rp_id: s, allow: aay) -> aa{sv}
++
++Lists credentials for `rp_id`. With a non-empty `allow` list, only
++credentials in the list are returned. This must not prompt the user or use
++a credential's key. Each entry has:
++
++- `id` `ay`: credential ID. Required.
++- `user_handle` `ay`
++- `user_name` `s`
++- `display_name` `s`
++
++When a provider returns no credentials, it takes no further part in the
++request. When it returns more than one, the user picks one.
++
++### MakeCredential(...) -> a{sv}
++
++- `request_id` `u`: chosen by credentialsd, used by `UserActionNeeded` and
++  `Cancel()`.
++- `client_data_hash` `ay`: SHA-256 of `clientDataJSON`.
++- `rp` `a{sv}`: `id` `s`, `name` `s`.
++- `user` `a{sv}`: `id` `ay`, `name` `s`, `displayName` `s`. These use the
++  member names of WebAuthn's `PublicKeyCredentialUserEntity`.
++- `algorithms` `ai`: COSE algorithm identifiers in order of preference.
++- `exclude` `aay`: credential IDs that must not be registered again.
++- `options` `a{sv}`:
++  - `origin` `s`: the request origin.
++  - `top_origin` `s`: the top-level origin, for cross-origin requests.
++  - `rk` `b`: whether a discoverable credential is requested.
++  - `uv` `s`: `required`, `preferred` or `discouraged`.
++  - `password_fd` `h`: see [Passwords](#passwords).
++
++Returns:
++
++- `attestation_object` `ay`: the CBOR attestation object with `fmt`,
++  `authData` and `attStmt`. Required.
++- `transports` `as`: defaults to `["internal"]`.
++
++### GetAssertion(...) -> a{sv}
++
++- `request_id` `u`, `client_data_hash` `ay`: as for `MakeCredential()`.
++- `rp_id` `s`
++- `credential_id` `ay`: a credential returned by `ListCredentials()`.
++- `options` `a{sv}`: `origin`, `top_origin`, `uv` and `password_fd`, as for
++  `MakeCredential()`.
++
++Returns:
++
++- `authenticator_data` `ay`. Required.
++- `signature` `ay`. Required.
++- `user_handle` `ay`: defaults to the user handle from `ListCredentials()`.
++
++credentialsd rejects authenticator data whose RP ID hash does not match the
++request.
++
++### Cancel(request_id: u)
++
++Cancels the call with the given request ID. credentialsd calls it when the
++user cancels or when another device completes the ceremony.
++
++### UserActionNeeded(request_id: u, kind: s, details: a{sv})
++
++Tells the UI what the provider is waiting for. `kind` is one of:
++
++- `touch`: on-device user verification, for example a fingerprint. Sent to
++  the UI as `NeedsUserVerification`. `details` may carry `retries` with the
++  number of attempts left.
++- `presence`: a user presence gesture. Sent to the UI as
++  `NeedsUserPresence`.
++
++Other kinds are ignored.
++
++### Passwords
++
++A provider that needs the user's password answers `MakeCredential()` or
++`GetAssertion()` with a `PasswordNeeded` error. credentialsd asks the UI for
++the password with `NotifyNeedsPassword` and calls the method again with a
++new `request_id` and the `password_fd` option: a file descriptor to read the
++password from until end of file. A provider that rejects the password
++answers `WrongPassword`, and the UI asks again.
++
++### Errors
++
++The last component of the D-Bus error name selects the meaning, so
++`org.example.Passkeys.Error.WrongPassword` works as well as any other
++prefix.
++
++- `PasswordNeeded`: call again with `password_fd`.
++- `WrongPassword`: the password was rejected. Call again with a new one.
++- `Locked`: the provider is locked.
++- `InvalidStateError`: a credential in `exclude` exists. Ends the ceremony.
++- `NotAllowedError`, `AbortError`: the user declined or the call was
++  cancelled. The provider takes no further part in the request; other
++  devices stay available.
++- `NotSupportedError`, `SecurityError` and anything else: the provider
++  takes no further part in the request.
++
+ # Related Works
+ 
+ ## Secret Service API
+diff --git a/doc/meson.build b/doc/meson.build
+index f52b7e4..6efb867 100644
+--- a/doc/meson.build
++++ b/doc/meson.build
+@@ -1,6 +1,7 @@
+ if daemon_feat.allowed()
+   install_data(
+     'xyz.iinuwa.credentialsd.Credentials.xml',
++    'xyz.iinuwa.credentialsd.Provider1.xml',
+     install_dir: datadir / 'credentialsd',
+   )
+ endif
+diff --git a/doc/xyz.iinuwa.credentialsd.Credentials.xml b/doc/xyz.iinuwa.credentialsd.Credentials.xml
+index bcf5070..684273e 100644
+--- a/doc/xyz.iinuwa.credentialsd.Credentials.xml
++++ b/doc/xyz.iinuwa.credentialsd.Credentials.xml
+@@ -38,6 +38,14 @@
+       <arg name="response" type="u" direction="out"/>
+       <arg name="results" type="a{sv}" direction="out"/>
+     </method>
++    <!--
++      WebAuthn client capabilities, with the capability names in snake_case.
++
++      https://www.w3.org/TR/webauthn-3/#enumdef-clientcapability
++    -->
++    <method name="GetClientCapabilities">
++      <arg name="capabilities" type="a{sv}" direction="out"/>
++    </method>
+   </interface>
+   <interface name="org.freedesktop.portal.experimental.Credential">
+     <method name="CreateCredential">
+diff --git a/doc/xyz.iinuwa.credentialsd.Provider1.xml b/doc/xyz.iinuwa.credentialsd.Provider1.xml
+new file mode 100644
+index 0000000..54e6c92
+--- /dev/null
++++ b/doc/xyz.iinuwa.credentialsd.Provider1.xml
+@@ -0,0 +1,46 @@
++<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
++ "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
++<!--
++  Interface implemented by platform passkey providers. See the Platform
++  Provider API section in doc/api.md for the dictionary keys and errors.
++  Providers may implement it under another name, set with Interface= in
++  their drop-in file.
++-->
++<node>
++  <interface name="xyz.iinuwa.credentialsd.Provider1">
++    <method name="GetInfo">
++      <arg name="info" type="a{sv}" direction="out"/>
++    </method>
++    <method name="ListCredentials">
++      <arg name="rp_id" type="s" direction="in"/>
++      <arg name="allow" type="aay" direction="in"/>
++      <arg name="credentials" type="aa{sv}" direction="out"/>
++    </method>
++    <method name="MakeCredential">
++      <arg name="request_id" type="u" direction="in"/>
++      <arg name="client_data_hash" type="ay" direction="in"/>
++      <arg name="rp" type="a{sv}" direction="in"/>
++      <arg name="user" type="a{sv}" direction="in"/>
++      <arg name="algorithms" type="ai" direction="in"/>
++      <arg name="exclude" type="aay" direction="in"/>
++      <arg name="options" type="a{sv}" direction="in"/>
++      <arg name="result" type="a{sv}" direction="out"/>
++    </method>
++    <method name="GetAssertion">
++      <arg name="request_id" type="u" direction="in"/>
++      <arg name="client_data_hash" type="ay" direction="in"/>
++      <arg name="rp_id" type="s" direction="in"/>
++      <arg name="credential_id" type="ay" direction="in"/>
++      <arg name="options" type="a{sv}" direction="in"/>
++      <arg name="result" type="a{sv}" direction="out"/>
++    </method>
++    <method name="Cancel">
++      <arg name="request_id" type="u" direction="in"/>
++    </method>
++    <signal name="UserActionNeeded">
++      <arg name="request_id" type="u"/>
++      <arg name="kind" type="s"/>
++      <arg name="details" type="a{sv}"/>
++    </signal>
++  </interface>
++</node>
+-- 
+2.50.1 (Apple Git-155)
+

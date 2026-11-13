@@ -1,0 +1,2294 @@
+From 3f7e209fc51cfa3fa7ac6b8c866a216927c5beb8 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Fri, 13 Nov 2026 17:35:31 +1100
+Subject: [PATCH 3/5] daemon: Route requests to platform passkey providers
+
+Add the `internal` transport handler. When discovery starts, every
+available provider gets the request, next to USB and hybrid.
+
+For a create request, credentialsd builds the client data as usual and
+calls MakeCredential() with its hash, the RP and user entities, the
+algorithms, the exclude list and the request options. For a get request
+it first calls ListCredentials() for the RP ID and allow list. A provider
+with no match stays silent; with several matches the user picks one
+through the existing credential selection, which only sees hashed IDs.
+GetAssertion() then signs with the chosen credential.
+
+Each call carries a request ID chosen by credentialsd. The provider's
+UserActionNeeded signals for that ID become NeedsUserVerification
+("touch") or NeedsUserPresence ("presence") events. Cancelling the
+ceremony calls Cancel() with the ID.
+
+A provider can answer PasswordNeeded or WrongPassword. credentialsd then
+sends NeedsPassword to the UI, reads the password the UI returns in a
+memfd_secret, and repeats the call with the password in a pipe passed as
+the `password_fd` option. A provider that answers Locked is reported to
+the UI as InternalLocked. InvalidStateError ends the ceremony as an
+excluded credential; other errors only end the request on that provider.
+
+The attestation object and assertion are checked against the RP ID hash
+before they are returned, and are marked with the `platform` attachment.
+
+Tests cover the handler against a scripted mock provider (touch, password
+retries, locked, excluded, cancel, credential choice) and the D-Bus
+client against a mock provider served over a peer-to-peer connection.
+---
+ Cargo.lock                                    |   3 +
+ credentialsd/Cargo.toml                       |   5 +-
+ .../src/credential_service/internal.rs        | 921 ++++++++++++++++++
+ credentialsd/src/credential_service/mod.rs    |  61 ++
+ .../credential_service/platform/convert.rs    | 370 +++++++
+ .../src/credential_service/platform/dbus.rs   | 443 ++++++++-
+ .../src/credential_service/platform/mod.rs    | 177 ++++
+ credentialsd/src/dbus/flow_control.rs         |  46 +-
+ 8 files changed, 2011 insertions(+), 15 deletions(-)
+ create mode 100644 credentialsd/src/credential_service/internal.rs
+ create mode 100644 credentialsd/src/credential_service/platform/convert.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+index eb5bdd6..774c629 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -809,6 +809,8 @@ dependencies = [
+  "rand 0.10.2",
+  "ring",
+  "serde",
++ "serde_bytes",
++ "serde_cbor_2",
+  "serde_json",
+  "tokio",
+  "tokio-stream",
+@@ -816,6 +818,7 @@ dependencies = [
+  "tracing",
+  "tracing-subscriber",
+  "zbus",
++ "zeroize",
+ ]
+ 
+ [[package]]
+diff --git a/credentialsd/Cargo.toml b/credentialsd/Cargo.toml
+index 5712d3d..45d305c 100644
+--- a/credentialsd/Cargo.toml
++++ b/credentialsd/Cargo.toml
+@@ -22,11 +22,14 @@ libwebauthn = { version = "=0.11.0", features = ["nfc-backend-libnfc", "nfc-back
+ nfc1 = { version = "=0.7.1", default-features = false }
+ rand = "=0.10.2"
+ ring = "=0.17.14"
++serde_bytes = "=0.11.19"
++serde_cbor_2 = "=0.13.0"
+ serde_json = "=1.0.151"
+ tokio = { version = "=1.53.1", features = ["rt-multi-thread"] }
+ tokio-stream = "=0.1.19"
+ tokio-util = "=0.7.13"
++zeroize = "=1.9.0"
+ 
+ [dev-dependencies]
+ gio = "=0.22.8"
+-zbus = { version = "=5.18.0", default-features = false, features = ["blocking-api", "tokio"] }
++zbus = { version = "=5.18.0", default-features = false, features = ["blocking-api", "p2p", "tokio"] }
+diff --git a/credentialsd/src/credential_service/internal.rs b/credentialsd/src/credential_service/internal.rs
+new file mode 100644
+index 0000000..db21c14
+--- /dev/null
++++ b/credentialsd/src/credential_service/internal.rs
+@@ -0,0 +1,921 @@
++//! Handler for the `internal` transport: runs requests against platform
++//! passkey providers.
++
++use std::{future::Future, io::Write, os::fd::OwnedFd, pin::Pin, sync::Arc};
++
++use async_stream::stream;
++use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
++use futures_lite::{Stream, StreamExt};
++use tokio::sync::mpsc;
++use tokio_util::sync::CancellationToken;
++use zeroize::Zeroize;
++
++use credentialsd_common::model::{BackgroundEvent, Credential};
++
++use crate::model::{CredentialRequest, CredentialResponse};
++
++use super::{
++    CredentialServiceError,
++    platform::{
++        PlatformProvider, PlatformProviders, ProviderCredential, ProviderError, ProviderInfo,
++        UserActionKind, UserActionStream, convert,
++    },
++};
++
++/// The largest password credentialsd passes on to a provider.
++const MAX_PASSWORD_LEN: usize = 1024;
++
++type ProviderCall<T> = Pin<Box<dyn Future<Output = Result<T, ProviderError>> + Send>>;
++
++pub struct InternalEvent {
++    pub(super) state: InternalStateInternal,
++}
++
++#[derive(Clone, Debug)]
++pub(super) enum InternalStateInternal {
++    /// The provider is locked and cannot be used in this ceremony.
++    Locked,
++    NeedsUserVerification {
++        attempts_left: Option<u32>,
++    },
++    NeedsUserPresence,
++    NeedsPassword {
++        incorrect: bool,
++        password_tx: mpsc::Sender<Vec<u8>>,
++    },
++    SelectingCredential {
++        creds: Vec<Credential>,
++        cred_tx: mpsc::Sender<String>,
++    },
++    Completed(CredentialResponse),
++    Failed(CredentialServiceError),
++}
++
++#[derive(Clone, Debug)]
++pub enum InternalState {
++    Locked,
++    NeedsUserVerification {
++        attempts_left: Option<u32>,
++    },
++    NeedsUserPresence,
++    NeedsPassword {
++        incorrect: bool,
++        password_tx: mpsc::Sender<Vec<u8>>,
++    },
++    SelectingCredential {
++        creds: Vec<Credential>,
++        cred_tx: mpsc::Sender<String>,
++    },
++    Completed,
++    Failed(CredentialServiceError),
++}
++
++impl From<InternalStateInternal> for InternalState {
++    fn from(value: InternalStateInternal) -> Self {
++        match value {
++            InternalStateInternal::Locked => Self::Locked,
++            InternalStateInternal::NeedsUserVerification { attempts_left } => {
++                Self::NeedsUserVerification { attempts_left }
++            }
++            InternalStateInternal::NeedsUserPresence => Self::NeedsUserPresence,
++            InternalStateInternal::NeedsPassword {
++                incorrect,
++                password_tx,
++            } => Self::NeedsPassword {
++                incorrect,
++                password_tx,
++            },
++            InternalStateInternal::SelectingCredential { creds, cred_tx } => {
++                Self::SelectingCredential { creds, cred_tx }
++            }
++            InternalStateInternal::Completed(_) => Self::Completed,
++            InternalStateInternal::Failed(err) => Self::Failed(err),
++        }
++    }
++}
++
++impl From<&InternalState> for BackgroundEvent {
++    fn from(value: &InternalState) -> Self {
++        match value {
++            InternalState::Locked => BackgroundEvent::InternalLocked,
++            InternalState::NeedsUserVerification { attempts_left } => {
++                BackgroundEvent::NeedsUserVerification {
++                    attempts_left: *attempts_left,
++                }
++            }
++            InternalState::NeedsUserPresence => BackgroundEvent::NeedsUserPresence,
++            InternalState::NeedsPassword { incorrect, .. } => BackgroundEvent::NeedsPassword {
++                incorrect: *incorrect,
++            },
++            InternalState::SelectingCredential { creds, .. } => {
++                BackgroundEvent::SelectingCredential {
++                    creds: creds.clone(),
++                }
++            }
++            InternalState::Completed => BackgroundEvent::CeremonyCompleted,
++            InternalState::Failed(CredentialServiceError::CredentialExcluded) => {
++                BackgroundEvent::ErrorCredentialExcluded
++            }
++            InternalState::Failed(CredentialServiceError::NoCredentials) => {
++                BackgroundEvent::ErrorNoCredentials
++            }
++            InternalState::Failed(CredentialServiceError::NonTerminatingCancellation) => {
++                BackgroundEvent::ErrorCancelled
++            }
++            InternalState::Failed(CredentialServiceError::Internal(_)) => {
++                BackgroundEvent::ErrorInternal
++            }
++            InternalState::Failed(
++                CredentialServiceError::AuthenticatorError
++                | CredentialServiceError::PinAttemptsExhausted,
++            ) => BackgroundEvent::ErrorAuthenticator,
++        }
++    }
++}
++
++/// Starts the request on every available platform provider and returns the
++/// merged stream of their states.
++pub(super) fn start(
++    providers: Arc<PlatformProviders>,
++    request: CredentialRequest,
++    cancellation: CancellationToken,
++) -> impl Stream<Item = InternalEvent> + Send + Unpin + 'static {
++    let (tx, mut rx) = mpsc::channel(32);
++    tokio::spawn(async move {
++        for (provider, info) in providers.available().await {
++            let tx = tx.clone();
++            let request = request.clone();
++            let cancellation = cancellation.clone();
++            tokio::spawn(async move {
++                let id = provider.id().to_string();
++                let result = run(provider, info, request, &tx, &cancellation).await;
++                match result {
++                    Ok(()) => {}
++                    Err(CredentialServiceError::NonTerminatingCancellation) => {
++                        tracing::debug!(id, "Platform provider request cancelled");
++                    }
++                    Err(err) => {
++                        tracing::warn!(id, %err, "Platform provider request failed");
++                        if super::is_ceremony_terminating(&err) {
++                            _ = tx.send(InternalStateInternal::Failed(err)).await;
++                        }
++                    }
++                }
++            });
++        }
++    });
++    Box::pin(stream! {
++        while let Some(state) = rx.recv().await {
++            yield InternalEvent { state }
++        }
++    })
++}
++
++async fn send(
++    tx: &mpsc::Sender<InternalStateInternal>,
++    state: InternalStateInternal,
++) -> Result<(), CredentialServiceError> {
++    tx.send(state).await.map_err(|_| {
++        CredentialServiceError::Internal("platform provider state receiver closed".to_string())
++    })
++}
++
++/// Runs one request against one provider until it completes, fails, is
++/// declined by the user or is cancelled.
++async fn run(
++    provider: Arc<dyn PlatformProvider>,
++    info: ProviderInfo,
++    request: CredentialRequest,
++    tx: &mpsc::Sender<InternalStateInternal>,
++    cancellation: &CancellationToken,
++) -> Result<(), CredentialServiceError> {
++    if info.locked {
++        return send(tx, InternalStateInternal::Locked).await;
++    }
++
++    // Subscribe before the first call so no signal is missed. Prompts still
++    // work without the signals, so a failure here is not fatal.
++    let mut actions = provider
++        .user_actions()
++        .await
++        .inspect_err(|err| tracing::debug!(%err, "Cannot subscribe to provider user actions"))
++        .ok();
++
++    let response = match &request {
++        CredentialRequest::CreatePublicKeyCredentialRequest(make_request) => {
++            let args = convert::make_credential_args(make_request);
++            let op_provider = provider.clone();
++            let op_args = args.clone();
++            let Some(attestation) = with_password(
++                &provider,
++                &mut actions,
++                tx,
++                cancellation,
++                move |request_id, password| {
++                    let provider = op_provider.clone();
++                    let args = op_args.clone();
++                    Box::pin(
++                        async move { provider.make_credential(request_id, &args, password).await },
++                    )
++                },
++            )
++            .await?
++            else {
++                return Ok(());
++            };
++            convert::attestation_to_response(&attestation, &args.rp_id)
++        }
++        CredentialRequest::GetPublicKeyCredentialRequest(get_request) => {
++            let allow = convert::allow_list(get_request);
++            let creds = match cancellation
++                .run_until_cancelled(
++                    provider.list_credentials(&get_request.relying_party_id, &allow),
++                )
++                .await
++            {
++                None => return Err(CredentialServiceError::NonTerminatingCancellation),
++                Some(Err(ProviderError::Locked)) => {
++                    return send(tx, InternalStateInternal::Locked).await;
++                }
++                Some(Err(err)) => {
++                    tracing::warn!(%err, "Failed to list platform provider credentials");
++                    return Err(CredentialServiceError::AuthenticatorError);
++                }
++                Some(Ok(creds)) => creds,
++            };
++            let Some(credential) = choose_credential(creds, tx, cancellation).await? else {
++                tracing::debug!(
++                    id = provider.id(),
++                    "Platform provider has no credential for this request"
++                );
++                return Ok(());
++            };
++            let args = convert::get_assertion_args(get_request, &credential.id);
++            let op_provider = provider.clone();
++            let op_args = args.clone();
++            let Some(assertion) = with_password(
++                &provider,
++                &mut actions,
++                tx,
++                cancellation,
++                move |request_id, password| {
++                    let provider = op_provider.clone();
++                    let args = op_args.clone();
++                    Box::pin(
++                        async move { provider.get_assertion(request_id, &args, password).await },
++                    )
++                },
++            )
++            .await?
++            else {
++                return Ok(());
++            };
++            convert::assertion_to_response(&assertion, &credential, &args.rp_id)
++        }
++    };
++
++    match response {
++        Ok(response) => send(tx, InternalStateInternal::Completed(response)).await,
++        Err(err) => {
++            tracing::warn!(%err, "Platform provider returned an invalid response");
++            Err(CredentialServiceError::AuthenticatorError)
++        }
++    }
++}
++
++/// Picks the credential to use. Asks the user when the provider holds more
++/// than one. Returns `None` when the provider has no matching credential.
++async fn choose_credential(
++    mut creds: Vec<ProviderCredential>,
++    tx: &mpsc::Sender<InternalStateInternal>,
++    cancellation: &CancellationToken,
++) -> Result<Option<ProviderCredential>, CredentialServiceError> {
++    if creds.len() <= 1 {
++        return Ok(creds.pop());
++    }
++    // As for USB authenticators, the UI only sees a hash of each credential
++    // ID.
++    let hashed_id =
++        |id: &[u8]| URL_SAFE_NO_PAD.encode(ring::digest::digest(&ring::digest::SHA256, id));
++    let (cred_tx, mut cred_rx) = mpsc::channel(1);
++    let ui_creds = creds
++        .iter()
++        .map(|cred| Credential {
++            id: hashed_id(&cred.id),
++            name: if cred.user_name.is_empty() {
++                String::from("<unknown>")
++            } else {
++                cred.user_name.clone()
++            },
++            display_name: (!cred.display_name.is_empty()).then(|| cred.display_name.clone()),
++        })
++        .collect();
++    send(
++        tx,
++        InternalStateInternal::SelectingCredential {
++            creds: ui_creds,
++            cred_tx,
++        },
++    )
++    .await?;
++    let selected = match cancellation.run_until_cancelled(cred_rx.recv()).await {
++        None => return Err(CredentialServiceError::NonTerminatingCancellation),
++        Some(None) => {
++            return Err(CredentialServiceError::Internal(
++                "credential selection channel closed".to_string(),
++            ));
++        }
++        Some(Some(selected)) => selected,
++    };
++    creds
++        .into_iter()
++        .find(|cred| hashed_id(&cred.id) == selected)
++        .map(Some)
++        .ok_or(CredentialServiceError::NoCredentials)
++}
++
++/// Calls `op` until the provider stops asking for the user's password.
++///
++/// When the provider answers [`ProviderError::PasswordNeeded`] or
++/// [`ProviderError::WrongPassword`], the UI is asked for the password and
++/// `op` is called again with it. Each call gets a new request ID.
++///
++/// Returns `None` when the provider turned out to be locked; the UI has been
++/// told already.
++async fn with_password<T, F>(
++    provider: &Arc<dyn PlatformProvider>,
++    actions: &mut Option<UserActionStream>,
++    tx: &mpsc::Sender<InternalStateInternal>,
++    cancellation: &CancellationToken,
++    op: F,
++) -> Result<Option<T>, CredentialServiceError>
++where
++    F: Fn(u32, Option<OwnedFd>) -> ProviderCall<T>,
++{
++    let mut password: Option<OwnedFd> = None;
++    loop {
++        let request_id: u32 = rand::random_range(1..=u32::MAX);
++        let call = op(request_id, password.take());
++        let result = drive(provider, request_id, call, actions, tx, cancellation).await?;
++        let incorrect = match result {
++            Ok(value) => return Ok(Some(value)),
++            Err(ProviderError::Locked) => {
++                send(tx, InternalStateInternal::Locked).await?;
++                return Ok(None);
++            }
++            Err(ProviderError::PasswordNeeded) => false,
++            Err(ProviderError::WrongPassword) => true,
++            Err(err) => return Err(provider_error(err)),
++        };
++        let (password_tx, mut password_rx) = mpsc::channel(1);
++        send(
++            tx,
++            InternalStateInternal::NeedsPassword {
++                incorrect,
++                password_tx,
++            },
++        )
++        .await?;
++        let mut secret = match cancellation.run_until_cancelled(password_rx.recv()).await {
++            None => return Err(CredentialServiceError::NonTerminatingCancellation),
++            Some(None) => {
++                return Err(CredentialServiceError::Internal(
++                    "password channel closed".to_string(),
++                ));
++            }
++            Some(Some(secret)) => secret,
++        };
++        let fd = secret_pipe(&secret);
++        secret.zeroize();
++        password = Some(fd.map_err(|err| {
++            CredentialServiceError::Internal(format!("cannot pass password to provider: {err}"))
++        })?);
++    }
++}
++
++/// Maps a provider error that ends the request on this provider.
++fn provider_error(err: ProviderError) -> CredentialServiceError {
++    match err {
++        ProviderError::InvalidState => CredentialServiceError::CredentialExcluded,
++        ProviderError::Aborted => CredentialServiceError::NonTerminatingCancellation,
++        err => {
++            tracing::info!(%err, "Platform provider did not complete the request");
++            CredentialServiceError::AuthenticatorError
++        }
++    }
++}
++
++/// Runs a provider call, forwards its `UserActionNeeded` signals to the UI
++/// and cancels it on the provider when the request is cancelled.
++async fn drive<T>(
++    provider: &Arc<dyn PlatformProvider>,
++    request_id: u32,
++    call: impl Future<Output = Result<T, ProviderError>>,
++    actions: &mut Option<UserActionStream>,
++    tx: &mpsc::Sender<InternalStateInternal>,
++    cancellation: &CancellationToken,
++) -> Result<Result<T, ProviderError>, CredentialServiceError> {
++    let mut call = std::pin::pin!(call);
++    loop {
++        tokio::select! {
++            biased;
++            _ = cancellation.cancelled() => {
++                provider.cancel(request_id).await;
++                return Err(CredentialServiceError::NonTerminatingCancellation);
++            }
++            result = &mut call => return Ok(result),
++            Some(action) = next_action(actions) => {
++                if action.request_id != request_id {
++                    continue;
++                }
++                let state = match action.kind {
++                    UserActionKind::Touch => InternalStateInternal::NeedsUserVerification {
++                        attempts_left: action.retries,
++                    },
++                    UserActionKind::Presence => InternalStateInternal::NeedsUserPresence,
++                    UserActionKind::Other(kind) => {
++                        tracing::debug!(kind, "Ignoring unknown provider user action");
++                        continue;
++                    }
++                };
++                send(tx, state).await?;
++            }
++        }
++    }
++}
++
++async fn next_action(
++    actions: &mut Option<UserActionStream>,
++) -> Option<super::platform::UserAction> {
++    match actions {
++        Some(stream) => match stream.next().await {
++            Some(action) => Some(action),
++            None => {
++                *actions = None;
++                std::future::pending().await
++            }
++        },
++        None => std::future::pending().await,
++    }
++}
++
++/// Writes a secret into a pipe and returns the read end. The provider reads
++/// the secret until end of file.
++fn secret_pipe(secret: &[u8]) -> std::io::Result<OwnedFd> {
++    if secret.is_empty() || secret.len() > MAX_PASSWORD_LEN {
++        return Err(std::io::Error::new(
++            std::io::ErrorKind::InvalidInput,
++            "password is empty or too long",
++        ));
++    }
++    let (reader, mut writer) = std::io::pipe()?;
++    // The secret is far smaller than the pipe buffer, so this never blocks.
++    writer.write_all(secret)?;
++    drop(writer);
++    Ok(reader.into())
++}
++
++#[cfg(test)]
++pub(crate) mod tests {
++    use std::{collections::VecDeque, io::Read, sync::Mutex, time::Duration};
++
++    use async_trait::async_trait;
++    use tokio::sync::broadcast;
++
++    use super::*;
++    use crate::credential_service::platform::{
++        ProviderAssertion, ProviderAttestation, ProviderGetAssertion, ProviderMakeCredential,
++        UserAction,
++        convert::tests::{
++            CREDENTIAL_ID, GET_JSON, MAKE_JSON, attestation_object, authenticator_data,
++            get_request, make_request,
++        },
++    };
++
++    /// What the mock provider does for one call.
++    #[derive(Clone, Debug)]
++    pub(crate) enum Step {
++        /// Emit a user action for the call, then answer with the result.
++        Reply(Vec<UserActionKind>, Result<(), ProviderError>),
++        /// Never answer.
++        Hang,
++    }
++
++    /// A provider that answers calls from a script and records what it
++    /// received.
++    #[derive(Debug)]
++    pub(crate) struct MockProvider {
++        pub info: ProviderInfo,
++        pub creds: Vec<ProviderCredential>,
++        pub steps: Mutex<VecDeque<Step>>,
++        pub passwords: Mutex<Vec<Option<String>>>,
++        pub assertion_ids: Mutex<Vec<Vec<u8>>>,
++        pub cancelled: Mutex<Vec<u32>>,
++        pub actions: broadcast::Sender<UserAction>,
++    }
++
++    impl MockProvider {
++        pub(crate) fn new(steps: Vec<Step>) -> Self {
++            Self {
++                info: ProviderInfo::default(),
++                creds: Vec::new(),
++                steps: Mutex::new(steps.into()),
++                passwords: Mutex::new(Vec::new()),
++                assertion_ids: Mutex::new(Vec::new()),
++                cancelled: Mutex::new(Vec::new()),
++                actions: broadcast::channel(16).0,
++            }
++        }
++
++        async fn step(
++            &self,
++            request_id: u32,
++            password: Option<OwnedFd>,
++        ) -> Result<(), ProviderError> {
++            let password = password.map(|fd| {
++                let mut s = String::new();
++                std::fs::File::from(fd).read_to_string(&mut s).unwrap();
++                s
++            });
++            self.passwords.lock().unwrap().push(password);
++            let step = self
++                .steps
++                .lock()
++                .unwrap()
++                .pop_front()
++                .expect("unexpected call");
++            match step {
++                Step::Reply(actions, result) => {
++                    for kind in actions {
++                        _ = self.actions.send(UserAction {
++                            request_id,
++                            kind,
++                            retries: Some(3),
++                        });
++                    }
++                    // Let the handler forward the actions before the reply.
++                    tokio::time::sleep(Duration::from_millis(20)).await;
++                    result
++                }
++                Step::Hang => std::future::pending().await,
++            }
++        }
++    }
++
++    #[async_trait]
++    impl PlatformProvider for MockProvider {
++        fn id(&self) -> &str {
++            "mock"
++        }
++
++        async fn get_info(&self) -> Result<ProviderInfo, ProviderError> {
++            Ok(self.info.clone())
++        }
++
++        async fn list_credentials(
++            &self,
++            _rp_id: &str,
++            _allow: &[Vec<u8>],
++        ) -> Result<Vec<ProviderCredential>, ProviderError> {
++            Ok(self.creds.clone())
++        }
++
++        async fn make_credential(
++            &self,
++            request_id: u32,
++            args: &ProviderMakeCredential,
++            password: Option<OwnedFd>,
++        ) -> Result<ProviderAttestation, ProviderError> {
++            self.step(request_id, password).await?;
++            Ok(ProviderAttestation {
++                attestation_object: attestation_object(&args.rp_id),
++                transports: vec!["internal".to_string()],
++            })
++        }
++
++        async fn get_assertion(
++            &self,
++            request_id: u32,
++            args: &ProviderGetAssertion,
++            password: Option<OwnedFd>,
++        ) -> Result<ProviderAssertion, ProviderError> {
++            self.assertion_ids
++                .lock()
++                .unwrap()
++                .push(args.credential_id.clone());
++            self.step(request_id, password).await?;
++            Ok(ProviderAssertion {
++                authenticator_data: authenticator_data(&args.rp_id, false),
++                signature: vec![0x30, 0x00],
++                user_handle: vec![],
++            })
++        }
++
++        async fn cancel(&self, request_id: u32) {
++            self.cancelled.lock().unwrap().push(request_id);
++        }
++
++        async fn user_actions(&self) -> Result<UserActionStream, ProviderError> {
++            let rx = self.actions.subscribe();
++            Ok(Box::pin(futures_lite::stream::unfold(
++                rx,
++                |mut rx| async move { rx.recv().await.ok().map(|action| (action, rx)) },
++            )))
++        }
++    }
++
++    pub(crate) fn pipe_with(secret: &[u8]) -> OwnedFd {
++        secret_pipe(secret).unwrap()
++    }
++
++    pub(crate) fn credential(id: &[u8], name: &str) -> ProviderCredential {
++        ProviderCredential {
++            id: id.to_vec(),
++            user_handle: b"user".to_vec(),
++            user_name: name.to_string(),
++            display_name: String::new(),
++        }
++    }
++
++    async fn create_request() -> CredentialRequest {
++        CredentialRequest::CreatePublicKeyCredentialRequest(make_request(MAKE_JSON).await)
++    }
++
++    async fn assertion_request() -> CredentialRequest {
++        CredentialRequest::GetPublicKeyCredentialRequest(get_request(GET_JSON).await)
++    }
++
++    fn start_with(
++        provider: Arc<MockProvider>,
++        request: CredentialRequest,
++        cancellation: CancellationToken,
++    ) -> impl Stream<Item = InternalEvent> + Send + Unpin + 'static {
++        let providers = Arc::new(PlatformProviders::new(vec![provider]));
++        start(providers, request, cancellation)
++    }
++
++    async fn next_state(
++        stream: &mut (impl Stream<Item = InternalEvent> + Unpin),
++    ) -> Option<InternalStateInternal> {
++        tokio::time::timeout(Duration::from_secs(5), stream.next())
++            .await
++            .expect("timed out waiting for a state")
++            .map(|event| event.state)
++    }
++
++    #[tokio::test]
++    async fn create_forwards_touch_and_completes() {
++        let provider = Arc::new(MockProvider::new(vec![Step::Reply(
++            vec![UserActionKind::Touch],
++            Ok(()),
++        )]));
++        let mut stream = start_with(
++            provider.clone(),
++            create_request().await,
++            CancellationToken::new(),
++        );
++        assert!(matches!(
++            next_state(&mut stream).await,
++            Some(InternalStateInternal::NeedsUserVerification {
++                attempts_left: Some(3)
++            })
++        ));
++        let Some(InternalStateInternal::Completed(response)) = next_state(&mut stream).await else {
++            panic!("expected completion");
++        };
++        let CredentialResponse::CreatePublicKeyCredentialResponse(response) = response else {
++            panic!("expected a create response");
++        };
++        assert_eq!(response.attachment_modality, "platform");
++        assert!(next_state(&mut stream).await.is_none());
++        assert_eq!(*provider.passwords.lock().unwrap(), vec![None]);
++    }
++
++    #[tokio::test]
++    async fn password_round_trip_retries_until_accepted() {
++        let provider = Arc::new(MockProvider::new(vec![
++            Step::Reply(vec![], Err(ProviderError::PasswordNeeded)),
++            Step::Reply(vec![], Err(ProviderError::WrongPassword)),
++            Step::Reply(vec![UserActionKind::Touch], Ok(())),
++        ]));
++        let mut stream = start_with(
++            provider.clone(),
++            create_request().await,
++            CancellationToken::new(),
++        );
++
++        let Some(InternalStateInternal::NeedsPassword {
++            incorrect: false,
++            password_tx,
++        }) = next_state(&mut stream).await
++        else {
++            panic!("expected a password prompt");
++        };
++        password_tx.send(b"wrong".to_vec()).await.unwrap();
++
++        let Some(InternalStateInternal::NeedsPassword {
++            incorrect: true,
++            password_tx,
++        }) = next_state(&mut stream).await
++        else {
++            panic!("expected a second password prompt");
++        };
++        password_tx.send(b"correct horse".to_vec()).await.unwrap();
++
++        assert!(matches!(
++            next_state(&mut stream).await,
++            Some(InternalStateInternal::NeedsUserVerification { .. })
++        ));
++        assert!(matches!(
++            next_state(&mut stream).await,
++            Some(InternalStateInternal::Completed(_))
++        ));
++        assert_eq!(
++            *provider.passwords.lock().unwrap(),
++            vec![
++                None,
++                Some("wrong".to_string()),
++                Some("correct horse".to_string())
++            ]
++        );
++    }
++
++    #[tokio::test]
++    async fn locked_provider_reports_locked_and_makes_no_call() {
++        let mut provider = MockProvider::new(vec![]);
++        provider.info.locked = true;
++        let provider = Arc::new(provider);
++        let mut stream = start_with(
++            provider.clone(),
++            create_request().await,
++            CancellationToken::new(),
++        );
++        assert!(matches!(
++            next_state(&mut stream).await,
++            Some(InternalStateInternal::Locked)
++        ));
++        assert!(next_state(&mut stream).await.is_none());
++        assert!(provider.passwords.lock().unwrap().is_empty());
++    }
++
++    #[tokio::test]
++    async fn locked_error_during_call_reports_locked() {
++        let provider = Arc::new(MockProvider::new(vec![Step::Reply(
++            vec![],
++            Err(ProviderError::Locked),
++        )]));
++        let mut stream = start_with(provider, create_request().await, CancellationToken::new());
++        assert!(matches!(
++            next_state(&mut stream).await,
++            Some(InternalStateInternal::Locked)
++        ));
++        assert!(next_state(&mut stream).await.is_none());
++    }
++
++    #[tokio::test]
++    async fn declined_request_ends_quietly() {
++        let provider = Arc::new(MockProvider::new(vec![Step::Reply(
++            vec![],
++            Err(ProviderError::NotAllowed("dismissed".to_string())),
++        )]));
++        let mut stream = start_with(provider, create_request().await, CancellationToken::new());
++        // Not ceremony-terminating: other transports stay available.
++        assert!(next_state(&mut stream).await.is_none());
++    }
++
++    #[tokio::test]
++    async fn excluded_credential_ends_the_ceremony() {
++        let provider = Arc::new(MockProvider::new(vec![Step::Reply(
++            vec![],
++            Err(ProviderError::InvalidState),
++        )]));
++        let mut stream = start_with(provider, create_request().await, CancellationToken::new());
++        assert!(matches!(
++            next_state(&mut stream).await,
++            Some(InternalStateInternal::Failed(
++                CredentialServiceError::CredentialExcluded
++            ))
++        ));
++    }
++
++    #[tokio::test]
++    async fn cancellation_cancels_the_provider_call() {
++        let provider = Arc::new(MockProvider::new(vec![Step::Hang]));
++        let cancellation = CancellationToken::new();
++        let mut stream = start_with(
++            provider.clone(),
++            create_request().await,
++            cancellation.clone(),
++        );
++        // Wait until the call is in flight.
++        for _ in 0..100 {
++            if !provider.passwords.lock().unwrap().is_empty() {
++                break;
++            }
++            tokio::time::sleep(Duration::from_millis(10)).await;
++        }
++        cancellation.cancel();
++        assert!(next_state(&mut stream).await.is_none());
++        assert_eq!(provider.cancelled.lock().unwrap().len(), 1);
++    }
++
++    #[tokio::test]
++    async fn get_without_matching_credentials_stays_silent() {
++        let provider = Arc::new(MockProvider::new(vec![]));
++        let mut stream = start_with(
++            provider.clone(),
++            assertion_request().await,
++            CancellationToken::new(),
++        );
++        assert!(next_state(&mut stream).await.is_none());
++        assert!(provider.assertion_ids.lock().unwrap().is_empty());
++    }
++
++    #[tokio::test]
++    async fn get_with_one_credential_signs_with_it() {
++        let mut provider = MockProvider::new(vec![Step::Reply(vec![], Ok(()))]);
++        provider.creds = vec![credential(CREDENTIAL_ID, "alice")];
++        let provider = Arc::new(provider);
++        let mut stream = start_with(
++            provider.clone(),
++            assertion_request().await,
++            CancellationToken::new(),
++        );
++        let Some(InternalStateInternal::Completed(
++            CredentialResponse::GetPublicKeyCredentialResponse(response),
++        )) = next_state(&mut stream).await
++        else {
++            panic!("expected an assertion");
++        };
++        assert_eq!(
++            response.ctap.user.as_ref().unwrap().name.as_deref(),
++            Some("alice")
++        );
++        assert_eq!(
++            *provider.assertion_ids.lock().unwrap(),
++            vec![CREDENTIAL_ID.to_vec()]
++        );
++    }
++
++    #[tokio::test]
++    async fn get_with_several_credentials_lets_the_user_choose() {
++        let mut provider = MockProvider::new(vec![Step::Reply(vec![], Ok(()))]);
++        provider.creds = vec![credential(&[1; 16], "alice"), credential(&[2; 16], "bob")];
++        let provider = Arc::new(provider);
++        let mut stream = start_with(
++            provider.clone(),
++            assertion_request().await,
++            CancellationToken::new(),
++        );
++        let Some(InternalStateInternal::SelectingCredential { creds, cred_tx }) =
++            next_state(&mut stream).await
++        else {
++            panic!("expected a credential choice");
++        };
++        let names: Vec<&str> = creds.iter().map(|c| c.name.as_str()).collect();
++        assert_eq!(names, vec!["alice", "bob"]);
++        // The UI only sees hashed credential IDs.
++        assert_ne!(creds[1].id, URL_SAFE_NO_PAD.encode([2u8; 16]));
++        cred_tx.send(creds[1].id.clone()).await.unwrap();
++        assert!(matches!(
++            next_state(&mut stream).await,
++            Some(InternalStateInternal::Completed(_))
++        ));
++        assert_eq!(*provider.assertion_ids.lock().unwrap(), vec![vec![2u8; 16]]);
++    }
++
++    #[test]
++    fn states_map_to_background_events() {
++        let (password_tx, _) = mpsc::channel(1);
++        assert_eq!(
++            BackgroundEvent::from(&InternalState::NeedsPassword {
++                incorrect: true,
++                password_tx,
++            }),
++            BackgroundEvent::NeedsPassword { incorrect: true }
++        );
++        assert_eq!(
++            BackgroundEvent::from(&InternalState::Locked),
++            BackgroundEvent::InternalLocked
++        );
++        assert_eq!(
++            BackgroundEvent::from(&InternalState::NeedsUserVerification {
++                attempts_left: None
++            }),
++            BackgroundEvent::NeedsUserVerification {
++                attempts_left: None
++            }
++        );
++    }
++
++    #[test]
++    fn secret_pipe_rejects_empty_and_oversized_secrets() {
++        assert!(secret_pipe(b"").is_err());
++        assert!(secret_pipe(&[b'a'; MAX_PASSWORD_LEN + 1]).is_err());
++        let mut s = String::new();
++        std::fs::File::from(secret_pipe(b"hunter2").unwrap())
++            .read_to_string(&mut s)
++            .unwrap();
++        assert_eq!(s, "hunter2");
++    }
++}
+diff --git a/credentialsd/src/credential_service/mod.rs b/credentialsd/src/credential_service/mod.rs
+index 0aa42bc..b0dfb24 100644
+--- a/credentialsd/src/credential_service/mod.rs
++++ b/credentialsd/src/credential_service/mod.rs
+@@ -1,4 +1,5 @@
+ pub mod hybrid;
++pub mod internal;
+ pub mod nfc;
+ pub mod platform;
+ pub mod usb;
+@@ -38,6 +39,7 @@ use self::{
+     usb::{UsbHandler, UsbStateInternal},
+ };
+ 
++pub use internal::InternalState;
+ pub use usb::UsbState;
+ 
+ /// Identifier for a request to be used for cancellation.
+@@ -256,6 +258,49 @@ impl<H: HybridHandler + Send, N: NfcHandler + Send, U: UsbHandler + Send>
+         }
+     }
+ 
++    async fn get_internal_credential(
++        &self,
++    ) -> Pin<Box<dyn Stream<Item = InternalState> + Send + 'static>> {
++        let (request, cancellation) = {
++            let guard = self.ctx.lock().unwrap();
++            let Some(RequestContext {
++                ref request,
++                ref cancellation,
++                ..
++            }) = *guard
++            else {
++                tracing::error!(
++                    "Attempted to start platform provider flow, but no request context was found."
++                );
++                return Box::pin(futures_lite::stream::empty());
++            };
++            (request.clone(), cancellation.clone())
++        };
++        let mut inner = internal::start(
++            self.platform_providers.clone(),
++            request,
++            cancellation.clone(),
++        );
++        let ctx = self.ctx.clone();
++        Box::pin(async_stream::stream! {
++            while let Some(internal::InternalEvent { state }) = inner.next().await {
++                if cancellation.is_cancelled() {
++                    break;
++                }
++                match &state {
++                    internal::InternalStateInternal::Completed(response) => {
++                        complete_request(&ctx, Ok(response.clone()));
++                    }
++                    internal::InternalStateInternal::Failed(err) if is_ceremony_terminating(err) => {
++                        complete_request(&ctx, Err(err.clone()));
++                    }
++                    _ => {}
++                }
++                yield InternalState::from(state);
++            }
++        })
++    }
++
+     async fn _get_nfc_credential(&self) -> Pin<Box<dyn Stream<Item = NfcState> + Send + 'static>> {
+         let guard = self.ctx.lock().unwrap();
+         if let Some(RequestContext {
+@@ -381,6 +426,14 @@ impl<H: HybridHandler + Send, N: NfcHandler + Send, U: UsbHandler + Send> Manage
+                 .boxed();
+             selected_transports.push(hybrid);
+         }
++        if !self.platform_providers.is_empty() && self.request_allows_platform() {
++            let internal = self
++                .get_internal_credential()
++                .await
++                .map(DeviceStateUpdate::from)
++                .boxed();
++            selected_transports.push(internal);
++        }
+         futures::stream::select_all(selected_transports).boxed()
+     }
+ }
+@@ -527,6 +580,7 @@ where
+ 
+ pub enum DeviceStateUpdate {
+     Hybrid(HybridState),
++    Internal(InternalState),
+     Nfc(NfcState),
+     Usb(UsbState),
+ }
+@@ -535,12 +589,19 @@ impl From<DeviceStateUpdate> for BackgroundEvent {
+     fn from(value: DeviceStateUpdate) -> Self {
+         match value {
+             DeviceStateUpdate::Hybrid(state) => (&state).into(),
++            DeviceStateUpdate::Internal(state) => (&state).into(),
+             DeviceStateUpdate::Nfc(state) => (&state).into(),
+             DeviceStateUpdate::Usb(state) => (&state).into(),
+         }
+     }
+ }
+ 
++impl From<InternalState> for DeviceStateUpdate {
++    fn from(value: InternalState) -> Self {
++        Self::Internal(value)
++    }
++}
++
+ impl From<HybridState> for DeviceStateUpdate {
+     fn from(value: HybridState) -> Self {
+         Self::Hybrid(value)
+diff --git a/credentialsd/src/credential_service/platform/convert.rs b/credentialsd/src/credential_service/platform/convert.rs
+new file mode 100644
+index 0000000..914f05c
+--- /dev/null
++++ b/credentialsd/src/credential_service/platform/convert.rs
+@@ -0,0 +1,370 @@
++//! Conversions between WebAuthn requests and responses and the provider
++//! interface.
++
++use libwebauthn::{
++    fido::AuthenticatorData,
++    ops::webauthn::{
++        Assertion, GetAssertionRequest, GetAssertionResponseExtensions, MakeCredentialRequest,
++        MakeCredentialResponse, MakeCredentialsResponseExtensions, ResidentKeyRequirement,
++        UserVerificationRequirement,
++    },
++    proto::ctap2::{
++        Ctap2AttestationStatement, Ctap2PublicKeyCredentialDescriptor,
++        Ctap2PublicKeyCredentialType, Ctap2PublicKeyCredentialUserEntity,
++    },
++};
++use serde::{Deserialize, de::value::BytesDeserializer};
++use serde_bytes::ByteBuf;
++
++use crate::model::CredentialResponse;
++
++use super::{
++    ProviderAssertion, ProviderAttestation, ProviderCredential, ProviderError,
++    ProviderGetAssertion, ProviderMakeCredential,
++};
++
++/// WebAuthn authenticator attachment reported for platform providers.
++pub const PLATFORM_ATTACHMENT: &str = "platform";
++
++fn user_verification(uv: &UserVerificationRequirement) -> &'static str {
++    match uv {
++        UserVerificationRequirement::Required => "required",
++        UserVerificationRequirement::Preferred => "preferred",
++        UserVerificationRequirement::Discouraged => "discouraged",
++    }
++}
++
++pub fn make_credential_args(request: &MakeCredentialRequest) -> ProviderMakeCredential {
++    ProviderMakeCredential {
++        client_data_hash: request.client_data_hash(),
++        rp_id: request.relying_party.id.clone(),
++        rp_name: request.relying_party.name.clone(),
++        user_id: request.user.id.to_vec(),
++        user_name: request.user.name.clone(),
++        user_display_name: request.user.display_name.clone(),
++        algorithms: request
++            .algorithms
++            .iter()
++            .map(|alg| i32::from(alg.algorithm))
++            .collect(),
++        exclude: request
++            .exclude
++            .iter()
++            .flatten()
++            .map(|cred| cred.id.to_vec())
++            .collect(),
++        resident_key: matches!(
++            request.resident_key,
++            Some(ResidentKeyRequirement::Required | ResidentKeyRequirement::Preferred)
++        ),
++        user_verification: user_verification(&request.user_verification),
++        origin: request.origin.clone(),
++        top_origin: request.top_origin.clone(),
++    }
++}
++
++pub fn get_assertion_args(
++    request: &GetAssertionRequest,
++    credential_id: &[u8],
++) -> ProviderGetAssertion {
++    ProviderGetAssertion {
++        client_data_hash: request.client_data_hash(),
++        rp_id: request.relying_party_id.clone(),
++        credential_id: credential_id.to_vec(),
++        user_verification: user_verification(&request.user_verification),
++        origin: request.origin.clone(),
++        top_origin: request.top_origin.clone(),
++    }
++}
++
++/// The credential IDs of a request's allow list.
++pub fn allow_list(request: &GetAssertionRequest) -> Vec<Vec<u8>> {
++    request.allow.iter().map(|cred| cred.id.to_vec()).collect()
++}
++
++fn check_rp_id_hash(rp_id_hash: &[u8; 32], rp_id: &str) -> Result<(), ProviderError> {
++    let expected = ring::digest::digest(&ring::digest::SHA256, rp_id.as_bytes());
++    if expected.as_ref() != rp_id_hash {
++        return Err(ProviderError::InvalidResponse(
++            "authenticator data is for another RP ID".to_string(),
++        ));
++    }
++    Ok(())
++}
++
++#[derive(Deserialize)]
++struct AttestationObject {
++    fmt: String,
++    #[serde(rename = "authData")]
++    auth_data: AuthenticatorData<MakeCredentialsResponseExtensions>,
++    #[serde(rename = "attStmt")]
++    att_stmt: Ctap2AttestationStatement,
++}
++
++/// Builds the credential service response from a provider's attestation
++/// object.
++pub fn attestation_to_response(
++    attestation: &ProviderAttestation,
++    rp_id: &str,
++) -> Result<CredentialResponse, ProviderError> {
++    let object: AttestationObject = serde_cbor_2::from_slice(&attestation.attestation_object)
++        .map_err(|err| ProviderError::InvalidResponse(format!("attestation object: {err}")))?;
++    check_rp_id_hash(&object.auth_data.rp_id_hash, rp_id)?;
++    if object.auth_data.attested_credential.is_none() {
++        return Err(ProviderError::InvalidResponse(
++            "attestation object has no attested credential".to_string(),
++        ));
++    }
++    let transports: Vec<String> = if attestation.transports.is_empty() {
++        vec!["internal".to_string()]
++    } else {
++        attestation.transports.clone()
++    };
++    let response = MakeCredentialResponse {
++        format: object.fmt,
++        authenticator_data: object.auth_data,
++        attestation_statement: object.att_stmt,
++        enterprise_attestation: None,
++        large_blob_key: None,
++        unsigned_extensions_output: Default::default(),
++        transport: None,
++        authenticator_transports: Some(transports.clone()),
++    };
++    let transports: Vec<&str> = transports.iter().map(String::as_str).collect();
++    Ok(CredentialResponse::from_make_credential(
++        &response,
++        &transports,
++        PLATFORM_ATTACHMENT,
++    ))
++}
++
++/// Builds the credential service response from a provider's assertion.
++pub fn assertion_to_response(
++    assertion: &ProviderAssertion,
++    credential: &ProviderCredential,
++    rp_id: &str,
++) -> Result<CredentialResponse, ProviderError> {
++    let authenticator_data =
++        AuthenticatorData::<GetAssertionResponseExtensions>::deserialize(BytesDeserializer::<
++            serde::de::value::Error,
++        >::new(
++            &assertion.authenticator_data,
++        ))
++        .map_err(|err| ProviderError::InvalidResponse(format!("authenticator data: {err}")))?;
++    check_rp_id_hash(&authenticator_data.rp_id_hash, rp_id)?;
++    if assertion.signature.is_empty() {
++        return Err(ProviderError::InvalidResponse(
++            "assertion has no signature".to_string(),
++        ));
++    }
++
++    let user_handle = if assertion.user_handle.is_empty() {
++        &credential.user_handle
++    } else {
++        &assertion.user_handle
++    };
++    let non_empty = |s: &str| (!s.is_empty()).then(|| s.to_string());
++    let user = (!user_handle.is_empty()).then(|| Ctap2PublicKeyCredentialUserEntity {
++        id: ByteBuf::from(user_handle.clone()),
++        name: non_empty(&credential.user_name),
++        display_name: non_empty(&credential.display_name),
++    });
++    let assertion = Assertion {
++        credential_id: Some(Ctap2PublicKeyCredentialDescriptor {
++            id: ByteBuf::from(credential.id.clone()),
++            r#type: Ctap2PublicKeyCredentialType::PublicKey,
++            transports: None,
++        }),
++        authenticator_data,
++        signature: assertion.signature.clone(),
++        user,
++        credentials_count: None,
++        user_selected: None,
++        unsigned_extensions_output: None,
++        transport: None,
++    };
++    Ok(CredentialResponse::from_get_assertion(
++        &assertion,
++        PLATFORM_ATTACHMENT,
++    ))
++}
++
++#[cfg(test)]
++pub(crate) mod tests {
++    use std::collections::BTreeMap;
++
++    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
++    use libwebauthn::ops::webauthn::{
++        OriginValidation, RequestSettings, WebAuthnIDLResponse, idl::origin::RequestOrigin,
++    };
++    use serde_cbor_2::Value;
++
++    use super::*;
++
++    pub(crate) const CREDENTIAL_ID: &[u8] = &[0xc0; 16];
++
++    /// Authenticator data for `rp_id` with flags UP and UV, plus an attested
++    /// P-256 credential when `attested` is set.
++    pub(crate) fn authenticator_data(rp_id: &str, attested: bool) -> Vec<u8> {
++        let mut data = ring::digest::digest(&ring::digest::SHA256, rp_id.as_bytes())
++            .as_ref()
++            .to_vec();
++        let flags: u8 = if attested { 0x45 } else { 0x05 };
++        data.push(flags);
++        data.extend_from_slice(&0u32.to_be_bytes());
++        if attested {
++            data.extend_from_slice(&[0u8; 16]);
++            data.extend_from_slice(&(CREDENTIAL_ID.len() as u16).to_be_bytes());
++            data.extend_from_slice(CREDENTIAL_ID);
++            let mut key = BTreeMap::new();
++            key.insert(Value::Integer(1), Value::Integer(2));
++            key.insert(Value::Integer(3), Value::Integer(-7));
++            key.insert(Value::Integer(-1), Value::Integer(1));
++            key.insert(Value::Integer(-2), Value::Bytes(vec![0x11; 32]));
++            key.insert(Value::Integer(-3), Value::Bytes(vec![0x22; 32]));
++            data.extend(serde_cbor_2::to_vec(&Value::Map(key)).unwrap());
++        }
++        data
++    }
++
++    pub(crate) fn attestation_object(rp_id: &str) -> Vec<u8> {
++        let mut object = BTreeMap::new();
++        object.insert(
++            Value::Text("fmt".to_string()),
++            Value::Text("none".to_string()),
++        );
++        object.insert(
++            Value::Text("attStmt".to_string()),
++            Value::Map(BTreeMap::new()),
++        );
++        object.insert(
++            Value::Text("authData".to_string()),
++            Value::Bytes(authenticator_data(rp_id, true)),
++        );
++        serde_cbor_2::to_vec(&Value::Map(object)).unwrap()
++    }
++
++    pub(crate) async fn make_request(json: &str) -> MakeCredentialRequest {
++        let origin: RequestOrigin = "https://example.com".try_into().unwrap();
++        let settings = RequestSettings {
++            origin: OriginValidation::Trust,
++        };
++        MakeCredentialRequest::prepare(&origin, json, &settings)
++            .await
++            .unwrap()
++    }
++
++    pub(crate) async fn get_request(json: &str) -> GetAssertionRequest {
++        let origin: RequestOrigin = "https://example.com".try_into().unwrap();
++        let settings = RequestSettings {
++            origin: OriginValidation::Trust,
++        };
++        GetAssertionRequest::prepare(&origin, json, &settings)
++            .await
++            .unwrap()
++    }
++
++    pub(crate) const MAKE_JSON: &str = r#"{
++        "rp": {"id": "example.com", "name": "Example"},
++        "user": {"id": "dXNlcg", "name": "alice", "displayName": "Alice"},
++        "challenge": "Y2hhbGxlbmdlY2hhbGxlbmdl",
++        "pubKeyCredParams": [{"type": "public-key", "alg": -7}, {"type": "public-key", "alg": -8}],
++        "excludeCredentials": [{"type": "public-key", "id": "AAEC"}],
++        "authenticatorSelection": {"residentKey": "required", "userVerification": "required"}
++    }"#;
++
++    pub(crate) const GET_JSON: &str = r#"{
++        "rpId": "example.com",
++        "challenge": "Y2hhbGxlbmdlY2hhbGxlbmdl",
++        "userVerification": "preferred"
++    }"#;
++
++    #[tokio::test]
++    async fn make_credential_args_follow_the_request() {
++        let request = make_request(MAKE_JSON).await;
++        let args = make_credential_args(&request);
++        assert_eq!(args.client_data_hash, request.client_data_hash());
++        assert_eq!(args.rp_id, "example.com");
++        assert_eq!(args.rp_name.as_deref(), Some("Example"));
++        assert_eq!(args.user_id, b"user");
++        assert_eq!(args.user_name.as_deref(), Some("alice"));
++        assert_eq!(args.user_display_name.as_deref(), Some("Alice"));
++        assert_eq!(args.algorithms, vec![-7, -8]);
++        assert_eq!(args.exclude, vec![vec![0, 1, 2]]);
++        assert!(args.resident_key);
++        assert_eq!(args.user_verification, "required");
++        assert_eq!(args.origin, "https://example.com");
++    }
++
++    #[tokio::test]
++    async fn attestation_object_converts_to_registration_json() {
++        let request = make_request(MAKE_JSON).await;
++        let attestation = ProviderAttestation {
++            attestation_object: attestation_object("example.com"),
++            transports: vec![],
++        };
++        let CredentialResponse::CreatePublicKeyCredentialResponse(response) =
++            attestation_to_response(&attestation, "example.com").unwrap()
++        else {
++            panic!("expected a create response");
++        };
++        assert_eq!(response.transport, vec!["internal".to_string()]);
++        assert_eq!(response.attachment_modality, "platform");
++        let json = response.ctap.to_idl_model(&request).unwrap();
++        assert_eq!(json.id, URL_SAFE_NO_PAD.encode(CREDENTIAL_ID));
++    }
++
++    #[test]
++    fn attestation_for_another_rp_is_rejected() {
++        let attestation = ProviderAttestation {
++            attestation_object: attestation_object("evil.example"),
++            transports: vec![],
++        };
++        assert!(matches!(
++            attestation_to_response(&attestation, "example.com"),
++            Err(ProviderError::InvalidResponse(_))
++        ));
++        let garbage = ProviderAttestation {
++            attestation_object: vec![1, 2, 3],
++            transports: vec![],
++        };
++        assert!(matches!(
++            attestation_to_response(&garbage, "example.com"),
++            Err(ProviderError::InvalidResponse(_))
++        ));
++    }
++
++    #[tokio::test]
++    async fn assertion_converts_to_authentication_json() {
++        let request = get_request(GET_JSON).await;
++        let credential = ProviderCredential {
++            id: CREDENTIAL_ID.to_vec(),
++            user_handle: b"user".to_vec(),
++            user_name: "alice".to_string(),
++            display_name: String::new(),
++        };
++        let assertion = ProviderAssertion {
++            authenticator_data: authenticator_data("example.com", false),
++            signature: vec![0x30, 0x00],
++            user_handle: vec![],
++        };
++        let CredentialResponse::GetPublicKeyCredentialResponse(response) =
++            assertion_to_response(&assertion, &credential, "example.com").unwrap()
++        else {
++            panic!("expected a get response");
++        };
++        assert_eq!(response.attachment_modality, "platform");
++        let user = response.ctap.user.as_ref().unwrap();
++        assert_eq!(user.id.as_ref(), b"user");
++        assert_eq!(user.name.as_deref(), Some("alice"));
++        assert_eq!(user.display_name, None);
++        let json = response.ctap.to_idl_model(&request).unwrap();
++        assert_eq!(json.id, URL_SAFE_NO_PAD.encode(CREDENTIAL_ID));
++
++        let wrong_rp = ProviderAssertion {
++            authenticator_data: authenticator_data("evil.example", false),
++            ..assertion
++        };
++        assert!(assertion_to_response(&wrong_rp, &credential, "example.com").is_err());
++    }
++}
+diff --git a/credentialsd/src/credential_service/platform/dbus.rs b/credentialsd/src/credential_service/platform/dbus.rs
+index 38fbb07..f83db12 100644
+--- a/credentialsd/src/credential_service/platform/dbus.rs
++++ b/credentialsd/src/credential_service/platform/dbus.rs
+@@ -1,18 +1,38 @@
+ //! Client for platform providers that implement the provider D-Bus interface.
++//!
++//! ```text
++//! GetInfo() -> a{sv}
++//! ListCredentials(s rp_id, aay allow) -> aa{sv}
++//! MakeCredential(u request_id, ay client_data_hash, a{sv} rp, a{sv} user,
++//!                ai algorithms, aay exclude, a{sv} options) -> a{sv}
++//! GetAssertion(u request_id, ay client_data_hash, s rp_id, ay credential_id,
++//!              a{sv} options) -> a{sv}
++//! Cancel(u request_id)
++//! signal UserActionNeeded(u request_id, s kind, a{sv} details)
++//! ```
++//!
++//! See `doc/api.md` for the keys of each dictionary.
+ 
+-use std::collections::HashMap;
++use std::{collections::HashMap, os::fd::OwnedFd};
+ 
+ use async_trait::async_trait;
++use futures_lite::StreamExt;
+ use serde::Serialize;
+ use zbus::{
+     Connection,
+     fdo::{self, DBusProxy},
+     names::{BusName, WellKnownName},
+     proxy::CacheProperties,
+-    zvariant::{DynamicDeserialize, DynamicType, OwnedValue},
++    zvariant::{DynamicDeserialize, DynamicType, Fd, OwnedValue, Value},
+ };
+ 
+-use super::{PlatformProvider, ProviderError, ProviderInfo, config::ProviderConfig};
++use super::{
++    PlatformProvider, ProviderAssertion, ProviderAttestation, ProviderCredential, ProviderError,
++    ProviderGetAssertion, ProviderInfo, ProviderMakeCredential, UserAction, UserActionKind,
++    UserActionStream, config::ProviderConfig, value_to_bytes, value_to_int, value_to_strings,
++};
++
++type Dict = HashMap<String, OwnedValue>;
+ 
+ /// A platform provider reached over D-Bus.
+ #[derive(Debug)]
+@@ -118,7 +138,422 @@ impl PlatformProvider for DbusPlatformProvider {
+     }
+ 
+     async fn get_info(&self) -> Result<ProviderInfo, ProviderError> {
+-        let dict: HashMap<String, OwnedValue> = self.call("GetInfo", &()).await?;
++        let dict: Dict = self.call("GetInfo", &()).await?;
+         Ok(ProviderInfo::from_dict(&dict))
+     }
++
++    async fn list_credentials(
++        &self,
++        rp_id: &str,
++        allow: &[Vec<u8>],
++    ) -> Result<Vec<ProviderCredential>, ProviderError> {
++        let creds: Vec<Dict> = self.call("ListCredentials", &(rp_id, allow)).await?;
++        Ok(creds
++            .iter()
++            .filter_map(ProviderCredential::from_dict)
++            .collect())
++    }
++
++    async fn make_credential(
++        &self,
++        request_id: u32,
++        args: &ProviderMakeCredential,
++        password: Option<OwnedFd>,
++    ) -> Result<ProviderAttestation, ProviderError> {
++        let mut rp: HashMap<&str, Value> =
++            HashMap::from([("id", Value::from(args.rp_id.as_str()))]);
++        if let Some(name) = &args.rp_name {
++            rp.insert("name", Value::from(name.as_str()));
++        }
++        // The rp and user dictionaries use the member names of WebAuthn's
++        // PublicKeyCredentialRpEntity and PublicKeyCredentialUserEntity.
++        let mut user: HashMap<&str, Value> =
++            HashMap::from([("id", Value::from(args.user_id.clone()))]);
++        if let Some(name) = &args.user_name {
++            user.insert("name", Value::from(name.as_str()));
++        }
++        if let Some(display_name) = &args.user_display_name {
++            user.insert("displayName", Value::from(display_name.as_str()));
++        }
++        let mut options = request_options(
++            &args.origin,
++            args.top_origin.as_deref(),
++            args.user_verification,
++            password,
++        );
++        options.insert("rk", Value::from(args.resident_key));
++
++        let reply: Dict = self
++            .call(
++                "MakeCredential",
++                &(
++                    request_id,
++                    args.client_data_hash.as_slice(),
++                    rp,
++                    user,
++                    args.algorithms.as_slice(),
++                    args.exclude.as_slice(),
++                    options,
++                ),
++            )
++            .await?;
++        Ok(ProviderAttestation {
++            attestation_object: reply
++                .get("attestation_object")
++                .and_then(|v| value_to_bytes(v))
++                .ok_or_else(|| {
++                    ProviderError::InvalidResponse("missing attestation_object".to_string())
++                })?,
++            transports: reply
++                .get("transports")
++                .and_then(|v| value_to_strings(v))
++                .unwrap_or_default(),
++        })
++    }
++
++    async fn get_assertion(
++        &self,
++        request_id: u32,
++        args: &ProviderGetAssertion,
++        password: Option<OwnedFd>,
++    ) -> Result<ProviderAssertion, ProviderError> {
++        let options = request_options(
++            &args.origin,
++            args.top_origin.as_deref(),
++            args.user_verification,
++            password,
++        );
++        let reply: Dict = self
++            .call(
++                "GetAssertion",
++                &(
++                    request_id,
++                    args.client_data_hash.as_slice(),
++                    args.rp_id.as_str(),
++                    args.credential_id.as_slice(),
++                    options,
++                ),
++            )
++            .await?;
++        let bytes = |key: &str| reply.get(key).and_then(|v| value_to_bytes(v));
++        Ok(ProviderAssertion {
++            authenticator_data: bytes("authenticator_data").ok_or_else(|| {
++                ProviderError::InvalidResponse("missing authenticator_data".to_string())
++            })?,
++            signature: bytes("signature")
++                .ok_or_else(|| ProviderError::InvalidResponse("missing signature".to_string()))?,
++            user_handle: bytes("user_handle").unwrap_or_default(),
++        })
++    }
++
++    async fn cancel(&self, request_id: u32) {
++        if let Err(err) = self.call::<_, ()>("Cancel", &(request_id,)).await {
++            tracing::debug!(id = %self.config.id, %err, "Failed to cancel provider request");
++        }
++    }
++
++    async fn user_actions(&self) -> Result<UserActionStream, ProviderError> {
++        let proxy = self.proxy().await?;
++        let signals = proxy
++            .receive_signal("UserActionNeeded")
++            .await
++            .map_err(|err| ProviderError::Unavailable(err.to_string()))?;
++        Ok(Box::pin(signals.filter_map(|msg| {
++            let (request_id, kind, details) =
++                msg.body().deserialize::<(u32, String, Dict)>().ok()?;
++            let kind = match kind.as_str() {
++                "touch" => UserActionKind::Touch,
++                "presence" => UserActionKind::Presence,
++                _ => UserActionKind::Other(kind),
++            };
++            let retries = details
++                .get("retries")
++                .and_then(|v| value_to_int(v))
++                .and_then(|n| u32::try_from(n).ok());
++            Some(UserAction {
++                request_id,
++                kind,
++                retries,
++            })
++        })))
++    }
++}
++
++/// Options shared by MakeCredential and GetAssertion.
++fn request_options<'a>(
++    origin: &'a str,
++    top_origin: Option<&'a str>,
++    user_verification: &'static str,
++    password: Option<OwnedFd>,
++) -> HashMap<&'static str, Value<'a>> {
++    let mut options = HashMap::from([
++        ("origin", Value::from(origin)),
++        ("uv", Value::from(user_verification)),
++    ]);
++    if let Some(top_origin) = top_origin {
++        options.insert("top_origin", Value::from(top_origin));
++    }
++    if let Some(password) = password {
++        options.insert("password_fd", Value::from(Fd::from(password)));
++    }
++    options
++}
++
++#[cfg(test)]
++mod tests {
++    use std::{collections::HashMap, io::Read, os::fd::AsFd, sync::Mutex};
++
++    use tokio::net::UnixStream;
++    use zbus::{
++        interface,
++        object_server::SignalEmitter,
++        zvariant::{OwnedValue, Value},
++    };
++
++    use super::*;
++    use crate::credential_service::platform::config::DEFAULT_PROVIDER_INTERFACE;
++
++    const PATH: &str = "/org/example/Passkeys1";
++
++    /// request ID, client data hash, user, algorithms, exclude list
++    type MakeCall = (
++        u32,
++        Vec<u8>,
++        HashMap<String, OwnedValue>,
++        Vec<i32>,
++        Vec<Vec<u8>>,
++    );
++
++    #[derive(Default)]
++    struct Received {
++        make: Option<MakeCall>,
++        options: Option<HashMap<String, String>>,
++        password: Option<String>,
++        cancelled: Vec<u32>,
++    }
++
++    struct MockService {
++        received: std::sync::Arc<Mutex<Received>>,
++    }
++
++    fn owned<'a>(value: impl Into<Value<'a>>) -> OwnedValue {
++        OwnedValue::try_from(value.into()).unwrap()
++    }
++
++    #[interface(name = "xyz.iinuwa.credentialsd.Provider1")]
++    impl MockService {
++        async fn get_info(&self) -> HashMap<String, OwnedValue> {
++            HashMap::from([
++                ("name".to_string(), owned("Mock")),
++                ("algorithms".to_string(), owned(vec![-7i64])),
++                ("uv".to_string(), owned(vec!["biometric"])),
++                ("locked".to_string(), owned(false)),
++            ])
++        }
++
++        async fn list_credentials(
++            &self,
++            rp_id: String,
++            _allow: Vec<Vec<u8>>,
++        ) -> Vec<HashMap<String, OwnedValue>> {
++            assert_eq!(rp_id, "example.com");
++            vec![HashMap::from([
++                ("id".to_string(), owned(vec![1u8, 2, 3])),
++                ("user_handle".to_string(), owned(b"user".to_vec())),
++                ("user_name".to_string(), owned("alice")),
++                ("display_name".to_string(), owned("Alice")),
++                ("created".to_string(), owned(0i64)),
++            ])]
++        }
++
++        #[allow(clippy::too_many_arguments)]
++        async fn make_credential(
++            &self,
++            #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
++            req: u32,
++            cdh: Vec<u8>,
++            _rp: HashMap<String, OwnedValue>,
++            user: HashMap<String, OwnedValue>,
++            algs: Vec<i32>,
++            exclude: Vec<Vec<u8>>,
++            options: HashMap<String, OwnedValue>,
++        ) -> Result<HashMap<String, OwnedValue>, MockError> {
++            let mut text_options = HashMap::new();
++            let mut password = None;
++            for (key, value) in options {
++                if key == "password_fd" {
++                    let Value::Fd(fd) = &*value else {
++                        panic!("password_fd is not a file descriptor");
++                    };
++                    let fd = fd.as_fd().try_clone_to_owned().unwrap();
++                    let mut s = String::new();
++                    std::fs::File::from(fd).read_to_string(&mut s).unwrap();
++                    password = Some(s);
++                } else {
++                    text_options.insert(key, format!("{:?}", *value));
++                }
++            }
++            {
++                let mut received = self.received.lock().unwrap();
++                received.make = Some((req, cdh, user, algs, exclude));
++                received.options = Some(text_options);
++                received.password = password.clone();
++            }
++            if password.is_none() {
++                return Err(MockError::PasswordNeeded("password needed".to_string()));
++            }
++            Self::user_action_needed(&emitter, req, "touch", HashMap::new())
++                .await
++                .unwrap();
++            Ok(HashMap::from([
++                ("attestation_object".to_string(), owned(vec![0xa0u8])),
++                ("transports".to_string(), owned(vec!["internal"])),
++            ]))
++        }
++
++        async fn cancel(&self, req: u32) {
++            self.received.lock().unwrap().cancelled.push(req);
++        }
++
++        #[zbus(signal)]
++        async fn user_action_needed(
++            emitter: &SignalEmitter<'_>,
++            req: u32,
++            kind: &str,
++            detail: HashMap<String, OwnedValue>,
++        ) -> zbus::Result<()>;
++    }
++
++    #[derive(Debug, zbus::DBusError)]
++    #[zbus(prefix = "org.example.Passkeys.Error")]
++    enum MockError {
++        #[zbus(error)]
++        ZBus(zbus::Error),
++        PasswordNeeded(String),
++    }
++
++    async fn connect() -> (
++        DbusPlatformProvider,
++        std::sync::Arc<Mutex<Received>>,
++        Connection,
++    ) {
++        let (a, b) = UnixStream::pair().unwrap();
++        let received = std::sync::Arc::new(Mutex::new(Received::default()));
++        let guid = zbus::Guid::generate();
++        let server = zbus::connection::Builder::unix_stream(a)
++            .server(guid)
++            .unwrap()
++            .p2p()
++            .serve_at(
++                PATH,
++                MockService {
++                    received: received.clone(),
++                },
++            )
++            .unwrap()
++            .build();
++        let client = zbus::connection::Builder::unix_stream(b).p2p().build();
++        let (server, client) = tokio::try_join!(server, client).unwrap();
++        let provider = DbusPlatformProvider::new(
++            client,
++            ProviderConfig {
++                id: "mock".to_string(),
++                name: "Mock".to_string(),
++                bus_name: "org.example.Passkeys1".to_string(),
++                object_path: PATH.to_string(),
++                interface: DEFAULT_PROVIDER_INTERFACE.to_string(),
++                executable: None,
++            },
++        );
++        (provider, received, server)
++    }
++
++    fn make_args() -> ProviderMakeCredential {
++        ProviderMakeCredential {
++            client_data_hash: vec![7; 32],
++            rp_id: "example.com".to_string(),
++            rp_name: Some("Example".to_string()),
++            user_id: b"user".to_vec(),
++            user_name: Some("alice".to_string()),
++            user_display_name: Some("Alice".to_string()),
++            algorithms: vec![-7, -8],
++            exclude: vec![vec![9, 9]],
++            resident_key: true,
++            user_verification: "required",
++            origin: "https://example.com".to_string(),
++            top_origin: None,
++        }
++    }
++
++    #[tokio::test]
++    async fn get_info_and_list_credentials_over_dbus() {
++        let (provider, _received, _server) = connect().await;
++        let info = provider.get_info().await.unwrap();
++        assert_eq!(info.name.as_deref(), Some("Mock"));
++        assert_eq!(info.algorithms, vec![-7]);
++        assert!(!info.locked);
++
++        let creds = provider
++            .list_credentials("example.com", &[vec![1, 2, 3]])
++            .await
++            .unwrap();
++        assert_eq!(
++            creds,
++            vec![ProviderCredential {
++                id: vec![1, 2, 3],
++                user_handle: b"user".to_vec(),
++                user_name: "alice".to_string(),
++                display_name: "Alice".to_string(),
++            }]
++        );
++    }
++
++    #[tokio::test]
++    async fn make_credential_passes_arguments_password_and_signals() {
++        let (provider, received, _server) = connect().await;
++        let mut actions = provider.user_actions().await.unwrap();
++
++        let args = make_args();
++        let err = provider.make_credential(41, &args, None).await.unwrap_err();
++        assert_eq!(err, ProviderError::PasswordNeeded);
++
++        let password = crate::credential_service::internal::tests::pipe_with(b"hunter2");
++        let attestation = provider
++            .make_credential(42, &args, Some(password))
++            .await
++            .unwrap();
++        assert_eq!(attestation.attestation_object, vec![0xa0]);
++        assert_eq!(attestation.transports, vec!["internal".to_string()]);
++
++        let action = actions.next().await.unwrap();
++        assert_eq!(
++            action,
++            UserAction {
++                request_id: 42,
++                kind: UserActionKind::Touch,
++                retries: None,
++            }
++        );
++
++        let received = received.lock().unwrap();
++        let (req, cdh, user, algs, exclude) = received.make.clone().unwrap();
++        assert_eq!(req, 42);
++        assert_eq!(cdh, vec![7; 32]);
++        assert_eq!(algs, vec![-7, -8]);
++        assert_eq!(exclude, vec![vec![9, 9]]);
++        assert!(user.contains_key("displayName"));
++        assert_eq!(received.password.as_deref(), Some("hunter2"));
++        let options = received.options.clone().unwrap();
++        assert!(options.contains_key("origin"));
++        assert!(options.contains_key("uv"));
++        assert!(options.contains_key("rk"));
++        assert!(!options.contains_key("top_origin"));
++    }
++
++    #[tokio::test]
++    async fn cancel_reaches_the_provider() {
++        let (provider, received, _server) = connect().await;
++        provider.cancel(7).await;
++        assert_eq!(received.lock().unwrap().cancelled, vec![7]);
++    }
+ }
+diff --git a/credentialsd/src/credential_service/platform/mod.rs b/credentialsd/src/credential_service/platform/mod.rs
+index 07b6bc5..5b04740 100644
+--- a/credentialsd/src/credential_service/platform/mod.rs
++++ b/credentialsd/src/credential_service/platform/mod.rs
+@@ -6,16 +6,20 @@
+ //! (see [`config`]) and implement a small D-Bus interface (see [`dbus`]).
+ 
+ pub mod config;
++pub mod convert;
+ pub mod dbus;
+ 
+ use std::{
+     collections::HashMap,
+     fmt::{Debug, Display},
++    os::fd::OwnedFd,
++    pin::Pin,
+     sync::{Arc, RwLock},
+     time::Duration,
+ };
+ 
+ use async_trait::async_trait;
++use futures_lite::Stream;
+ use zbus::{
+     Connection,
+     zvariant::{OwnedValue, Value},
+@@ -143,7 +147,113 @@ impl ProviderInfo {
+     }
+ }
+ 
++/// Display metadata for a credential held by a provider. Listing
++/// credentials must not prompt the user or use the credential's key.
++#[derive(Clone, Debug, Default, PartialEq)]
++pub struct ProviderCredential {
++    pub id: Vec<u8>,
++    pub user_handle: Vec<u8>,
++    pub user_name: String,
++    pub display_name: String,
++}
++
++impl ProviderCredential {
++    pub(crate) fn from_dict(dict: &HashMap<String, OwnedValue>) -> Option<Self> {
++        Some(Self {
++            id: dict.get("id").and_then(|v| value_to_bytes(v))?,
++            user_handle: dict
++                .get("user_handle")
++                .and_then(|v| value_to_bytes(v))
++                .unwrap_or_default(),
++            user_name: dict
++                .get("user_name")
++                .and_then(|v| value_to_string(v))
++                .unwrap_or_default(),
++            display_name: dict
++                .get("display_name")
++                .and_then(|v| value_to_string(v))
++                .unwrap_or_default(),
++        })
++    }
++}
++
++/// Arguments for a provider's `MakeCredential()` call.
++#[derive(Clone, Debug, PartialEq)]
++pub struct ProviderMakeCredential {
++    /// SHA-256 of the clientDataJSON that credentialsd built for the request.
++    pub client_data_hash: Vec<u8>,
++    pub rp_id: String,
++    pub rp_name: Option<String>,
++    pub user_id: Vec<u8>,
++    pub user_name: Option<String>,
++    pub user_display_name: Option<String>,
++    /// COSE algorithm identifiers, in order of preference.
++    pub algorithms: Vec<i32>,
++    /// Credential IDs that must not be registered again.
++    pub exclude: Vec<Vec<u8>>,
++    /// Whether a discoverable credential is requested.
++    pub resident_key: bool,
++    /// `required`, `preferred` or `discouraged`.
++    pub user_verification: &'static str,
++    pub origin: String,
++    pub top_origin: Option<String>,
++}
++
++/// Arguments for a provider's `GetAssertion()` call.
++#[derive(Clone, Debug, PartialEq)]
++pub struct ProviderGetAssertion {
++    /// SHA-256 of the clientDataJSON that credentialsd built for the request.
++    pub client_data_hash: Vec<u8>,
++    pub rp_id: String,
++    pub credential_id: Vec<u8>,
++    /// `required`, `preferred` or `discouraged`.
++    pub user_verification: &'static str,
++    pub origin: String,
++    pub top_origin: Option<String>,
++}
++
++/// A provider's answer to `MakeCredential()`.
++#[derive(Clone, Debug, Default, PartialEq)]
++pub struct ProviderAttestation {
++    /// The CBOR attestation object (`fmt`, `authData`, `attStmt`).
++    pub attestation_object: Vec<u8>,
++    pub transports: Vec<String>,
++}
++
++/// A provider's answer to `GetAssertion()`.
++#[derive(Clone, Debug, Default, PartialEq)]
++pub struct ProviderAssertion {
++    pub authenticator_data: Vec<u8>,
++    pub signature: Vec<u8>,
++    pub user_handle: Vec<u8>,
++}
++
++/// What a provider waits for while a call is in progress.
++#[derive(Clone, Debug, PartialEq)]
++pub enum UserActionKind {
++    /// On-device user verification, for example a fingerprint.
++    Touch,
++    /// A user presence gesture without verification.
++    Presence,
++    Other(String),
++}
++
++/// A `UserActionNeeded` signal from a provider.
++#[derive(Clone, Debug, PartialEq)]
++pub struct UserAction {
++    pub request_id: u32,
++    pub kind: UserActionKind,
++    /// Remaining attempts, when the provider reports them.
++    pub retries: Option<u32>,
++}
++
++pub type UserActionStream = Pin<Box<dyn Stream<Item = UserAction> + Send>>;
++
+ /// A platform passkey provider.
++///
++/// Calls that may prompt the user take a `request_id`, chosen by
++/// credentialsd, which the provider uses in `UserActionNeeded` signals and
++/// which `cancel()` refers to.
+ #[async_trait]
+ pub trait PlatformProvider: Debug + Send + Sync {
+     /// Stable identifier, taken from the provider's drop-in file name.
+@@ -152,6 +262,37 @@ pub trait PlatformProvider: Debug + Send + Sync {
+     /// Returns what the provider supports and whether it is locked. This must
+     /// be cheap and must not prompt the user.
+     async fn get_info(&self) -> Result<ProviderInfo, ProviderError>;
++
++    /// Lists credentials for `rp_id`. With a non-empty `allow` list, only
++    /// credentials in that list are returned.
++    async fn list_credentials(
++        &self,
++        rp_id: &str,
++        allow: &[Vec<u8>],
++    ) -> Result<Vec<ProviderCredential>, ProviderError>;
++
++    /// Creates a credential. `password` carries the user's password when the
++    /// provider asked for it with [`ProviderError::PasswordNeeded`].
++    async fn make_credential(
++        &self,
++        request_id: u32,
++        args: &ProviderMakeCredential,
++        password: Option<OwnedFd>,
++    ) -> Result<ProviderAttestation, ProviderError>;
++
++    /// Signs an assertion with the given credential.
++    async fn get_assertion(
++        &self,
++        request_id: u32,
++        args: &ProviderGetAssertion,
++        password: Option<OwnedFd>,
++    ) -> Result<ProviderAssertion, ProviderError>;
++
++    /// Cancels the call with the given request ID, if it is still running.
++    async fn cancel(&self, request_id: u32);
++
++    /// Subscribes to the provider's `UserActionNeeded` signals.
++    async fn user_actions(&self) -> Result<UserActionStream, ProviderError>;
+ }
+ 
+ /// The device ID under which a provider is offered to the user.
+@@ -192,6 +333,10 @@ impl PlatformProviders {
+         self.providers.read().unwrap().clone()
+     }
+ 
++    pub fn is_empty(&self) -> bool {
++        self.providers.read().unwrap().is_empty()
++    }
++
+     /// Asks every provider for its info and returns those that answered in
+     /// time.
+     pub async fn available(&self) -> Vec<(Arc<dyn PlatformProvider>, ProviderInfo)> {
+@@ -377,6 +522,38 @@ pub(crate) mod tests {
+         async fn get_info(&self) -> Result<ProviderInfo, ProviderError> {
+             self.info.clone()
+         }
++
++        async fn list_credentials(
++            &self,
++            _rp_id: &str,
++            _allow: &[Vec<u8>],
++        ) -> Result<Vec<ProviderCredential>, ProviderError> {
++            Ok(Vec::new())
++        }
++
++        async fn make_credential(
++            &self,
++            _request_id: u32,
++            _args: &ProviderMakeCredential,
++            _password: Option<OwnedFd>,
++        ) -> Result<ProviderAttestation, ProviderError> {
++            Err(ProviderError::NotSupported)
++        }
++
++        async fn get_assertion(
++            &self,
++            _request_id: u32,
++            _args: &ProviderGetAssertion,
++            _password: Option<OwnedFd>,
++        ) -> Result<ProviderAssertion, ProviderError> {
++            Err(ProviderError::NotSupported)
++        }
++
++        async fn cancel(&self, _request_id: u32) {}
++
++        async fn user_actions(&self) -> Result<UserActionStream, ProviderError> {
++            Ok(Box::pin(futures_lite::stream::empty()))
++        }
+     }
+ 
+     #[tokio::test]
+diff --git a/credentialsd/src/dbus/flow_control.rs b/credentialsd/src/dbus/flow_control.rs
+index a68aec7..a981abb 100644
+--- a/credentialsd/src/dbus/flow_control.rs
++++ b/credentialsd/src/dbus/flow_control.rs
+@@ -21,15 +21,15 @@ use zbus::connection::Connection;
+ use zbus::zvariant::OwnedObjectPath;
+ 
+ use crate::dbus::UiControlServiceClient;
+-use crate::{
+-    credential_service::UsbState,
+-    dbus::ui_control::UiController,
+-    model::{CredentialRequest, CredentialResponse},
+-};
+ use crate::{
+     credential_service::{CredentialServiceError, DeviceStateUpdate, ManageDevice, nfc::NfcState},
+     model::ClientDetails,
+ };
++use crate::{
++    credential_service::{InternalState, UsbState},
++    dbus::ui_control::UiController,
++    model::{CredentialRequest, CredentialResponse},
++};
+ use crate::{dbus::ui_control::Ceremony, gateway::WebAuthnError};
+ 
+ pub struct UiRequestContext {
+@@ -148,6 +148,7 @@ async fn handle<M: ManageDevice + Debug + Send + Sync + 'static, UC: UiControlle
+         let client_pin_tx: Arc<Mutex<Option<Sender<String>>>> = Arc::new(Mutex::new(None));
+         let set_pin_tx: Arc<Mutex<Option<Sender<String>>>> = Arc::new(Mutex::new(None));
+         let cred_selector_tx = Arc::new(Mutex::new(None));
++        let password_tx: Arc<Mutex<Option<Sender<Vec<u8>>>>> = Arc::new(Mutex::new(None));
+ 
+         let wait_for_ui_request_fut = async {
+             loop {
+@@ -160,6 +161,7 @@ async fn handle<M: ManageDevice + Debug + Send + Sync + 'static, UC: UiControlle
+                         let client_pin_tx = client_pin_tx.clone();
+                         let set_pin_tx = set_pin_tx.clone();
+                         let cred_selector_tx = cred_selector_tx.clone();
++                        let password_tx = password_tx.clone();
+                         let stream =
+                             svc.lock()
+                                 .await
+@@ -196,10 +198,20 @@ async fn handle<M: ManageDevice + Debug + Send + Sync + 'static, UC: UiControlle
+                                         DeviceStateUpdate::Usb(UsbState::SelectingCredential {
+                                             cred_tx,
+                                             ..
+-                                        }) => {
++                                        })
++                                        | DeviceStateUpdate::Internal(
++                                            InternalState::SelectingCredential { cred_tx, .. },
++                                        ) => {
+                                             *cred_selector_tx.lock().unwrap() =
+                                                 Some(cred_tx.clone());
+                                         }
++                                        DeviceStateUpdate::Internal(
++                                            InternalState::NeedsPassword {
++                                                password_tx: tx, ..
++                                            },
++                                        ) => {
++                                            *password_tx.lock().unwrap() = Some(tx.clone());
++                                        }
+                                         _ => {}
+                                     }
+                                     device_update.into()
+@@ -273,10 +285,24 @@ async fn handle<M: ManageDevice + Debug + Send + Sync + 'static, UC: UiControlle
+                             );
+                         }
+                     }
+-                    UserInteractedEvent::PasswordEntered(_) => {
+-                        tracing::error!(
+-                            "Invalid state: received a password with no pending request."
+-                        );
++                    UserInteractedEvent::PasswordEntered(password_fd) => {
++                        let password = match read_secret(OwnedFd::from(password_fd)) {
++                            Ok(password) => password,
++                            Err(err) => {
++                                tracing::error!(%err, "Failed to read password. Stopping event loop. TODO: cancel the request");
++                                break;
++                            }
++                        };
++                        let tx = { password_tx.lock().unwrap().take() };
++                        if let Some(tx) = tx {
++                            if tx.send(password).await.is_err() {
++                                tracing::error!("Failed to send password to platform provider");
++                            }
++                        } else {
++                            tracing::error!(
++                                "Invalid state: received a password with no pending request."
++                            );
++                        }
+                     }
+                     UserInteractedEvent::RequestCancelled => {
+                         tracing::debug!(%request_id, "Cancelling request");
+-- 
+2.50.1 (Apple Git-155)
+
