@@ -1,18 +1,20 @@
 import hashlib
 import pathlib
+import tarfile
 import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PAYLOAD = ROOT / "packages" / "j773g-kernel" / "run59"
+PAYLOAD = ROOT / "packages" / "j773g-kernel" / "integration-0443-v2"
 
 
 class J773gBinaryKernelTests(unittest.TestCase):
     def test_payload_hashes(self):
         expected = {
-            "Image": "13d3d96630b2cb68c5d3828819431fe5b4c851a4f40c0b498978ead27fe662e7",
-            "t8132-j773g.dtb": "5a72db650a379a3320d2736be69a152c5836e16a3cb038a50f0d692180620e46",
-            "config": "f21c4062336081cb004fb12eff2bafa9d0bdfecb98c9e4fb63f6db35c363219c",
+            "Image": "9b2f6aa0bb7b8740c3659312504ca07091494cd068b26b3543063d4341139eb0",
+            "t8132-j773g.dtb": "d086e25ffa5a4bbe645a1c29448dc8c013af8eea89cda564113b47a7fd7b56b4",
+            "modules.tar.gz": "455854d97c192ee61237b65e253f36d474f12654c3f47bfbb29903437683c468",
+            "config": "8527ceccf7718d672f1a4c0697ed9c5bd259d1407d1e0cbfb0d8061804025006",
         }
         for name, digest in expected.items():
             with self.subTest(name=name):
@@ -30,6 +32,11 @@ class J773gBinaryKernelTests(unittest.TestCase):
             "CONFIG_VFAT_FS=y",
         ):
             self.assertIn(option, config)
+
+        with tarfile.open(PAYLOAD / "modules.tar.gz") as archive:
+            names = archive.getnames()
+            self.assertIn("lib/modules/7.3.0-m4atlrx+/modules.builtin", names)
+            self.assertTrue(any(name.endswith(".ko") for name in names))
 
     def test_profile_is_opt_in(self):
         flake = (ROOT / "flake.nix").read_text()

@@ -1,8 +1,9 @@
-{ lib, stdenvNoCC, kmod, kernelPayload ? ./j773g-kernel/run59
+{ lib, stdenvNoCC, kmod, kernelPayload ? ./j773g-kernel/integration-0443-v2
 , kernelRelease ? "7.3.0-m4atlrx+"
-, sourceCommit ? "b3218010d34be05fa0d6ebfb6fd08638ecdb7451"
-, imageSha256 ? "13d3d96630b2cb68c5d3828819431fe5b4c851a4f40c0b498978ead27fe662e7"
-, dtbSha256 ? "5a72db650a379a3320d2736be69a152c5836e16a3cb038a50f0d692180620e46"
+, sourceCommit ? "920ed134a628366563fd442aa55224d321caa1a7"
+, imageSha256 ? "9b2f6aa0bb7b8740c3659312504ca07091494cd068b26b3543063d4341139eb0"
+, dtbSha256 ? "d086e25ffa5a4bbe645a1c29448dc8c013af8eea89cda564113b47a7fd7b56b4"
+, modulesSha256 ? "455854d97c192ee61237b65e253f36d474f12654c3f47bfbb29903437683c468"
 , ...
 }:
 
@@ -44,6 +45,7 @@ stdenvNoCC.mkDerivation {
     runHook preInstall
     test "$(sha256sum ${kernelPayload}/Image | cut -d ' ' -f 1)" = ${imageSha256}
     test "$(sha256sum ${kernelPayload}/t8132-j773g.dtb | cut -d ' ' -f 1)" = ${dtbSha256}
+    test "$(sha256sum ${kernelPayload}/modules.tar.gz | cut -d ' ' -f 1)" = ${modulesSha256}
     grep -aF "Linux version ${kernelRelease} " ${kernelPayload}/Image >/dev/null
     grep -qx 'CONFIG_APPLE_WATCHDOG=y' ${kernelPayload}/config
     grep -qx 'CONFIG_NVME_APPLE=y' ${kernelPayload}/config
@@ -55,10 +57,13 @@ stdenvNoCC.mkDerivation {
     install -Dm0444 ${kernelPayload}/config "$configfile"
     printf '%s\n' ${sourceCommit} > "$out/aurora-source-commit"
 
+    mkdir -p "$modules" "$dev"
+    tar -xzf ${kernelPayload}/modules.tar.gz -C "$modules"
     moduleDir="$modules/lib/modules/${kernelRelease}"
-    mkdir -p "$moduleDir" "$dev"
-    touch "$moduleDir/modules.order" "$moduleDir/modules.builtin.modinfo"
-    printf '%s\n' kernel/drivers/watchdog/apple_wdt.ko > "$moduleDir/modules.builtin"
+    rm -f "$moduleDir/build" "$moduleDir/source"
+    test -s "$moduleDir/modules.builtin"
+    test -s "$moduleDir/modules.builtin.modinfo"
+    test -n "$(find "$moduleDir/kernel" -name '*.ko' -print -quit)"
     depmod -b "$modules" ${kernelRelease}
     runHook postInstall
   '';
@@ -79,9 +84,7 @@ stdenvNoCC.mkDerivation {
       ia32Emulation = false;
       efiBootStub = false;
       netfilterRPFilter = kernelConfig.isEnabled "IP_NF_MATCH_RPFILTER";
-      # NF_TABLES is modular in the config, but the archived run-59 payload
-      # contains no .ko files. Do not claim a feature the package cannot load.
-      nftables = false;
+      nftables = kernelConfig.isEnabled "NF_TABLES";
     };
     auroraSourceCommit = sourceCommit;
     auroraDtbAbi = 1;
@@ -89,7 +92,7 @@ stdenvNoCC.mkDerivation {
   };
 
   meta = {
-    description = "Verified prebuilt Linux kernel for the Apple J773g";
+    description = "Verified integration kernel and modules for the Apple J773g";
     platforms = [ "x86_64-linux" "aarch64-linux" ];
     license = lib.licenses.gpl2Only;
   };
