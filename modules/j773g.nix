@@ -8,6 +8,9 @@
 
   boot.initrd.availableKernelModules = lib.mkForce [ ];
   boot.initrd.kernelModules = lib.mkForce [ ];
+  # The binary package has no source tree from which to build cpupower. The
+  # Apple cpufreq driver remains active with its firmware-selected policy.
+  powerManagement.cpuFreqGovernor = lib.mkForce null;
   boot.kernelParams = [
     "user4k=on"
     "console=tty0"
