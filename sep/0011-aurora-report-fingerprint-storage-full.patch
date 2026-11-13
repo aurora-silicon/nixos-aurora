@@ -1,0 +1,26 @@
+Subject: [PATCH] aurora: report ENOSPC as DATA_FULL with guarded fprintd
+
+The paired fprintd package prevents automatic print deletion for apple-sep.
+Expose ENOSPC as DATA_FULL so clients show their existing storage-full text.
+Do not guess which store filled: the kernel uses ENOSPC for both the SEP's
+three-finger limit and host persistence capacity.
+
+diff --git a/libfprint/drivers/aurora/aurora.c b/libfprint/drivers/aurora/aurora.c
+index 3cb7509..75ac0df 100644
+--- a/libfprint/drivers/aurora/aurora.c
++++ b/libfprint/drivers/aurora/aurora.c
+@@ -129,9 +129,11 @@ aurora_ioctl (FpiDeviceAurora *self, unsigned long req, void *arg, GError **erro
+           break;
+ 
+         case ENOSPC:
+-          /* DATA_FULL makes fprintd garbage-collect another device print. */
+-          g_set_error_literal (error, FP_DEVICE_ERROR, FP_DEVICE_ERROR_GENERAL,
+-                               "SEP fingerprint slots or host store are full; no enrolment was started");
++          /* Requires fprintd's apple-sep no-GC guard: prints absent from the
++           * host database can belong to another OS sharing the SEP.
++           * The kernel currently uses ENOSPC for both capacity limits. */
++          g_set_error_literal (error, FP_DEVICE_ERROR, FP_DEVICE_ERROR_DATA_FULL,
++                               "Fingerprint storage is full (finger limit reached or host store full); remove an enrolled fingerprint before trying again");
+           break;
+ 
+         case ENODATA:
