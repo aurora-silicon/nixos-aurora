@@ -60,6 +60,7 @@ NEEDS = {
     'speakerguardd': ['speakerguardd'],
     'speakerguardd-v2': ['speakerguardd-v2'],
     'speaker-upgrade': ['aurora-speaker-upgrade', 'speakerguardd-v2'],
+    'wifi-firmware': ['aurora-wifi-firmware'],
     'mutter': [],
     'iio-sensor-proxy': [],  # nixpkgs' pinned release, with the local patch
     'gnome-settings-daemon': [],  # nixpkgs' pinned release, with the local patch
