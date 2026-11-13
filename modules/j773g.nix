@@ -2,8 +2,8 @@
 
 {
   fileSystems."/boot/efi" = {
-    device = lib.mkForce "/dev/disk/by-label/AURORA_EFI";
-    options = lib.mkForce [ "nofail" "x-systemd.device-timeout=5s" ];
+    device = lib.mkOverride 40 "/dev/disk/by-label/AURORA_EFI";
+    options = lib.mkOverride 40 [ "nofail" "x-systemd.device-timeout=5s" ];
   };
 
   boot.initrd.availableKernelModules = lib.mkForce [ ];
