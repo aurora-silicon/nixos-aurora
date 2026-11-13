@@ -20,7 +20,7 @@ index 286ea80..01d03c5 100644
        <description>This is the number of days after which the printer color profile is considered invalid.</description>
      </key>
 +    <key name="ambient-white-point-enabled" type="b">
-+      <default>false</default>
++      <default>true</default>
 +      <summary>Adapt the display white point to the ambient light</summary>
 +      <description>Use the ambient light sensor's colour temperature, where the computer has one, to make the displays slightly warmer in warm light, similar to how paper looks under different lights. Night Light takes priority. Requires a light sensor that reports colour and a compositor that supports Night Light.</description>
 +    </key>
@@ -359,7 +359,7 @@ index 0000000..5f32a5f
 +                g_main_context_iteration (NULL, FALSE);
 +}
 +
-+/* Off by default: no claim, neutral. */
++/* Off: no claim, neutral. */
 +static void
 +test_default_off (Fixture *f, gconstpointer data)
 +{
@@ -938,7 +938,7 @@ index 0000000..abee986
 @@ -0,0 +1,422 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + *
-+ * Opt-in ambient white point. The ambient light's colour temperature and
++ * Ambient white point. The ambient light's colour temperature and
 + * illuminance come from iio-sensor-proxy (the same light claim gsd-power
 + * uses for automatic brightness), the policy picks a display white point,
 + * and the colour manager publishes it through the existing Temperature
@@ -1541,7 +1541,7 @@ index aae10e4..8c022de 100644
          manager->calibrate = gsd_color_calibrate_new (manager);
          manager->state = gsd_color_state_new ();
  
-+        /* ambient white point, off unless enabled */
++        /* ambient white point, while enabled */
 +        manager->ambient = gsd_ambient_white_point_new ();
 +        manager->ambient_temperature = GSD_COLOR_TEMPERATURE_DEFAULT;
 +        g_signal_connect (manager->ambient, "changed",
