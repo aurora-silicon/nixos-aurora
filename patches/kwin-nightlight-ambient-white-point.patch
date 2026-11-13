@@ -1023,7 +1023,7 @@ index 0b347403cb..ef1538f2ee 100644
  
      int m_inhibitReferenceCount = 0;
 +
-+    // Ambient white point, off unless AmbientWhitePoint is set.
++    // Ambient white point, on unless AmbientWhitePoint is false.
 +    bool m_ambientEnabled = false;
 +    bool m_ambientSensorHeld = false;
 +    AmbientPolicy m_ambientPolicy;
@@ -1043,7 +1043,7 @@ index a99b262f6b..67c29a8455 100644
          </entry>
 +        <entry name="AmbientWhitePoint" type="Bool">
 +            <label>Adapt the screen white point to the ambient light, where a light sensor reports its colour. Night Light takes priority.</label>
-+            <default>false</default>
++            <default>true</default>
 +        </entry>
      </group>
  </kcfg>
