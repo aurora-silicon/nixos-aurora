@@ -46,6 +46,15 @@
       destination = "/lib/udev/rules.d/64-aurora-trackpad-clicks.rules";
       text = builtins.readFile ./64-aurora-trackpad-clicks.rules;
     })
+    # The sysfs-polled AOP ambient light sensor is claimed by iio-sensor-proxy
+    # only through its poll driver, which matches on IIO_SENSOR_PROXY_TYPE=
+    # iio-poll-als; tag it so GNOME and KDE offer automatic screen brightness
+    # out of the box, as macOS does. aurora-kbd-light reads the sensor directly.
+    (pkgs.writeTextFile {
+      name = "aurora-ambient-light-rules";
+      destination = "/lib/udev/rules.d/65-aurora-ambient-light.rules";
+      text = builtins.readFile ./65-aurora-ambient-light.rules;
+    })
   ];
   # The sense-PCM udev rule starts the feed-forward guardian only on J700.
   systemd.services.speakersafetyd.serviceConfig = {

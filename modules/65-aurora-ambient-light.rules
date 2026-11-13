@@ -1,0 +1,9 @@
+# The Apple AOP ambient light sensor (CT817 on the T8140, FireFish2/CT720, and
+# Redbird/VD6286) reports processed lux through one sysfs value, with no IIO
+# buffer or trigger. iio-sensor-proxy claims a sysfs-polled ALS only through its
+# poll driver, which matches solely on this property; without the tag
+# net.hadess.SensorProxy exposes no ambient light sensor and GNOME and KDE hide
+# their automatic screen brightness. Tag it so auto-brightness works out of the
+# box, as it does on macOS. aurora-kbd-light reads the sensor directly and does
+# not rely on this.
+SUBSYSTEM=="iio", KERNEL=="iio:device*", ATTR{name}=="aop-sensors-als", ENV{IIO_SENSOR_PROXY_TYPE}="iio-poll-als"
