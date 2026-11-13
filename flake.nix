@@ -26,10 +26,28 @@
           { nixpkgs.overlays = overlays; aurora.desktop = desktop; }
           ./modules/image.nix ];
       };
+      j773gKernel = pkgs.callPackage ./packages/j773g-binary-kernel.nix { };
+      makeJ773gSystem = desktop: nixpkgs.lib.nixosSystem {
+        inherit system;
+        modules = [
+          apple-silicon.nixosModules.default
+          self.nixosModules.default
+          self.nixosModules.installed
+          {
+            nixpkgs.overlays = overlays;
+            aurora.desktop = desktop;
+            aurora.stage2.requiredBoards = [ "j773g" ];
+            boot.kernelPackages = nixpkgs.lib.mkForce (pkgs.linuxPackagesFor j773gKernel);
+          }
+          ./modules/image.nix
+          ./modules/j773g.nix
+        ];
+      };
     in {
       overlays.default = import ./overlay.nix;
       nixosModules.image = ./modules/image.nix;
       nixosModules.default = ./modules/aurora.nix;
+      nixosModules.j773g = ./modules/j773g.nix;
       # An installed system: the native installer provisioned Stage 1, which
       # rebuilds never touch; every bootloader install refreshes the ESP
       # Stage 2 as update-m1n1 does on ALARM and Fedora (modules/installed.nix).
@@ -38,6 +56,7 @@
         aurora-kde = makeSystem "kde";
         aurora-gnome = makeSystem "gnome";
         aurora-minimal = makeSystem "minimal";
+        aurora-j773g-kde = makeJ773gSystem "kde";
       };
       packages.${system} = {
         inherit (pkgs)
@@ -58,6 +77,7 @@
         aura = pkgs.m1n1;
         uboot = pkgs.uboot-asahi;
         kernel = pkgs.linux-asahi.kernel;
+        j773g-binary-kernel = j773gKernel;
         userpages = pkgs.aurora-userpages;
         proton = pkgs.aurora-proton;
         rusticl = pkgs.aurora-rusticl;

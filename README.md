@@ -12,7 +12,7 @@ NixOS modules and pinned Aurora packages for Apple Silicon. The [native installe
 
 Use `nixosModules.default` with the pinned Apple Silicon module and both overlays. Add `nixosModules.installed` for update commands and checked Stage 2 updates. `nixosModules.image` is for the native installer's partition layout. See the [import example](docs/modules.md#existing-system).
 
-The flake exposes `aurora-kde`, `aurora-gnome` and `aurora-minimal` NixOS configurations. Hardware packages are under `packages.aarch64-linux`; `fex-mesa` also has an `x86_64-linux` build output.
+The flake exposes `aurora-kde`, `aurora-gnome` and `aurora-minimal` NixOS configurations. An opt-in `aurora-j773g-kde` configuration packages the hardware-qualified M4 Mac mini kernel as binary data; it does not compile a kernel in Nix and does not change the generic configurations. Hardware packages are under `packages.aarch64-linux`; `fex-mesa` also has an `x86_64-linux` build output.
 
 ```sh
 nix build .#kernel .#mesa .#steam
