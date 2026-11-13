@@ -7,16 +7,31 @@
 }:
 
 let
-  configText = builtins.readFile (kernelPayload + "/config");
+  # These values are checked against the shipped config in the install phase
+  # and by tests. Keep the passthru small: linuxPackagesFor queries it during
+  # module evaluation and must not parse the full 190 KiB config repeatedly.
+  configValues = {
+    BINFMT_ELF = "y";
+    FW_LOADER = "y";
+    MODULES = "y";
+    APPLE_WATCHDOG = "y";
+    NVME_APPLE = "y";
+    BTRFS_FS = "y";
+    EXT4_FS = "y";
+    VFAT_FS = "y";
+    RUST = "y";
+    IP_NF_MATCH_RPFILTER = "n";
+    NF_TABLES = "n";
+  };
   kernelConfig = rec {
-    isYes = name: lib.hasInfix "\nCONFIG_${name}=y\n" "\n${configText}\n";
-    isNo = name: lib.hasInfix "\n# CONFIG_${name} is not set\n" "\n${configText}\n";
-    isModule = name: lib.hasInfix "\nCONFIG_${name}=m\n" "\n${configText}\n";
-    isSet = name: isYes name || isNo name || isModule name;
-    getValue = name: if isYes name then "y" else if isModule name then "m" else if isNo name then "n" else null;
+    isSet = name: builtins.hasAttr name configValues;
+    getValue = name: if isSet name then configValues.${name} else null;
+    isYes = name: getValue name == "y";
+    isNo = name: getValue name == "n";
+    isModule = name: getValue name == "m";
     isEnabled = name: isYes name || isModule name;
     isDisabled = name: !isEnabled name;
-  };
+  } // builtins.listToAttrs (map (name: { name = "CONFIG_${name}"; value = configValues.${name}; }) (builtins.attrNames configValues));
 in
 stdenvNoCC.mkDerivation {
   pname = "linux-j773g-binary";
@@ -30,6 +45,9 @@ stdenvNoCC.mkDerivation {
     test "$(sha256sum ${kernelPayload}/Image | cut -d ' ' -f 1)" = ${imageSha256}
     test "$(sha256sum ${kernelPayload}/t8132-j773g.dtb | cut -d ' ' -f 1)" = ${dtbSha256}
     grep -aF "Linux version ${kernelRelease} " ${kernelPayload}/Image >/dev/null
+    grep -qx 'CONFIG_APPLE_WATCHDOG=y' ${kernelPayload}/config
+    grep -qx 'CONFIG_NVME_APPLE=y' ${kernelPayload}/config
+    grep -qx '# CONFIG_NF_TABLES is not set' ${kernelPayload}/config
 
     install -Dm0444 ${kernelPayload}/Image "$out/Image"
     install -Dm0444 ${kernelPayload}/t8132-j773g.dtb \
