@@ -1,0 +1,812 @@
+From 17f6448e7b665626bf9b1680a7704820c97e243f Mon Sep 17 00:00:00 2001
+From: Martin Sirringhaus <msirringhaus@suse.de>
+Date: Fri, 13 Nov 2026 17:14:07 +1100
+Subject: [PATCH 1/7] Bug 2088324 - WebAuthn: plumb getClientCapabilities and
+ isCMA to nsIWebAuthnService (r=mfarrell)
+
+Base for this series, not ours: Phabricator D341303 as downloaded 2026-11-13.
+
+Differential Revision: https://phabricator.services.mozilla.com/D341303
+---
+ dom/webauthn/AndroidWebAuthnService.cpp       |  19 ++
+ dom/webauthn/MacOSWebAuthnService.mm          |  22 +++
+ dom/webauthn/PWebAuthnTransaction.ipdl        |   1 +
+ dom/webauthn/PublicKeyCredential.cpp          | 178 +++---------------
+ dom/webauthn/WebAuthnHandler.cpp              | 110 +++++++++++
+ dom/webauthn/WebAuthnHandler.h                |  12 ++
+ dom/webauthn/WebAuthnService.cpp              |  17 ++
+ dom/webauthn/WebAuthnTransactionParent.cpp    |  25 +++
+ dom/webauthn/WebAuthnTransactionParent.h      |   3 +
+ dom/webauthn/WinWebAuthnService.cpp           |  24 +++
+ dom/webauthn/authrs_bridge/src/lib.rs         |  21 +++
+ dom/webauthn/nsIWebAuthnService.idl           |   5 +
+ dom/webauthn/tests/mochitest.toml             |   2 +
+ ...test_webauthn_get_client_capabilities.html | 113 +++++++++++
+ .../resistfingerprinting/RFPTargets.inc       |   2 +
+ .../@types/subs/RFPTargetConstants.sys.d.mts  |   1 +
+ 16 files changed, 405 insertions(+), 150 deletions(-)
+ create mode 100644 dom/webauthn/tests/test_webauthn_get_client_capabilities.html
+
+diff --git a/dom/webauthn/AndroidWebAuthnService.cpp b/dom/webauthn/AndroidWebAuthnService.cpp
+index d9760421..bd5fb9d8 100644
+--- a/dom/webauthn/AndroidWebAuthnService.cpp
++++ b/dom/webauthn/AndroidWebAuthnService.cpp
+@@ -36,6 +36,25 @@ AndroidWebAuthnService::GetIsUVPAA(bool* aAvailable) {
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
++NS_IMETHODIMP
++AndroidWebAuthnService::GetClientCapabilities(
++    nsTArray<nsCString>& aClientCapabilities) {
++  aClientCapabilities = nsTArray<nsCString>{
++      "extension:appid"_ns,
++      "extension:credProps"_ns,
++      "extension:hmacCreateSecret"_ns,
++      "extension:largeBlob"_ns,
++      "extension:minPinLength"_ns,
++      "extension:prf"_ns,
++      "hybridTransport"_ns,
++      "passkeyPlatformAuthenticator"_ns,
++      // WebAuthnService adds "relatedOrigins" unless
++      // StaticPrefs::security_webauthn_related_origin_requests_mode() is 0.
++      "userVerifyingPlatformAuthenticator"_ns,
++  };
++  return NS_OK;
++}
++
+ NS_IMETHODIMP
+ AndroidWebAuthnService::MakeCredential(uint64_t aTransactionId,
+                                        uint64_t aBrowsingContextId,
+diff --git a/dom/webauthn/MacOSWebAuthnService.mm b/dom/webauthn/MacOSWebAuthnService.mm
+index c9012a6a..ed6b1314 100644
+--- a/dom/webauthn/MacOSWebAuthnService.mm
++++ b/dom/webauthn/MacOSWebAuthnService.mm
+@@ -1340,6 +1340,28 @@ nsresult BrowsingContextIdToNSWindow(uint64_t browsingContextId,
+   return NS_OK;
+ }
+ 
++NS_IMETHODIMP
++MacOSWebAuthnService::GetClientCapabilities(
++    nsTArray<nsCString>& aClientCapabilities) {
++  aClientCapabilities = nsTArray<nsCString>{
++      // WebAuthnService removes this if
++      // StaticPrefs::security_webauthn_enable_conditional_mediation() is false.
++      "conditionalGet"_ns,
++      "extension:appid"_ns,
++      "extension:credProps"_ns,
++      "extension:hmacCreateSecret"_ns,
++      "extension:largeBlob"_ns,
++      "extension:minPinLength"_ns,
++      "extension:prf"_ns,
++      "hybridTransport"_ns,
++      "passkeyPlatformAuthenticator"_ns,
++      // WebAuthnService adds "relatedOrigins" unless
++      // StaticPrefs::security_webauthn_related_origin_requests_mode() is 0.
++      "userVerifyingPlatformAuthenticator"_ns,
++  };
++  return NS_OK;
++}
++
+ NS_IMETHODIMP
+ MacOSWebAuthnService::Cancel(uint64_t aTransactionId) {
+   MOZ_ASSERT(NS_IsMainThread());
+diff --git a/dom/webauthn/PWebAuthnTransaction.ipdl b/dom/webauthn/PWebAuthnTransaction.ipdl
+index 9b21bf42..34420374 100644
+--- a/dom/webauthn/PWebAuthnTransaction.ipdl
++++ b/dom/webauthn/PWebAuthnTransaction.ipdl
+@@ -196,6 +196,7 @@ async protocol PWebAuthnTransaction {
+     async RequestRegister(WebAuthnMakeCredentialInfo aTransactionInfo) returns (WebAuthnMakeCredentialResponse response);
+     async RequestSign(WebAuthnGetAssertionInfo aTransactionInfo) returns (WebAuthnGetAssertionResponse response);
+     async RequestIsUVPAA() returns (bool available);
++    async RequestClientCapabilities() returns (nsCString[] capabilities);
+     async RequestCancel();
+ 
+   child:
+diff --git a/dom/webauthn/PublicKeyCredential.cpp b/dom/webauthn/PublicKeyCredential.cpp
+index a5c4ebb5..22ea74be 100644
+--- a/dom/webauthn/PublicKeyCredential.cpp
++++ b/dom/webauthn/PublicKeyCredential.cpp
+@@ -6,7 +6,6 @@
+ 
+ #include "mozilla/Base64.h"
+ #include "mozilla/Preferences.h"
+-#include "mozilla/StaticPrefs_security.h"
+ #include "mozilla/dom/AuthenticatorResponse.h"
+ #include "mozilla/dom/ChromeUtils.h"
+ #include "mozilla/dom/CredentialsContainer.h"
+@@ -98,10 +97,12 @@ void PublicKeyCredential::SetAssertionResponse(
+   mAssertionResponse = aAssertionResponse;
+ }
+ 
+-/* static */
+-already_AddRefed<Promise>
+-PublicKeyCredential::IsUserVerifyingPlatformAuthenticatorAvailable(
+-    GlobalObject& aGlobal, ErrorResult& aError) {
++// Creates a promise and passes it to aCall together with the WebAuthnHandler
++// of aGlobal's window.
++template <typename F>
++static already_AddRefed<Promise> CallWebAuthnHandler(GlobalObject& aGlobal,
++                                                     ErrorResult& aError,
++                                                     F&& aCall) {
+   nsCOMPtr<nsPIDOMWindowInner> window =
+       do_QueryInterface(aGlobal.GetAsSupports());
+   if (!window) {
+@@ -117,163 +118,40 @@ PublicKeyCredential::IsUserVerifyingPlatformAuthenticatorAvailable(
+ 
+   RefPtr<WebAuthnHandler> handler =
+       window->Navigator()->Credentials()->GetWebAuthnHandler();
+-  handler->IsUVPAA(promise);
++  aCall(handler, promise);
+ 
+   return promise.forget();
+ }
+ 
+ /* static */
+-already_AddRefed<Promise> PublicKeyCredential::GetClientCapabilities(
++already_AddRefed<Promise>
++PublicKeyCredential::IsUserVerifyingPlatformAuthenticatorAvailable(
+     GlobalObject& aGlobal, ErrorResult& aError) {
+-  RefPtr<Promise> promise =
+-      Promise::Create(xpc::CurrentNativeGlobal(aGlobal.Context()), aError);
+-  if (aError.Failed()) {
+-    return nullptr;
+-  }
+-
+-  // From https://w3c.github.io/webauthn/#sctn-getClientCapabilities:
+-  //    Keys in PublicKeyCredentialClientCapabilities MUST be sorted in
+-  //    ascending lexicographical order. The set of keys SHOULD contain the set
+-  //    of enumeration values of ClientCapability
+-  //    (https://w3c.github.io/webauthn/#enumdef-clientcapability) but the
+-  //    client MAY omit keys as it deems necessary. [...] The set of keys SHOULD
+-  //    also contain a key for each extension implemented by the client, where
+-  //    the key is formed by prefixing the string 'extension:' to the extension
+-  //    identifier. The associated value for each implemented extension SHOULD
+-  //    be true.
+-  //
+-  Record<nsString, bool> capabilities;
+-
+-  auto entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"conditionalCreate"_ns;
+-  entry->mValue = false;
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"conditionalGet"_ns;
+-#if defined(MOZ_WIDGET_ANDROID)
+-  entry->mValue = false;
+-#else
+-  entry->mValue = StaticPrefs::security_webauthn_enable_conditional_mediation();
+-#endif
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"extension:appid"_ns;
+-  entry->mValue = true;
+-
+-  // Bug 1570429: support the appidExclude extension.
+-  // entry = capabilities.Entries().AppendElement();
+-  // entry->mKey = u"extension:appidExclude"_ns;
+-  // entry->mValue = true;
+-
+-  // Bug 1844448: support the credBlob extension.
+-  // entry = capabilities.Entries().AppendElement();
+-  // entry->mKey = u"extension:credBlob"_ns;
+-  // entry->mValue = true;
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"extension:credProps"_ns;
+-  entry->mValue = true;
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"extension:credentialProtectionPolicy"_ns;
+-#if defined(XP_MACOSX) || defined(MOZ_WIDGET_ANDROID)
+-  entry->mValue = false;
+-#else
+-  entry->mValue = true;
+-#endif
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"extension:enforceCredentialProtectionPolicy"_ns;
+-#if defined(XP_MACOSX) || defined(MOZ_WIDGET_ANDROID)
+-  entry->mValue = false;
+-#else
+-  entry->mValue = true;
+-#endif
+-
+-  // Bug 1844448: support the credBlob extension.
+-  // entry = capabilities.Entries().AppendElement();
+-  // entry->mKey = u"extension:getCredBlob"_ns;
+-  // entry->mValue = true;
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"extension:hmacCreateSecret"_ns;
+-  entry->mValue = true;
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"extension:largeBlob"_ns;
+-#if defined(XP_MACOSX) || defined(XP_WIN) || defined(MOZ_WIDGET_ANDROID)
+-  entry->mValue = true;
+-#else
+-  entry->mValue = false;
+-#endif
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"extension:minPinLength"_ns;
+-  entry->mValue = true;
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"extension:prf"_ns;
+-  entry->mValue = true;
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"hybridTransport"_ns;
+-#if defined(XP_MACOSX) || defined(XP_WIN) || defined(MOZ_WIDGET_ANDROID)
+-  entry->mValue = true;
+-#else
+-  entry->mValue = false;
+-#endif
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"passkeyPlatformAuthenticator"_ns;
+-#if defined(XP_MACOSX) || defined(XP_WIN) || defined(MOZ_WIDGET_ANDROID)
+-  entry->mValue = true;
+-#else
+-  entry->mValue = false;
+-#endif
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"relatedOrigins"_ns;
+-  entry->mValue = true;
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"signalAllAcceptedCredentials"_ns;
+-  entry->mValue = false;
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"signalCurrentUserDetails"_ns;
+-  entry->mValue = false;
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"signalUnknownCredential"_ns;
+-  entry->mValue = false;
+-
+-  entry = capabilities.Entries().AppendElement();
+-  entry->mKey = u"userVerifyingPlatformAuthenticator"_ns;
+-#if defined(XP_MACOSX) || defined(XP_WIN) || defined(MOZ_WIDGET_ANDROID)
+-  entry->mValue = true;
+-#else
+-  entry->mValue = false;
+-#endif
++  return CallWebAuthnHandler(
++      aGlobal, aError,
++      [](WebAuthnHandler* aHandler, const RefPtr<Promise>& aPromise) {
++        aHandler->IsUVPAA(aPromise);
++      });
++}
+ 
+-  promise->MaybeResolve(capabilities);
+-  return promise.forget();
++/* static */
++already_AddRefed<Promise> PublicKeyCredential::GetClientCapabilities(
++    GlobalObject& aGlobal, ErrorResult& aError) {
++  return CallWebAuthnHandler(
++      aGlobal, aError,
++      [](WebAuthnHandler* aHandler, const RefPtr<Promise>& aPromise) {
++        aHandler->GetClientCapabilities(aPromise);
++      });
+ }
+ 
+ /* static */
+ already_AddRefed<Promise> PublicKeyCredential::IsConditionalMediationAvailable(
+     GlobalObject& aGlobal, ErrorResult& aError) {
+-  RefPtr<Promise> promise =
+-      Promise::Create(xpc::CurrentNativeGlobal(aGlobal.Context()), aError);
+-  if (aError.Failed()) {
+-    return nullptr;
+-  }
+-#if defined(MOZ_WIDGET_ANDROID)
+-  promise->MaybeResolve(false);
+-#else
+-  promise->MaybeResolve(
+-      StaticPrefs::security_webauthn_enable_conditional_mediation());
+-#endif
+-  return promise.forget();
++  return CallWebAuthnHandler(
++      aGlobal, aError,
++      [](WebAuthnHandler* aHandler, const RefPtr<Promise>& aPromise) {
++        aHandler->IsConditionalMediationAvailable(aPromise);
++      });
+ }
+ 
+ void PublicKeyCredential::GetClientExtensionResults(
+diff --git a/dom/webauthn/WebAuthnHandler.cpp b/dom/webauthn/WebAuthnHandler.cpp
+index 50127a8e..347326a1 100644
+--- a/dom/webauthn/WebAuthnHandler.cpp
++++ b/dom/webauthn/WebAuthnHandler.cpp
+@@ -15,6 +15,7 @@
+ #include "mozilla/dom/AuthenticatorAttestationResponse.h"
+ #include "mozilla/dom/PWebAuthnTransaction.h"
+ #include "mozilla/dom/PublicKeyCredential.h"
++#include "mozilla/dom/Record.h"
+ #include "mozilla/dom/WebAuthenticationBinding.h"
+ #include "mozilla/dom/WebAuthnTransactionChild.h"
+ #include "mozilla/dom/WebAuthnUtil.h"
+@@ -22,6 +23,7 @@
+ #include "mozilla/glean/DomWebauthnMetrics.h"
+ #include "nsContentUtils.h"
+ #include "nsHTMLDocument.h"
++#include "nsIGlobalObject.h"
+ #include "nsIURIMutator.h"
+ #include "nsThreadUtils.h"
+ 
+@@ -694,6 +696,114 @@ void WebAuthnHandler::IsUVPAA(const RefPtr<Promise>& aPromise) {
+       });
+ }
+ 
++// From https://w3c.github.io/webauthn/#sctn-getClientCapabilities:
++//    Keys in PublicKeyCredentialClientCapabilities MUST be sorted in
++//    ascending lexicographical order. The set of keys SHOULD contain the set
++//    of enumeration values of ClientCapability
++//    (https://w3c.github.io/webauthn/#enumdef-clientcapability) but the
++//    client MAY omit keys as it deems necessary. [...] The set of keys SHOULD
++//    also contain a key for each extension implemented by the client, where
++//    the key is formed by prefixing the string 'extension:' to the extension
++//    identifier. The associated value for each implemented extension SHOULD
++//    be true.
++//
++// Every platform reports the same keys; their values come from the
++// nsIWebAuthnService in the parent process.
++static constexpr nsLiteralCString kClientCapabilities[] = {
++    "conditionalCreate"_ns,
++    "conditionalGet"_ns,
++    "extension:appid"_ns,
++    // Bug 1570429: support the appidExclude extension.
++    // "extension:appidExclude"_ns,
++    // Bug 1844448: support the credBlob extension.
++    // "extension:credBlob"_ns,
++    "extension:credProps"_ns,
++    "extension:credentialProtectionPolicy"_ns,
++    "extension:enforceCredentialProtectionPolicy"_ns,
++    // Bug 1844448: support the credBlob extension.
++    // "extension:getCredBlob"_ns,
++    "extension:hmacCreateSecret"_ns,
++    "extension:largeBlob"_ns,
++    "extension:minPinLength"_ns,
++    "extension:prf"_ns,
++    "hybridTransport"_ns,
++    "passkeyPlatformAuthenticator"_ns,
++    "relatedOrigins"_ns,
++    "signalAllAcceptedCredentials"_ns,
++    "signalCurrentUserDetails"_ns,
++    "signalUnknownCredential"_ns,
++    "userVerifyingPlatformAuthenticator"_ns,
++};
++
++// Reported instead of the real capabilities when resisting fingerprinting.
++static constexpr nsLiteralCString kResistFingerprintingClientCapabilities[] = {
++    "conditionalGet"_ns,
++    "extension:appid"_ns,
++    "extension:credProps"_ns,
++    "extension:credentialProtectionPolicy"_ns,
++    "extension:enforceCredentialProtectionPolicy"_ns,
++    "extension:hmacCreateSecret"_ns,
++    "extension:largeBlob"_ns,
++    "extension:minPinLength"_ns,
++    "extension:prf"_ns,
++    "hybridTransport"_ns,
++    "passkeyPlatformAuthenticator"_ns,
++    "relatedOrigins"_ns,
++    "userVerifyingPlatformAuthenticator"_ns,
++};
++
++void WebAuthnHandler::RequestClientCapabilities(
++    std::function<void(const nsTArray<nsCString>&)>&& aCallback) {
++  if (mWindow->AsGlobal()->ShouldResistFingerprinting(
++          RFPTarget::WebAuthnClientCapabilities)) {
++    nsTArray<nsCString> capabilities;
++    for (const nsLiteralCString& key :
++         kResistFingerprintingClientCapabilities) {
++      capabilities.AppendElement(key);
++    }
++    aCallback(capabilities);
++    return;
++  }
++
++  if (!MaybeCreateActor()) {
++    aCallback(nsTArray<nsCString>());
++    return;
++  }
++
++  mActor->SendRequestClientCapabilities()->Then(
++      GetCurrentSerialEventTarget(), __func__,
++      [callback = std::move(aCallback)](
++          const PWebAuthnTransactionChild::RequestClientCapabilitiesPromise::
++              ResolveOrRejectValue& aValue) {
++        if (aValue.IsResolve()) {
++          callback(aValue.ResolveValue());
++        } else {
++          callback(nsTArray<nsCString>());
++        }
++      });
++}
++
++void WebAuthnHandler::GetClientCapabilities(const RefPtr<Promise>& aPromise) {
++  RequestClientCapabilities(
++      [promise = RefPtr{aPromise}](const nsTArray<nsCString>& aSupported) {
++        Record<nsString, bool> capabilities;
++        for (const nsLiteralCString& key : kClientCapabilities) {
++          auto entry = capabilities.Entries().AppendElement();
++          CopyASCIItoUTF16(key.AsString(), entry->mKey);
++          entry->mValue = aSupported.Contains(key);
++        }
++        promise->MaybeResolve(capabilities);
++      });
++}
++
++void WebAuthnHandler::IsConditionalMediationAvailable(
++    const RefPtr<Promise>& aPromise) {
++  RequestClientCapabilities(
++      [promise = RefPtr{aPromise}](const nsTArray<nsCString>& aSupported) {
++        promise->MaybeResolve(aSupported.Contains("conditionalGet"_ns));
++      });
++}
++
+ void WebAuthnHandler::FinishMakeCredential(
+     const WebAuthnMakeCredentialResult& aResult) {
+   MOZ_ASSERT(NS_IsMainThread());
+diff --git a/dom/webauthn/WebAuthnHandler.h b/dom/webauthn/WebAuthnHandler.h
+index 270b53f2..38e82a76 100644
+--- a/dom/webauthn/WebAuthnHandler.h
++++ b/dom/webauthn/WebAuthnHandler.h
+@@ -5,6 +5,8 @@
+ #ifndef mozilla_dom_WebAuthnHandler_h
+ #define mozilla_dom_WebAuthnHandler_h
+ 
++#include <functional>
++
+ #include "mozilla/Maybe.h"
+ #include "mozilla/MozPromise.h"
+ #include "mozilla/dom/AbortSignal.h"
+@@ -96,6 +98,11 @@ class WebAuthnHandler final : public AbortFollower {
+ 
+   void IsUVPAA(const RefPtr<Promise>& aPromise);
+ 
++  // Resolves aPromise with a PublicKeyCredentialClientCapabilities record.
++  void GetClientCapabilities(const RefPtr<Promise>& aPromise);
++
++  void IsConditionalMediationAvailable(const RefPtr<Promise>& aPromise);
++
+   void ActorDestroyed();
+ 
+   // AbortFollower
+@@ -106,6 +113,11 @@ class WebAuthnHandler final : public AbortFollower {
+ 
+   bool MaybeCreateActor();
+ 
++  // Calls aCallback with the supported client capability keys. Calls it with
++  // an empty list if they can't be determined.
++  void RequestClientCapabilities(
++      std::function<void(const nsTArray<nsCString>&)>&& aCallback);
++
+   void FinishMakeCredential(const WebAuthnMakeCredentialResult& aResult);
+ 
+   void FinishGetAssertion(const WebAuthnGetAssertionResult& aResult);
+diff --git a/dom/webauthn/WebAuthnService.cpp b/dom/webauthn/WebAuthnService.cpp
+index 6e3a91b1..24a1312f 100644
+--- a/dom/webauthn/WebAuthnService.cpp
++++ b/dom/webauthn/WebAuthnService.cpp
+@@ -329,6 +329,23 @@ WebAuthnService::GetIsUVPAA(bool* aAvailable) {
+   return DefaultService()->GetIsUVPAA(aAvailable);
+ }
+ 
++NS_IMETHODIMP
++WebAuthnService::GetClientCapabilities(
++    nsTArray<nsCString>& aClientCapabilities) {
++  nsresult rv = DefaultService()->GetClientCapabilities(aClientCapabilities);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  if (!StaticPrefs::security_webauthn_enable_conditional_mediation()) {
++    aClientCapabilities.RemoveElement("conditionalGet"_ns);
++  }
++  // Related origin requests are checked by Firefox itself, independent of the
++  // service handling the request.
++  if (StaticPrefs::security_webauthn_related_origin_requests_mode() != 0) {
++    aClientCapabilities.AppendElement("relatedOrigins"_ns);
++  }
++  return NS_OK;
++}
++
+ NS_IMETHODIMP
+ WebAuthnService::HasPendingConditionalGet(uint64_t aBrowsingContextId,
+                                           const nsAString& aOrigin,
+diff --git a/dom/webauthn/WebAuthnTransactionParent.cpp b/dom/webauthn/WebAuthnTransactionParent.cpp
+index ba2fe2c3..18928e5b 100644
+--- a/dom/webauthn/WebAuthnTransactionParent.cpp
++++ b/dom/webauthn/WebAuthnTransactionParent.cpp
+@@ -837,6 +837,31 @@ mozilla::ipc::IPCResult WebAuthnTransactionParent::RecvRequestIsUVPAA(
+ #endif
+ }
+ 
++mozilla::ipc::IPCResult
++WebAuthnTransactionParent::RecvRequestClientCapabilities(
++    RequestClientCapabilitiesResolver&& aResolver) {
++  MOZ_ASSERT(NS_IsMainThread());
++
++  nsCOMPtr<nsISerialEventTarget> target = GetCurrentSerialEventTarget();
++  nsCOMPtr<nsIRunnable> runnable(NS_NewRunnableFunction(
++      __func__, [target, resolver = std::move(aResolver)]() mutable {
++        nsTArray<nsCString> capabilities;
++        nsCOMPtr<nsIWebAuthnService> service(
++            do_GetService("@mozilla.org/webauthn/service;1"));
++        if (!service ||
++            NS_FAILED(service->GetClientCapabilities(capabilities))) {
++          capabilities.Clear();
++        }
++        target->Dispatch(NS_NewRunnableFunction(
++            __func__, [resolver = std::move(resolver),
++                       capabilities = std::move(capabilities)]() {
++              resolver(capabilities);
++            }));
++      }));
++  NS_DispatchBackgroundTask(runnable.forget(), NS_DISPATCH_EVENT_MAY_BLOCK);
++  return IPC_OK();
++}
++
+ void WebAuthnTransactionParent::ActorDestroy(ActorDestroyReason aWhy) {
+   // Called either by Send__delete__() in RecvDestroyMe() above, or when
+   // the channel disconnects. Ensure the token manager forgets about us.
+diff --git a/dom/webauthn/WebAuthnTransactionParent.h b/dom/webauthn/WebAuthnTransactionParent.h
+index 9fa85c3d..6b6ffe1f 100644
+--- a/dom/webauthn/WebAuthnTransactionParent.h
++++ b/dom/webauthn/WebAuthnTransactionParent.h
+@@ -42,6 +42,9 @@ class WebAuthnTransactionParent final : public PWebAuthnTransactionParent {
+   mozilla::ipc::IPCResult RecvRequestIsUVPAA(
+       RequestIsUVPAAResolver&& aResolver);
+ 
++  mozilla::ipc::IPCResult RecvRequestClientCapabilities(
++      RequestClientCapabilitiesResolver&& aResolver);
++
+   mozilla::ipc::IPCResult RecvDestroyMe();
+ 
+   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+diff --git a/dom/webauthn/WinWebAuthnService.cpp b/dom/webauthn/WinWebAuthnService.cpp
+index 77dc66e6..5363596a 100644
+--- a/dom/webauthn/WinWebAuthnService.cpp
++++ b/dom/webauthn/WinWebAuthnService.cpp
+@@ -214,6 +214,30 @@ WinWebAuthnService::GetIsUVPAA(bool* aAvailable) {
+   return NS_OK;
+ }
+ 
++NS_IMETHODIMP
++WinWebAuthnService::GetClientCapabilities(
++    nsTArray<nsCString>& aClientCapabilities) {
++  aClientCapabilities = nsTArray<nsCString>{
++      // WebAuthnService removes this if
++      // StaticPrefs::security_webauthn_enable_conditional_mediation() is false.
++      "conditionalGet"_ns,
++      "extension:appid"_ns,
++      "extension:credProps"_ns,
++      "extension:credentialProtectionPolicy"_ns,
++      "extension:enforceCredentialProtectionPolicy"_ns,
++      "extension:hmacCreateSecret"_ns,
++      "extension:largeBlob"_ns,
++      "extension:minPinLength"_ns,
++      "extension:prf"_ns,
++      "hybridTransport"_ns,
++      "passkeyPlatformAuthenticator"_ns,
++      // WebAuthnService adds "relatedOrigins" unless
++      // StaticPrefs::security_webauthn_related_origin_requests_mode() is 0.
++      "userVerifyingPlatformAuthenticator"_ns,
++  };
++  return NS_OK;
++}
++
+ NS_IMETHODIMP
+ WinWebAuthnService::Cancel(uint64_t aTransactionId) {
+   MOZ_ASSERT(NS_IsMainThread());
+diff --git a/dom/webauthn/authrs_bridge/src/lib.rs b/dom/webauthn/authrs_bridge/src/lib.rs
+index 6e340691..92b4c2e3 100644
+--- a/dom/webauthn/authrs_bridge/src/lib.rs
++++ b/dom/webauthn/authrs_bridge/src/lib.rs
+@@ -773,6 +773,27 @@ impl AuthrsService {
+         }
+     }
+ 
++    xpcom_method!(get_client_capabilities => GetClientCapabilities() -> ThinVec<nsCString>);
++    fn get_client_capabilities(&self) -> Result<ThinVec<nsCString>, nsresult> {
++        Ok([
++            // WebAuthnService removes this if
++            // StaticPrefs::security_webauthn_enable_conditional_mediation() is false.
++            "conditionalGet",
++            "extension:appid",
++            "extension:credProps",
++            "extension:credentialProtectionPolicy",
++            "extension:enforceCredentialProtectionPolicy",
++            "extension:hmacCreateSecret",
++            "extension:minPinLength",
++            "extension:prf",
++            // WebAuthnService adds "relatedOrigins" unless
++            // StaticPrefs::security_webauthn_related_origin_requests_mode() is 0.
++        ]
++        .into_iter()
++        .map(nsCString::from)
++        .collect())
++    }
++
+     xpcom_method!(make_credential => MakeCredential(aTid: u64, aBrowsingContextId: u64, aArgs: *const nsIWebAuthnRegisterArgs, aPromise: *const nsIWebAuthnRegisterPromise));
+     fn make_credential(
+         &self,
+diff --git a/dom/webauthn/nsIWebAuthnService.idl b/dom/webauthn/nsIWebAuthnService.idl
+index adab9b7c..184db8d5 100644
+--- a/dom/webauthn/nsIWebAuthnService.idl
++++ b/dom/webauthn/nsIWebAuthnService.idl
+@@ -38,6 +38,11 @@ interface nsIWebAuthnService : nsISupports
+     // IsUserVerifyingPlatformAuthenticatorAvailable
+     readonly attribute boolean isUVPAA;
+ 
++    // The PublicKeyCredential.getClientCapabilities() keys (ClientCapability
++    // values and "extension:<id>") supported by this service. Keys that are
++    // not listed are reported as false. May be called off the main thread.
++    readonly attribute Array<AUTF8String> clientCapabilities;
++
+     [noscript]
+     void makeCredential(
+         in uint64_t aTransactionId,
+diff --git a/dom/webauthn/tests/mochitest.toml b/dom/webauthn/tests/mochitest.toml
+index c0b00d7b..a6ae009d 100644
+--- a/dom/webauthn/tests/mochitest.toml
++++ b/dom/webauthn/tests/mochitest.toml
+@@ -90,6 +90,8 @@ run-if = [
+   "os != 'win'", # Bug 1718296 (Windows 10 1903+ has its own window and U2F that we cannot control with tests.)
+ ]
+ 
++["test_webauthn_get_client_capabilities.html"]
++
+ ["test_webauthn_in_xhtml.xhtml"]
+ fail-if = [
+   "xorigin",
+diff --git a/dom/webauthn/tests/test_webauthn_get_client_capabilities.html b/dom/webauthn/tests/test_webauthn_get_client_capabilities.html
+new file mode 100644
+index 00000000..5ddc0c27
+--- /dev/null
++++ b/dom/webauthn/tests/test_webauthn_get_client_capabilities.html
+@@ -0,0 +1,113 @@
++<!DOCTYPE html>
++<meta charset=utf-8>
++<head>
++  <title>Test for W3C Web Authentication getClientCapabilities</title>
++  <script src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++
++<h1>Test for W3C Web Authentication getClientCapabilities</h1>
++<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=2088324">Mozilla Bug 2088324</a>
++
++<script class="testbody" type="text/javascript">
++"use strict";
++
++// The softtoken pref makes authenticator-rs handle all requests, so these are
++// its capabilities. relatedOrigins is false because the test manifest sets
++// security.webauthn.related_origin_requests_mode to 0.
++const AUTHRS_CAPABILITIES = {
++  conditionalCreate: false,
++  conditionalGet: true,
++  "extension:appid": true,
++  "extension:credProps": true,
++  "extension:credentialProtectionPolicy": true,
++  "extension:enforceCredentialProtectionPolicy": true,
++  "extension:hmacCreateSecret": true,
++  "extension:largeBlob": false,
++  "extension:minPinLength": true,
++  "extension:prf": true,
++  hybridTransport: false,
++  passkeyPlatformAuthenticator: false,
++  relatedOrigins: false,
++  signalAllAcceptedCredentials: false,
++  signalCurrentUserDetails: false,
++  signalUnknownCredential: false,
++  userVerifyingPlatformAuthenticator: false,
++};
++
++const RESIST_FINGERPRINTING_CAPABILITIES = {
++  ...AUTHRS_CAPABILITIES,
++  "extension:largeBlob": true,
++  hybridTransport: true,
++  passkeyPlatformAuthenticator: true,
++  relatedOrigins: true,
++  userVerifyingPlatformAuthenticator: true,
++};
++
++async function loadFrame() {
++  let frame = document.createElement("iframe");
++  frame.src = "empty.html";
++  let loaded = new Promise(resolve =>
++    frame.addEventListener("load", resolve, { once: true })
++  );
++  document.body.appendChild(frame);
++  await loaded;
++  return frame.contentWindow;
++}
++
++add_task(async function test_capabilities() {
++  let capabilities = await PublicKeyCredential.getClientCapabilities();
++  isDeeply(
++    Object.keys(capabilities),
++    Object.keys(AUTHRS_CAPABILITIES),
++    "All keys are reported, in sorted order"
++  );
++  isDeeply(capabilities, AUTHRS_CAPABILITIES, "authenticator-rs capabilities");
++  is(
++    await PublicKeyCredential.isConditionalMediationAvailable(),
++    true,
++    "isConditionalMediationAvailable matches conditionalGet"
++  );
++});
++
++add_task(async function test_prefs() {
++  await SpecialPowers.pushPrefEnv({
++    set: [
++      ["security.webauthn.enable_conditional_mediation", false],
++      ["security.webauthn.related_origin_requests_mode", 1],
++    ],
++  });
++  let capabilities = await PublicKeyCredential.getClientCapabilities();
++  is(capabilities.conditionalGet, false, "conditionalGet follows its pref");
++  is(capabilities.relatedOrigins, true, "relatedOrigins follows its pref");
++  is(
++    await PublicKeyCredential.isConditionalMediationAvailable(),
++    false,
++    "isConditionalMediationAvailable follows its pref"
++  );
++  await SpecialPowers.popPrefEnv();
++});
++
++add_task(async function test_resist_fingerprinting() {
++  await SpecialPowers.pushPrefEnv({
++    set: [["privacy.resistFingerprinting", true]],
++  });
++  let win = await loadFrame();
++  let capabilities = await win.PublicKeyCredential.getClientCapabilities();
++  isDeeply(
++    capabilities,
++    RESIST_FINGERPRINTING_CAPABILITIES,
++    "Fixed capabilities when resisting fingerprinting"
++  );
++  is(
++    await win.PublicKeyCredential.isConditionalMediationAvailable(),
++    true,
++    "Fixed isConditionalMediationAvailable when resisting fingerprinting"
++  );
++  await SpecialPowers.popPrefEnv();
++});
++</script>
++
++</body>
++</html>
+diff --git a/toolkit/components/resistfingerprinting/RFPTargets.inc b/toolkit/components/resistfingerprinting/RFPTargets.inc
+index 8be14ed3..573023b3 100644
+--- a/toolkit/components/resistfingerprinting/RFPTargets.inc
++++ b/toolkit/components/resistfingerprinting/RFPTargets.inc
+@@ -114,6 +114,8 @@ ITEM_VALUE(WebGLVendorRandomize,        79)
+ ITEM_VALUE(WebGLRendererConstant,       80)
+ // How IME software in use chooses to style composition (exposed via EditContext)
+ ITEM_VALUE(IMEStyle,                    81)
++// PublicKeyCredential.getClientCapabilities() and isConditionalMediationAvailable()
++ITEM_VALUE(WebAuthnClientCapabilities,  82)
+ 
+ /*
+  * In certain cases, we precompute the value of ShouldRFP for e.g. a Document.
+diff --git a/tools/@types/subs/RFPTargetConstants.sys.d.mts b/tools/@types/subs/RFPTargetConstants.sys.d.mts
+index 49169a7d..658c4a01 100644
+--- a/tools/@types/subs/RFPTargetConstants.sys.d.mts
++++ b/tools/@types/subs/RFPTargetConstants.sys.d.mts
+@@ -80,6 +80,7 @@ export namespace Targets {
+     let WebGLVendorRandomize: number;
+     let WebGLRendererConstant: number;
+     let IMEStyle: number;
++    let WebAuthnClientCapabilities: number;
+     let IsAlwaysEnabledForPrecompute: number;
+     let AllTargets: number;
+ }
+-- 
+2.50.1 (Apple Git-155)
+

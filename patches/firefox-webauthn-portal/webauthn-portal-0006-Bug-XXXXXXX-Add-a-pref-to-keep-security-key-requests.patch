@@ -1,0 +1,292 @@
+From ff695adf3034475899f0c239d838c5c773d21717 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Fri, 13 Nov 2026 17:19:54 +1100
+Subject: [PATCH 6/7] Bug XXXXXXX - Add a pref to keep security key requests
+ off the credential portal. r?mfarrell
+
+With security.webauthn.use-xdg-desktop-portal enabled, every WebAuthn
+request goes to the credential portal. Add
+security.webauthn.use-xdg-desktop-portal.security-keys (default true, so
+nothing changes by default). When it is false, requests meant for a
+security key stay on authenticator-rs, and the portal only sees requests
+that a platform or hybrid authenticator can serve.
+
+A registration is meant for a security key when its hints say so, or
+when it has no deciding hint and asks for a cross-platform authenticator.
+An assertion is when its hints say so, or when every allowed credential
+lists only security key transports. An explicit "platform" registration,
+a discoverable credential request and a credential without transports
+all go to the portal.
+
+The classification lives in WebAuthnUtil so it can be tested without a
+portal.
+---
+ dom/webauthn/WebAuthnService.cpp              | 25 +++++++++
+ dom/webauthn/WebAuthnService.h                |  9 +++
+ dom/webauthn/WebAuthnUtil.cpp                 | 49 +++++++++++++++++
+ dom/webauthn/WebAuthnUtil.h                   | 12 ++++
+ .../tests/gtest/TestWebAuthnRouting.cpp       | 55 +++++++++++++++++++
+ dom/webauthn/tests/gtest/moz.build            |  1 +
+ modules/libpref/init/StaticPrefList.yaml      |  8 +++
+ 7 files changed, 159 insertions(+)
+ create mode 100644 dom/webauthn/tests/gtest/TestWebAuthnRouting.cpp
+
+diff --git a/dom/webauthn/WebAuthnService.cpp b/dom/webauthn/WebAuthnService.cpp
+index 24a1312f..0a6649e4 100644
+--- a/dom/webauthn/WebAuthnService.cpp
++++ b/dom/webauthn/WebAuthnService.cpp
+@@ -8,6 +8,7 @@
+ #include "WebAuthnTransportIdentifiers.h"
+ #include "mozilla/Services.h"
+ #include "mozilla/StaticPrefs_security.h"
++#include "mozilla/dom/WebAuthnUtil.h"
+ #include "nsIObserverService.h"
+ #include "nsTextFormatter.h"
+ #include "nsThreadUtils.h"
+@@ -141,6 +142,18 @@ WebAuthnService::MakeCredential(uint64_t aTransactionId,
+   }
+ #endif
+ 
++#if defined(MOZ_WIDGET_GTK) && defined(MOZ_ENABLE_DBUS)
++  if (KeepSecurityKeysOnAuthrs()) {
++    nsAutoString attachment;
++    (void)aArgs->GetAuthenticatorAttachment(attachment);
++    nsTArray<nsString> hints;
++    (void)aArgs->GetHints(hints);
++    if (IsSecurityKeyRegistration(attachment, hints)) {
++      mActiveTransaction.ref().service = AuthrsService();
++    }
++  }
++#endif
++
+   // We may need to show an attestation consent prompt before we return a
+   // credential to WebAuthnTransactionParent, so we insert a new promise that
+   // chains to `aPromise` here.
+@@ -315,6 +328,18 @@ WebAuthnService::GetAssertion(uint64_t aTransactionId,
+   }
+ #endif
+ 
++#if defined(MOZ_WIDGET_GTK) && defined(MOZ_ENABLE_DBUS)
++  if (KeepSecurityKeysOnAuthrs()) {
++    nsTArray<uint8_t> allowListTransports;
++    (void)aArgs->GetAllowListTransports(allowListTransports);
++    nsTArray<nsString> hints;
++    (void)aArgs->GetHints(hints);
++    if (IsSecurityKeyAssertion(allowListTransports, hints)) {
++      mActiveTransaction.ref().service = AuthrsService();
++    }
++  }
++#endif
++
+   nsresult rv = ActiveService()->GetAssertion(
+       aTransactionId, aBrowsingContextId, aArgs, aPromise);
+   if (NS_FAILED(rv)) {
+diff --git a/dom/webauthn/WebAuthnService.h b/dom/webauthn/WebAuthnService.h
+index 8f3f87d6..36780b94 100644
+--- a/dom/webauthn/WebAuthnService.h
++++ b/dom/webauthn/WebAuthnService.h
+@@ -106,6 +106,15 @@ class WebAuthnService final : public nsIWebAuthnService {
+     return mPlatformService;
+   }
+ 
++#if defined(MOZ_WIDGET_GTK) && defined(MOZ_ENABLE_DBUS)
++  // Whether requests meant for a security key bypass the credential portal.
++  bool KeepSecurityKeysOnAuthrs() {
++    return DefaultService() != mAuthrsService &&
++           !StaticPrefs::
++               security_webauthn_use_xdg_desktop_portal_security_keys();
++  }
++#endif
++
+   // Returns the authrs_bridge service. This is the default service on some
+   // platforms, and it is used as a fallback to workaround platform specific
+   // bugs on others. It is also used for all commands related to the WebDriver
+diff --git a/dom/webauthn/WebAuthnUtil.cpp b/dom/webauthn/WebAuthnUtil.cpp
+index f4a4662d..9175a1c7 100644
+--- a/dom/webauthn/WebAuthnUtil.cpp
++++ b/dom/webauthn/WebAuthnUtil.cpp
+@@ -4,12 +4,15 @@
+ 
+ #include "mozilla/dom/WebAuthnUtil.h"
+ 
++#include "WebAuthnEnumStrings.h"
++#include "WebAuthnTransportIdentifiers.h"
+ #include "hasht.h"
+ #include "js/Exception.h"
+ #include "mozilla/Base64.h"
+ #include "mozilla/BasePrincipal.h"
+ #include "mozilla/Components.h"
+ #include "mozilla/ExtensionPolicyService.h"
++#include "mozilla/Maybe.h"
+ #include "mozilla/StaticPrefs_security.h"
+ #include "mozilla/dom/BrowsingContextGroup.h"
+ #include "mozilla/dom/RemoteType.h"
+@@ -803,4 +806,50 @@ nsresult SerializeWebAuthnRequestOptions(
+   return NS_OK;
+ }
+ 
++// Returns Some(true) for a "security-key" hint, Some(false) for a
++// "client-device" or "hybrid" hint, and Nothing if aHints has neither.
++static Maybe<bool> SecurityKeyHint(const nsTArray<nsString>& aHints) {
++  for (const nsString& hint : aHints) {
++    if (hint.EqualsLiteral("security-key")) {
++      return Some(true);
++    }
++    if (hint.EqualsLiteral("client-device") || hint.EqualsLiteral("hybrid")) {
++      return Some(false);
++    }
++  }
++  return Nothing();
++}
++
++bool IsSecurityKeyRegistration(const nsAString& aAuthenticatorAttachment,
++                               const nsTArray<nsString>& aHints) {
++  if (aAuthenticatorAttachment.EqualsLiteral(
++          MOZ_WEBAUTHN_AUTHENTICATOR_ATTACHMENT_PLATFORM)) {
++    return false;
++  }
++  if (Maybe<bool> hint = SecurityKeyHint(aHints)) {
++    return *hint;
++  }
++  return aAuthenticatorAttachment.EqualsLiteral(
++      MOZ_WEBAUTHN_AUTHENTICATOR_ATTACHMENT_CROSS_PLATFORM);
++}
++
++bool IsSecurityKeyAssertion(const nsTArray<uint8_t>& aAllowListTransports,
++                            const nsTArray<nsString>& aHints) {
++  if (Maybe<bool> hint = SecurityKeyHint(aHints)) {
++    return *hint;
++  }
++  if (aAllowListTransports.IsEmpty()) {
++    return false;
++  }
++  const uint8_t passkeyTransports =
++      MOZ_WEBAUTHN_AUTHENTICATOR_TRANSPORT_ID_INTERNAL |
++      MOZ_WEBAUTHN_AUTHENTICATOR_TRANSPORT_ID_HYBRID;
++  for (uint8_t transports : aAllowListTransports) {
++    if (transports == 0 || (transports & passkeyTransports)) {
++      return false;
++    }
++  }
++  return true;
++}
++
+ }  // namespace mozilla::dom
+diff --git a/dom/webauthn/WebAuthnUtil.h b/dom/webauthn/WebAuthnUtil.h
+index a134eeb5..541cdfd7 100644
+--- a/dom/webauthn/WebAuthnUtil.h
++++ b/dom/webauthn/WebAuthnUtil.h
+@@ -47,6 +47,18 @@ nsresult SerializeWebAuthnRequestOptions(
+     const PublicKeyCredentialRequestOptions& aOptions,
+     /* out */ nsString& aOut);
+ 
++// Whether a request is meant for a security key rather than a platform or
++// hybrid authenticator. A registration with authenticatorAttachment
++// "platform" never is. Otherwise the first of "security-key",
++// "client-device" and "hybrid" in aHints decides. Without such a hint, a
++// registration is when its authenticatorAttachment is "cross-platform", and
++// an assertion is when every allowed credential lists its transports and none
++// of them is "internal" or "hybrid".
++bool IsSecurityKeyRegistration(const nsAString& aAuthenticatorAttachment,
++                               const nsTArray<nsString>& aHints);
++bool IsSecurityKeyAssertion(const nsTArray<uint8_t>& aAllowListTransports,
++                            const nsTArray<nsString>& aHints);
++
+ }  // namespace mozilla::dom
+ 
+ #endif  // mozilla_dom_WebAuthnUtil_h
+diff --git a/dom/webauthn/tests/gtest/TestWebAuthnRouting.cpp b/dom/webauthn/tests/gtest/TestWebAuthnRouting.cpp
+new file mode 100644
+index 00000000..33ffaabc
+--- /dev/null
++++ b/dom/webauthn/tests/gtest/TestWebAuthnRouting.cpp
+@@ -0,0 +1,55 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "gtest/gtest.h"
++#include "mozilla/dom/WebAuthnTransportIdentifiers.h"
++#include "mozilla/dom/WebAuthnUtil.h"
++
++using namespace mozilla::dom;
++
++static const uint8_t kUsb = MOZ_WEBAUTHN_AUTHENTICATOR_TRANSPORT_ID_USB;
++static const uint8_t kNfc = MOZ_WEBAUTHN_AUTHENTICATOR_TRANSPORT_ID_NFC;
++static const uint8_t kInternal =
++    MOZ_WEBAUTHN_AUTHENTICATOR_TRANSPORT_ID_INTERNAL;
++static const uint8_t kHybrid = MOZ_WEBAUTHN_AUTHENTICATOR_TRANSPORT_ID_HYBRID;
++
++TEST(WebAuthnRouting, Registration)
++{
++  nsTArray<nsString> none;
++  EXPECT_FALSE(IsSecurityKeyRegistration(u""_ns, none));
++  EXPECT_FALSE(IsSecurityKeyRegistration(u"platform"_ns, none));
++  EXPECT_TRUE(IsSecurityKeyRegistration(u"cross-platform"_ns, none));
++
++  nsTArray<nsString> securityKey{u"security-key"_ns};
++  EXPECT_TRUE(IsSecurityKeyRegistration(u""_ns, securityKey));
++  EXPECT_FALSE(IsSecurityKeyRegistration(u"platform"_ns, securityKey));
++
++  nsTArray<nsString> hybridFirst{u"hybrid"_ns, u"security-key"_ns};
++  EXPECT_FALSE(IsSecurityKeyRegistration(u"cross-platform"_ns, hybridFirst));
++
++  nsTArray<nsString> clientDevice{u"client-device"_ns};
++  EXPECT_FALSE(IsSecurityKeyRegistration(u""_ns, clientDevice));
++
++  nsTArray<nsString> unknown{u"something-else"_ns};
++  EXPECT_TRUE(IsSecurityKeyRegistration(u"cross-platform"_ns, unknown));
++}
++
++TEST(WebAuthnRouting, Assertion)
++{
++  nsTArray<nsString> none;
++  EXPECT_FALSE(IsSecurityKeyAssertion({}, none));
++  EXPECT_TRUE(IsSecurityKeyAssertion({kUsb}, none));
++  EXPECT_TRUE(IsSecurityKeyAssertion({kUsb, uint8_t(kUsb | kNfc)}, none));
++  EXPECT_FALSE(IsSecurityKeyAssertion({kUsb, kInternal}, none));
++  EXPECT_FALSE(IsSecurityKeyAssertion({uint8_t(kUsb | kHybrid)}, none));
++  // A credential without transports could be a passkey.
++  EXPECT_FALSE(IsSecurityKeyAssertion({kUsb, 0}, none));
++
++  nsTArray<nsString> securityKey{u"security-key"_ns};
++  EXPECT_TRUE(IsSecurityKeyAssertion({}, securityKey));
++  EXPECT_TRUE(IsSecurityKeyAssertion({kInternal}, securityKey));
++
++  nsTArray<nsString> clientDevice{u"client-device"_ns};
++  EXPECT_FALSE(IsSecurityKeyAssertion({kUsb}, clientDevice));
++}
+diff --git a/dom/webauthn/tests/gtest/moz.build b/dom/webauthn/tests/gtest/moz.build
+index 43de3c0e..8d84f715 100644
+--- a/dom/webauthn/tests/gtest/moz.build
++++ b/dom/webauthn/tests/gtest/moz.build
+@@ -4,6 +4,7 @@
+ 
+ UNIFIED_SOURCES += [
+     "TestWebAuthnExtensionRpId.cpp",
++    "TestWebAuthnRouting.cpp",
+     "TestWebAuthnRpId.cpp",
+     "TestWebAuthnSerialization.cpp",
+ ]
+diff --git a/modules/libpref/init/StaticPrefList.yaml b/modules/libpref/init/StaticPrefList.yaml
+index 317c8298..dc819c19 100644
+--- a/modules/libpref/init/StaticPrefList.yaml
++++ b/modules/libpref/init/StaticPrefList.yaml
+@@ -19289,6 +19289,14 @@
+   type: RelaxedAtomicInt32
+   value: 2
+   mirror: always
++
++# When the Credential portal is used for WebAuthn, whether requests meant for
++# a security key go to the portal too. If false, they stay on
++# authenticator-rs and the portal only gets platform and hybrid requests.
++- name: security.webauthn.use-xdg-desktop-portal.security-keys
++  type: RelaxedAtomicBool
++  value: true
++  mirror: always
+ #endif
+ 
+ # Dispatch WebAuthn requests to authenticator-rs
+-- 
+2.50.1 (Apple Git-155)
+

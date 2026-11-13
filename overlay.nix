@@ -547,7 +547,19 @@ in {
       enablePGO = false;
       enableLTO = false;
     }).overrideAttrs (old: {
-      patches = (old.patches or [ ]) ++ [ (stableFile ./patches/firefox-rdd-v4l2-request.patch) ];
+      patches = (old.patches or [ ]) ++ [ (stableFile ./patches/firefox-rdd-v4l2-request.patch) ]
+        # WebAuthn through the credential portal (credentialsd): Mozilla bugs
+        # 2088324 and 1983767 and five commits on top, the same series as
+        # fedora-aurora and alarm-aurora. modules/aurora.nix turns it on.
+        ++ map stableFile [
+          ./patches/firefox-webauthn-portal/webauthn-portal-0001-Bug-2088324-WebAuthn-plumb-getClientCapabilities-and.patch
+          ./patches/firefox-webauthn-portal/webauthn-portal-0002-Bug-1983767-Implement-support-for-credentialsd-porta.patch
+          ./patches/firefox-webauthn-portal/webauthn-portal-0003-Bug-XXXXXXX-Build-xdg_credentials_responses-against-.patch
+          ./patches/firefox-webauthn-portal/webauthn-portal-0004-Bug-XXXXXXX-Report-credential-portal-capabilities-an.patch
+          ./patches/firefox-webauthn-portal/webauthn-portal-0005-Bug-XXXXXXX-Let-WebAuthnService-hold-conditional-req.patch
+          ./patches/firefox-webauthn-portal/webauthn-portal-0006-Bug-XXXXXXX-Add-a-pref-to-keep-security-key-requests.patch
+          ./patches/firefox-webauthn-portal/webauthn-portal-0007-Bug-XXXXXXX-Offer-credential-portal-passkeys-in-WebA.patch
+        ];
     });
   # nixpkgs exposes a symlink join here: overriding its src does not replace
   # the inner model derivation. Build the pinned models explicitly, then merge

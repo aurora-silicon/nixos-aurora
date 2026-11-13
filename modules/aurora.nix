@@ -103,6 +103,13 @@
     services.displayManager.gdm.enable = config.aurora.desktop == "gnome";
     # Every Aurora desktop image comes with a web browser, as Fedora and ALARM do.
     programs.firefox.enable = config.aurora.desktop != "minimal";
+    # WebAuthn through the credential portal where it exists (credentialsd
+    # starts it), else authenticator-rs; security keys always stay on
+    # authenticator-rs. As fedora-aurora's and alarm-aurora's default prefs.
+    programs.firefox.preferences = {
+      "security.webauthn.use-xdg-desktop-portal" = 1;
+      "security.webauthn.use-xdg-desktop-portal.security-keys" = false;
+    };
     # Every image has the OpenSSH server, but nothing starts it: no unit at
     # boot wants sshd or its host key generation, and the firewall keeps
     # port 22 closed. `sudo systemctl start sshd` starts it without a rebuild

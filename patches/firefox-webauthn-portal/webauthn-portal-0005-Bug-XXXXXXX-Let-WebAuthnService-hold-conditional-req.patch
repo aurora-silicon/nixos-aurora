@@ -1,0 +1,190 @@
+From 3b8435bfb0fa163fc82d088f9f9f4e4fd76e329f Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Fri, 13 Nov 2026 17:18:30 +1100
+Subject: [PATCH 5/7] Bug XXXXXXX - Let WebAuthnService hold conditional
+ requests for the credential portal. r?mfarrell
+
+WebAuthnService now keeps pending conditional (autofill) requests itself
+and calls the backend's GetAssertion only once the user picks an entry or
+the request is resumed. The portal service still kept its own copy of a
+conditional request in GetAssertion, so a request handed over by
+WebAuthnService was parked again and never reached the portal.
+
+Drop that state and run every GetAssertion against the portal, as the
+other platform services do.
+---
+ dom/webauthn/XdgPortalWebAuthnService.cpp | 92 +----------------------
+ dom/webauthn/XdgPortalWebAuthnService.h   | 26 -------
+ 2 files changed, 4 insertions(+), 114 deletions(-)
+
+diff --git a/dom/webauthn/XdgPortalWebAuthnService.cpp b/dom/webauthn/XdgPortalWebAuthnService.cpp
+index 3df44894..736191be 100644
+--- a/dom/webauthn/XdgPortalWebAuthnService.cpp
++++ b/dom/webauthn/XdgPortalWebAuthnService.cpp
+@@ -161,35 +161,6 @@ XdgPortalWebAuthnService::GetAssertion(uint64_t aTransactionId,
+                                        uint64_t aBrowsingContextId,
+                                        nsIWebAuthnSignArgs* aArgs,
+                                        nsIWebAuthnSignPromise* aPromise) {
+-  Reset();
+-
+-  // Check if this is a conditional mediation request
+-  bool conditionallyMediated = false;
+-  nsresult rv = aArgs->GetConditionallyMediated(&conditionallyMediated);
+-  if (NS_FAILED(rv)) {
+-    aPromise->Reject(rv);
+-    return NS_OK;
+-  }
+-
+-  if (conditionallyMediated) {
+-    // Cache the request and wait for the conditional UI to trigger it
+-    nsAutoString origin;
+-    rv = aArgs->GetOrigin(origin);
+-    if (NS_FAILED(rv)) {
+-      aPromise->Reject(rv);
+-      return NS_OK;
+-    }
+-
+-    RefPtr<BrowsingContext> bc = BrowsingContext::Get(aBrowsingContextId);
+-    nsCOMPtr<nsIWidget> widget =
+-        bc ? bc->Canonical()->GetParentProcessWidgetContaining() : nullptr;
+-
+-    mPendingConditionalGet.emplace(aTransactionId, aBrowsingContextId, origin,
+-                                   ""_ns, aArgs, aPromise, widget.get());
+-    return NS_OK;
+-  }
+-
+-  // Not conditional - proceed immediately
+   RefPtr<BrowsingContext> bc = BrowsingContext::Get(aBrowsingContextId);
+   nsCOMPtr<nsIWidget> widget =
+       bc ? bc->Canonical()->GetParentProcessWidgetContaining() : nullptr;
+@@ -213,40 +184,16 @@ XdgPortalWebAuthnService::GetAssertion(uint64_t aTransactionId,
+ }
+ 
+ NS_IMETHODIMP
+-XdgPortalWebAuthnService::Reset() {
+-  if (auto pending = std::move(mPendingConditionalGet)) {
+-    pending->mPromise->Reject(NS_ERROR_ABORT);
+-  }
+-  MOZ_ASSERT(!mPendingConditionalGet);
+-  return NS_OK;
+-}
++XdgPortalWebAuthnService::Reset() { return NS_OK; }
+ 
+ NS_IMETHODIMP
+-XdgPortalWebAuthnService::Cancel(uint64_t aTransactionId) {
+-  if (mPendingConditionalGet.isSome() &&
+-      mPendingConditionalGet->mTransactionId == aTransactionId) {
+-    mPendingConditionalGet->mPromise->Reject(NS_ERROR_ABORT);
+-    mPendingConditionalGet.reset();
+-  }
+-  return NS_OK;
+-}
++XdgPortalWebAuthnService::Cancel(uint64_t aTransactionId) { return NS_OK; }
+ 
+ NS_IMETHODIMP
+ XdgPortalWebAuthnService::HasPendingConditionalGet(uint64_t aBrowsingContextId,
+                                                    const nsAString& aOrigin,
+                                                    uint64_t* aRv) {
+-  if (mPendingConditionalGet.isNothing()) {
+-    *aRv = 0;
+-    return NS_OK;
+-  }
+-
+-  const auto& pending = mPendingConditionalGet.ref();
+-  if (pending.mBrowsingContextId == aBrowsingContextId &&
+-      pending.mOrigin.Equals(aOrigin)) {
+-    *aRv = pending.mTransactionId;
+-  } else {
+-    *aRv = 0;
+-  }
++  *aRv = 0;
+   return NS_OK;
+ }
+ 
+@@ -274,38 +221,7 @@ XdgPortalWebAuthnService::SelectAutoFillEntry(
+ 
+ NS_IMETHODIMP
+ XdgPortalWebAuthnService::ResumeConditionalGet(uint64_t aTransactionId) {
+-  if (mPendingConditionalGet.isNothing()) {
+-    return NS_ERROR_NOT_AVAILABLE;
+-  }
+-
+-  auto pending = mPendingConditionalGet.extract();
+-
+-  if (pending.mTransactionId != aTransactionId) {
+-    return NS_ERROR_INVALID_ARG;
+-  }
+-
+-  // Copy values so both lambdas can capture them
+-  RefPtr<nsIWebAuthnSignArgs> args = pending.mArgs;
+-  RefPtr<nsIWebAuthnSignPromise> promise = pending.mPromise;
+-  nsCOMPtr<nsIWidget> widget = pending.mWidget;
+-
+-  // Now execute the cached request
+-  if (!widget) {
+-    DoGetAssertion(""_ns, args, promise, nullptr);
+-    return NS_OK;
+-  }
+-
+-  ExportWindowHandle(widget.get())
+-      ->Then(
+-          GetCurrentSerialEventTarget(), __func__,
+-          [self = RefPtr{this}, args, promise,
+-           widget](const nsCString& aHandle) {
+-            self->DoGetAssertion(aHandle, args, promise, widget);
+-          },
+-          [self = RefPtr{this}, args, promise](bool) {
+-            self->DoGetAssertion(""_ns, args, promise, nullptr);
+-          });
+-  return NS_OK;
++  return NS_ERROR_NOT_AVAILABLE;
+ }
+ 
+ NS_IMETHODIMP
+diff --git a/dom/webauthn/XdgPortalWebAuthnService.h b/dom/webauthn/XdgPortalWebAuthnService.h
+index 49a40acc..2f5a7ef6 100644
+--- a/dom/webauthn/XdgPortalWebAuthnService.h
++++ b/dom/webauthn/XdgPortalWebAuthnService.h
+@@ -5,7 +5,6 @@
+ #ifndef mozilla_dom_XdgPortalWebAuthnService_h_
+ #define mozilla_dom_XdgPortalWebAuthnService_h_
+ 
+-#include "mozilla/Maybe.h"
+ #include "nsIWebAuthnService.h"
+ #include "nsString.h"
+ 
+@@ -34,31 +33,6 @@ class XdgPortalWebAuthnService final : public nsIWebAuthnService {
+                       nsIWebAuthnSignArgs* aArgs,
+                       RefPtr<nsIWebAuthnSignPromise> aPromise,
+                       nsCOMPtr<nsIWidget> aWidget);
+-
+-  // Pending conditional get state
+-  struct PendingConditionalGet {
+-    uint64_t mTransactionId;
+-    uint64_t mBrowsingContextId;
+-    nsString mOrigin;
+-    nsCString mWindowHandle;
+-    RefPtr<nsIWebAuthnSignArgs> mArgs;
+-    RefPtr<nsIWebAuthnSignPromise> mPromise;
+-    nsIWidget* mWidget;
+-
+-    PendingConditionalGet(uint64_t aTransactionId, uint64_t aBrowsingContextId,
+-                          const nsString& aOrigin,
+-                          const nsCString& aWindowHandle,
+-                          nsIWebAuthnSignArgs* aArgs,
+-                          nsIWebAuthnSignPromise* aPromise, nsIWidget* aWidget)
+-        : mTransactionId(aTransactionId),
+-          mBrowsingContextId(aBrowsingContextId),
+-          mOrigin(aOrigin),
+-          mWindowHandle(aWindowHandle),
+-          mArgs(aArgs),
+-          mPromise(aPromise),
+-          mWidget(aWidget) {}
+-  };
+-  Maybe<PendingConditionalGet> mPendingConditionalGet;
+ };
+ 
+ }  // namespace dom
+-- 
+2.50.1 (Apple Git-155)
+
