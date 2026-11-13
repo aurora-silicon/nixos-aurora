@@ -1,25 +1,35 @@
 {
   "cache": {
     "actor": "RyanTheTide",
-    "commit": "88bba5d83a4b77ec08e80b8cb45d6ae0f91ed49e",
-    "deployed_at": "2026-11-12T13:41:05Z",
+    "commit": "9713718d878b5c51a8c913033030d9067fcb3ea0",
+    "deployed_at": "2026-11-13T01:38:17Z",
     "provenance": "verified",
-    "released_at": "2026-11-12T12:22:37Z",
-    "run_id": "43229162330",
-    "tag": "cache-testing-20261112.4"
+    "released_at": "2026-11-13T00:37:23Z",
+    "run_id": "43345933472",
+    "tag": "cache-testing-20261113.1"
   },
   "channels": {
     "testing": {
       "actor": "RyanTheTide",
-      "commit": "88bba5d83a4b77ec08e80b8cb45d6ae0f91ed49e",
-      "deployed_at": "2026-11-12T13:41:05Z",
+      "commit": "9713718d878b5c51a8c913033030d9067fcb3ea0",
+      "deployed_at": "2026-11-13T01:38:17Z",
       "provenance": "verified",
-      "released_at": "2026-11-12T12:22:37Z",
-      "run_id": "43229162330",
-      "tag": "cache-testing-20261112.4"
+      "released_at": "2026-11-13T00:37:23Z",
+      "run_id": "43345933472",
+      "tag": "cache-testing-20261113.1"
     }
   },
   "history": [
+    {
+      "actor": "RyanTheTide",
+      "channel": "testing",
+      "commit": "9713718d878b5c51a8c913033030d9067fcb3ea0",
+      "deployed_at": "2026-11-13T01:38:17Z",
+      "provenance": "verified",
+      "released_at": "2026-11-13T00:37:23Z",
+      "run_id": "43345933472",
+      "tag": "cache-testing-20261113.1"
+    },
     {
       "actor": "RyanTheTide",
       "channel": "testing",
