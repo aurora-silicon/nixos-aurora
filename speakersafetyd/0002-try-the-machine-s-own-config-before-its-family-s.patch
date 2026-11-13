@@ -1,0 +1,103 @@
+From: Roberto Dantas <7robertodantas@gmail.com>
+Subject: [PATCH] Try the machine's own config before its family's
+
+speakersafetyd names its configuration after the machine's first
+compatible with the variant letters dropped ("apple,j575c" ->
+apple/j575.conf), so every variant of a machine shares one file. The
+Mac Studio M4 Max (J575c) and M3 Ultra (J575d) share the enclosure and
+the speaker, and so the model, but not the sense layout: the J575c's
+speaker is on the AOP's stream, whose sense PCM has twelve channels,
+where j575.conf describes two. Started with j575.conf on a J575c,
+snd_pcm_hw_params_set_channels fails and the daemon panics, which
+leaves the speaker at the kernel's floor.
+
+Look for the machine's own file first (apple/j575c.conf) and fall back
+to the family's, as before. The ALSA device keeps the family's name
+(hw:AppleJ575), the sound card's.
+
+Downstream (Aurora Silicon) patch. Ported to speakersafetyd 3.0.0 (the
+release nixpkgs ships) from alarm-aurora#267's patch on 2.0.1; the code
+is the same, rebased onto 3.0.0's main().
+
+Signed-off-by: Roberto Dantas <7robertodantas@gmail.com>
+Assisted-by: LLM (Claude Code)
+---
+diff --git a/src/main.rs b/src/main.rs
+index d0cfda7..261893c 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -76,13 +76,22 @@ fn period_rate(known: i32, cur: i32) -> PeriodRate {
+ 
+ #[cfg(test)]
+ mod period_rate_tests {
+-    use super::{period_rate, PeriodRate};
++    use super::{config_candidates, family_model, period_rate, PeriodRate};
+ 
+     #[test]
+     fn a_probe_period_before_any_rate_is_skipped() {
+         assert_eq!(period_rate(0, 0), PeriodRate::ProbeClosed);
+     }
+ 
++    #[test]
++    fn a_variant_tries_its_own_config_before_its_family_s() {
++        assert_eq!(config_candidates("j575c"), vec!["j575c", "j575"]);
++        assert_eq!(config_candidates("j616s"), vec!["j616s", "j616"]);
++        assert_eq!(config_candidates("j375"), vec!["j375"]);
++        assert_eq!(family_model("j575c"), "j575");
++        assert_eq!(family_model("j375"), "j375");
++    }
++
+     #[test]
+     fn a_known_rate_is_kept_after_the_speakers_close() {
+         assert_eq!(period_rate(48000, 0), PeriodRate::Known(48000));
+@@ -105,10 +114,27 @@ fn get_machine() -> String {
+         .split_once("\0")
+         .expect("Unexpected compatible format")
+         .0
+-        .trim_end_matches(|c: char| c.is_ascii_alphabetic())
+         .to_string()
+ }
+ 
++/// The machine's model without its variant letters ("j575c" -> "j575"): the
++/// sound card's name and the configuration a machine family shares.
++fn family_model(model: &str) -> &str {
++    model.trim_end_matches(|c: char| c.is_ascii_alphabetic())
++}
++
++/// The configuration files to try, most specific first: the machine's own
++/// ("j575c.conf"), for a variant whose speaker sense differs from its
++/// family's, then the family's ("j575.conf").
++fn config_candidates(model: &str) -> Vec<String> {
++    let family = family_model(model);
++    if family == model {
++        vec![family.to_string()]
++    } else {
++        vec![model.to_string(), family.to_string()]
++    }
++}
++
+ fn get_speakers(config: &Ini) -> Vec<String> {
+     config
+         .sections()
+@@ -168,13 +194,18 @@ fn main() {
+     let machine: String = get_machine();
+     info!("Machine: {}", machine);
+ 
+-    let (maker, model) = machine
++    let (maker, full_model) = machine
+         .split_once(",")
+         .expect("Unexpected machine name format");
++    let model = family_model(full_model);
+ 
+     config_path.push(maker);
+-    config_path.push(model);
+-    config_path.set_extension("conf");
++    let candidates = config_candidates(full_model);
++    let config_path = candidates
++        .iter()
++        .map(|name| config_path.join(name).with_extension("conf"))
++        .find(|path| path.exists())
++        .unwrap_or_else(|| config_path.join(model).with_extension("conf"));
+     info!("Config file: {:?}", config_path);
+ 
+     let maker_titlecase = maker[0..1].to_ascii_uppercase() + &maker[1..];

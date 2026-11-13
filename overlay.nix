@@ -557,19 +557,27 @@ in {
     pin = pins.alsa-ucm-conf-aurora;
   };
   # Fedora Aurora's speakersafetyd-aurora-profiles: the J616s speaker model
-  # (speakersafetyd's J316 values with the J616 V/I sense layout) and the udev
-  # rule that starts the daemon for its card. The daemon reads its models from
-  # its own share directory, so they go into the package.
+  # (speakersafetyd's J316 values with the J616 V/I sense layout), the J575c
+  # speaker model (Mac Studio M4 Max) and the udev rule that starts the daemon
+  # for its card. The daemon reads its models from its own share directory, so
+  # they go into the package.
   speakersafetyd = prev.speakersafetyd.overrideAttrs (old: {
     # Downstream: a sense period read after a startup probe closed the speakers
     # is skipped instead of panicking the daemon (every boot and PipeWire restart
     # on an M2 Air). Any other invalid rate still fails safe. Same change as
     # fedora-aurora/alarm-aurora speakersafetyd 2.0.1, on nixpkgs' 3.0.0.
+    # 0002 tries the machine's own config (apple/j575c.conf) before its family's
+    # (apple/j575.conf), so the J575c, whose AOP speaker stream carries twelve
+    # sense channels where j575.conf describes two, gets its own profile instead
+    # of panicking the daemon. Ported from alarm-aurora#267 (Roberto Dantas),
+    # rebased onto 3.0.0's main().
     patches = (old.patches or [ ]) ++ [
       (stableFile ./speakersafetyd/0001-skip-a-sense-period-read-after-a-probe-closed-the-speakers.patch)
+      (stableFile ./speakersafetyd/0002-try-the-machine-s-own-config-before-its-family-s.patch)
     ];
     postInstall = (old.postInstall or "") + ''
       install -Dm644 ${stableFile ./speakersafetyd/j616.conf} $out/share/speakersafetyd/apple/j616.conf
+      install -Dm644 ${stableFile ./speakersafetyd/j575c.conf} $out/share/speakersafetyd/apple/j575c.conf
       install -Dm644 ${stableFile ./speakersafetyd/96-speakersafetyd-aurora.rules} \
         $out/lib/udev/rules.d/96-speakersafetyd-aurora.rules
     '';
