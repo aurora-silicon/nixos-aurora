@@ -32,7 +32,7 @@
     "version": "26.3.0",
     "source_url": "https://codeload.github.com/aurora-silicon/mesa/tar.gz/bbad52187b6086375806e2430f605fbe70c1c78d",
     "archive_root": "mesa-bbad52187b6086375806e2430f605fbe70c1c78d",
-    "sha256": "dde34150a7bc8b62b283a9468334c0a9449e5ae07404c5539388fc67a4599092",
+    "sha256": "29c79d84aba076cee25268f1e67ead4c2e4ad34c00d6f759a1060ec427051b87",
     "nix_hash": "sha256-KcedhKugds7iUmjx5n6tTC5K00wA1vdZoQYOxCcFG4c="
   },
   "speakerguardd": {
