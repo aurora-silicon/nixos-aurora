@@ -15,7 +15,8 @@ class PrefetchSourcesTests(unittest.TestCase):
         self.pins = json.loads((ROOT / 'sources.json').read_text())
 
     def test_vendored_helpers_and_patched_nixpkgs_packages_need_no_aurora_archives(self):
-        self.assertEqual(module.select_sources(['sep', 'plymouth', 'docker'], self.archives), [])
+        self.assertEqual(module.select_sources(
+            ['sep', 'plymouth', 'docker', 'j773g-binary-kernel'], self.archives), [])
         with self.assertRaisesRegex(ValueError, 'Unknown flake packages: typo'):
             module.select_sources(['typo'], self.archives)
 

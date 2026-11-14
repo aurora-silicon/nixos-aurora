@@ -29,6 +29,7 @@ NEEDS = {
     'plymouth-theme-aurora': [],  # theme and artwork are vendored in this Git source
     'logos': [],  # licensed artwork is vendored in this Git source
     'kernel': ['kernel-aurora', 'bindgen'],
+    'j773g-binary-kernel': [],  # verified kernel payloads are vendored in this Git source
     'bindgen': ['bindgen'],
     'userpages': ['kernel-aurora'],
     'fex': ['fex-emu'],
