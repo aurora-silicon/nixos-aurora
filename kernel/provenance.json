@@ -1,5 +1,5 @@
 {
-  "kernel_commit": "d89d8c0ce7549460cd94d49dfe3b599577edc849",
+  "kernel_commit": "be8d4cd130cff6f39377f7fa86341e6f37e57d26",
   "config_source": "kernel/config is the canonical resolved ALARM configuration recorded in config_upstream. NixOS merges only kernel/nixos.config, resolves olddefconfig, then strictly validates the matching kernel asahi.config and NixOS policy. The snapshot kernel pin and SHA256 are checked during evaluation; refresh it from ALARM when the kernel pin changes.",
   "shared_fragment_source": "arch/arm64/configs/asahi.config at kernel_commit",
   "config_upstream": {
