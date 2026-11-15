@@ -271,6 +271,10 @@ in {
       systemd.services.fprintd = {
         requires = [ "aurora-sep.service" ];
         after = [ "aurora-sep.service" "aurora-sep-ready.service" ];
+        # Start the daemon with Touch ID instead of waiting for the first
+        # D-Bus call, so the first lock-screen unlock after boot does not pay
+        # for starting it. The daemon keeps running (--no-timeout below).
+        wantedBy = [ "aurora-sep-ready.service" ];
         unitConfig.ConditionPathExists = "/dev/sep-bio";
         serviceConfig = {
           ExecCondition = "${pkgs.aurora-sep}/libexec/aurora/sensor-present";
