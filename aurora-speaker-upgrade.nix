@@ -32,8 +32,7 @@ stdenvNoCC.mkDerivation {
     runHook postInstall
   '';
   meta = {
-    description = "Move the speakers to speakerguardd v2 with this Mac's own tuning (preview, ships disabled)";
-    longDescription = "speakerguardd v2 is a preview. It does not fully match macOS yet. The legacy protection (speakersafetyd, speakerguardd 0.1) is the supported default and stays installed. To go back at any time: sudo aurora-speaker-upgrade --revert.";
+    description = "Move the speakers to speakerguardd v2 with this Mac's own tuning (ships disabled)";
     license = lib.licenses.mit;
     platforms = [ "aarch64-linux" ];
     mainProgram = "aurora-speaker-upgrade";
