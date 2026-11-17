@@ -26,6 +26,18 @@ with `schedutil` and removing inherited boost writes. Stock tuned per-policy
 boost writes also fail with EINVAL on M2. That tuned-specific migration does
 not apply to PPD here.
 
+## Games (GameMode)
+
+With `programs.gamemode.enable = true`, `modules/gamemode.nix` gives GameMode
+the same defaults Fedora and ALARM install as `/etc/gamemode.ini`
+([aurora-platform `power/GAMEMODE.md`](https://github.com/aurora-silicon/aurora-platform/blob/main/power/GAMEMODE.md)):
+games started with GameMode run on the P cores (`pin_cores = "yes"`), and the
+governor stays `schedutil` instead of GameMode's default `performance`. On a
+MacBook Pro M4 Pro that takes two-frames-in-flight rendering from 197 to
+179 us per frame (geometry) and 162 to 145 us (fill) at the same energy per
+frame. Macs with fewer than four P cores (A18 Pro) are left unpinned by
+GameMode itself. Any `programs.gamemode.settings` value you set wins.
+
 ## Power Saver
 
 Power Saver gets a CPU power budget from `aurora-power-budget`, built from
