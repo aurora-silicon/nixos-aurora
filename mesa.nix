@@ -1,11 +1,11 @@
 { callPackage, lib, mesa, src, version, vulkan-loader, llvmPackages, spirv-tools, stdenv
 , mesa-libclc, spirv-llvm-translator, lm_sensors, libunwind
-, rustc, rust-bindgen, rust-cbindgen, valgrind-light, writeText
+, rustc, rust-bindgen, rust-cbindgen, valgrind-light
 , commit, guest ? false, compilerTools ? null }:
 (callPackage ./pkgs/mesa-common.nix {
   inherit lib mesa src version llvmPackages spirv-tools stdenv mesa-libclc
     spirv-llvm-translator lm_sensors libunwind rustc rust-bindgen rust-cbindgen
-    valgrind-light writeText commit guest;
+    valgrind-light commit guest;
 }).overrideAttrs (old: {
   outputs = [ "out" ] ++ lib.optionals (!guest) [ "dev" ];
   configurePhase = ''

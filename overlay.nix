@@ -69,6 +69,11 @@ in {
     src = source "libva-v4l2-request-avd";
     version = pins.libva-v4l2-request-avd.version;
     portabilityPatch = stableFile ./patches/libva-v4l2-request-offline-test-portability.patch;
+    # Chrome AV1 decode on AVD; drop when omacom/libva-v4l2_request merges them.
+    extraPatches = map stableFile [
+      ./patches/libva-v4l2-request-av1-chrome.patch
+      ./patches/libva-v4l2-request-av1-multitile.patch
+    ];
   };
   plymouth = prev.plymouth.overrideAttrs (old: {
     version = "${old.version}-aurora3";
@@ -87,6 +92,9 @@ in {
       (stableFile ./plymouth/0001-Fix-splash-keyboard-lifetime.patch)
       # Clear the previous DRM master's HDR state before the SDR splash scans out.
       (stableFile ./plymouth/0002-drm-Reset-inherited-HDR-connector-state-before-SDR.patch)
+      # Dirty only the copied areas: a full-buffer flush makes simpledrm copy the
+      # whole boot framebuffer for every animation frame.
+      (stableFile ./plymouth/0003-drm-Flush-only-the-damaged-areas.patch)
     ];
     doCheck = true;
     postCheck = (old.postCheck or "") + ''
@@ -112,6 +120,15 @@ in {
         -Wl,-rpath,"$PWD/src/libply" \
         -lply-splash-core -lply $($PKG_CONFIG --libs libdrm libevdev) -lm
       timeout 15s ./test-drm-sdr
+      $CC -D_GNU_SOURCE -Wall \
+        -I. -I.. -I../src/libply -I../src/libply-splash-core \
+        $($PKG_CONFIG --cflags libdrm libevdev) \
+        ${stableFile ./plymouth/test-drm-damage.c} -o test-drm-damage \
+        -Lsrc/libply-splash-core -Lsrc/libply \
+        -Wl,-rpath,"$PWD/src/libply-splash-core" \
+        -Wl,-rpath,"$PWD/src/libply" \
+        -lply-splash-core -lply $($PKG_CONFIG --libs libdrm libevdev) -lm
+      timeout 15s ./test-drm-damage
     '';
   });
   docker_29 = prev.docker_29.override { buildGoModule = dockerPolicyBuilder; };
@@ -119,6 +136,17 @@ in {
   aurora-logos = final.callPackage ./logos/package.nix { };
   plymouth-theme-aurora = final.callPackage ./plymouth-theme-aurora/package.nix { };
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
+    # Opt-in ambient white point in Night Light (AmbientWhitePoint in kwinrc,
+    # off by default), fed by iio-sensor-proxy's ColorTemperature. The same
+    # patch is in fedora-aurora's and alarm-aurora's kwin packages. Also
+    # upstream c9d72079 (6.8 branch), as in Fedora's kwin 6.8.2-3: no crash on
+    # a scanout device without a render device (DisplayLink).
+    kwin = kdePrev.kwin.overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ map stableFile [
+        ./patches/kwin-nightlight-ambient-white-point.patch
+        ./patches/kwin-handle-missing-render-device.patch
+      ];
+    });
     kinfocenter = kdePrev.kinfocenter.overrideAttrs (old: {
       patches = (old.patches or [ ]) ++ map stableFile [
         ./patches/kinfocenter-unknown-memory.patch
@@ -133,6 +161,51 @@ in {
         ./patches/plasma-setup-unique-pages.patch
       ];
     });
+  });
+  # The ambient light's colour temperature as SensorProxy's ColorTemperature,
+  # from the IIO in_colortemp_input channel. The same patch is in
+  # fedora-aurora's and alarm-aurora's iio-sensor-proxy packages.
+  iio-sensor-proxy = prev.iio-sensor-proxy.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./patches/iio-sensor-proxy-ambient-colour-temperature.patch)
+    ];
+    # Run the integration tests, which include one for the colour channel.
+    postPatch = (old.postPatch or "") + ''
+      patchShebangs tests
+    '';
+    mesonFlags = (old.mesonFlags or [ ]) ++ [ (final.lib.mesonBool "tests" true) ];
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
+      final.gobject-introspection
+      final.umockdev
+      (final.python3.withPackages (p: [ p.dbus-python p.python-dbusmock p.pygobject3 p.psutil ]))
+    ];
+    checkInputs = (old.checkInputs or [ ]) ++ [ final.umockdev ];
+    nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.dbus ];
+    doCheck = true;
+    # The Qualcomm SSC tests need SSC services that the sandbox lacks; they
+    # fail the same way on the unpatched 3.9.
+    checkPhase = ''
+      runHook preCheck
+      meson test --no-rebuild --print-errorlogs $(meson test --no-rebuild --list 2>/dev/null | grep -v ssc)
+      runHook postCheck
+    '';
+  });
+  # Opt-in ambient white point in the colour plugin
+  # (org.gnome.settings-daemon.plugins.color ambient-white-point-enabled, off
+  # by default). The same patch is in fedora-aurora's and alarm-aurora's
+  # gnome-settings-daemon packages.
+  gnome-settings-daemon = prev.gnome-settings-daemon.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./patches/gnome-settings-daemon-ambient-white-point.patch)
+    ];
+    nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.dbus ];
+    doCheck = true;
+    checkPhase = ''
+      runHook preCheck
+      export XDG_DATA_DIRS="${final.gsettings-desktop-schemas}/share/gsettings-schemas/${final.gsettings-desktop-schemas.name}''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+      meson test --no-rebuild --print-errorlogs gcm-self-test ambient-policy ambient-service
+      runHook postCheck
+    '';
   });
   gnome-initial-setup = prev.gnome-initial-setup.overrideAttrs (old: {
     mesonFlags = map (flag: if final.lib.hasPrefix "-Dvendor-conf-file=" flag
@@ -215,6 +288,12 @@ in {
   };
   aurora-firstboot = final.callPackage ./firstboot.nix { };
   aurora-power-budget = final.callPackage ./power-budget.nix { };
+  aurora-secboot = final.callPackage ./secboot.nix { };
+  # The installed macOS's Wi-Fi firmware onto the ESP (modules/wifi-firmware.nix).
+  aurora-wifi-firmware = final.callPackage ./aurora-wifi-firmware.nix {
+    src = source "aurora-wifi-firmware";
+    version = pins.aurora-wifi-firmware.version;
+  };
   # The legacy-to-speakerguardd-v2 upgrade tool (modules/speaker-upgrade.nix).
   aurora-speaker-upgrade = final.callPackage ./aurora-speaker-upgrade.nix {
     src = source "aurora-speaker-upgrade";
@@ -239,6 +318,16 @@ in {
     src = source "omarchy-ane-tools";
     version = pins.omarchy-ane-tools.version;
   };
+  # power-profiles-daemon reads the platform profile only from ACPI's
+  # /sys/firmware/acpi/platform_profile. A device tree boot (Apple silicon)
+  # has a platform profile only as a class device, such as the M5 Pro/Max
+  # CLPC's apple-clpc: fall back to the first /sys/class/platform-profile
+  # device when the ACPI file is missing. ACPI machines are unchanged.
+  power-profiles-daemon = prev.power-profiles-daemon.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./patches/power-profiles-daemon-platform-profile-class.patch)
+    ];
+  });
   # Drive.Size for NVMe controllers that leave TNVMCAP at zero, such as the
   # Apple silicon SSDs, from their namespaces (udisks f032f09cc760 for 2.11.x),
   # so GNOME's About page and desktop tools show the internal disk's capacity.
@@ -257,6 +346,8 @@ in {
   # period after a refused start and reports refusals at most once per 5 s;
   # 1008: a retry on a PCM that a system sleep suspended is an info line.
   # 1009: display audio nodes carry the ELD product name (upstream efb5aa06).
+  # 1010: a stream whose start the driver refused is prepared again on the next
+  # start (it failed every later start with -EPIPE until PipeWire restarted).
   # 1000-1004: AirPlay (RAOP)
   # sender fixes. nixpkgs runs the meson suite, with both new tests.
   aurora-pipewire = prev.pipewire.overrideAttrs (old: {
@@ -271,6 +362,7 @@ in {
       ./patches/pipewire/1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch
       ./patches/pipewire/1008-alsa-a-start-on-a-suspended-PCM-is-expected-not-an-error.patch
       ./patches/pipewire/1009-alsa-put-the-ELD-product-name-on-HDMI-DP-nodes.patch
+      ./patches/pipewire/1010-alsa-prepare-a-stream-again-after-its-start-failed.patch
     ];
     doCheck = true;
   });
@@ -318,7 +410,7 @@ in {
   linux-asahi = final.lib.makeOverridable ({ _kernelPatches ? [ ] }:
     final.lib.recurseIntoAttrs (final.linuxPackagesFor (import ./pkgs/kernel.nix {
       # Preserve buildLinux's .override API (features, extraMakeFlags, ...).
-      inherit (final) lib callPackage path writeText openssl binutils aurora-bindgen;
+      inherit (final) lib callPackage path writeText openssl kmod binutils aurora-bindgen;
       src = source "kernel-aurora" // { rev = pins.kernel-aurora.commit; };
       pin = pins.kernel-aurora;
       llvmPackages = kernelLLVM;
@@ -427,13 +519,36 @@ in {
   # A built-in panel in a variable refresh rate mode uses it on its whole
   # desktop, not only for fullscreen surfaces, so an idle desktop lets the
   # panel drop to its minimum rate.
+  # The renderer drops the onscreens it queued for power save page flips when
+  # it is disposed, before the Cogl display goes away, so gnome-shell does not
+  # crash at shutdown while outputs are in power save.
   mutter = prev.mutter.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ map stableFile [
       ./patches/mutter-prefer-variable-refresh-rate.patch
       ./patches/mutter-pq-reference-luminance.patch
       ./patches/mutter-builtin-desktop-vrr.patch
+      ./patches/mutter-power-save-onscreens-dispose.patch
     ];
   });
+  # Firefox's RDD sandbox admits the media controller node of an allowed M2M
+  # decoder and the four media/request ioctls libva-v4l2-request needs, so
+  # VA-API decodes on the AVD with the sandbox on (Mozilla bug 2080696; the
+  # same patch as fedora-aurora and alarm-aurora). nixpkgs' firefox wraps this
+  # firefox-unwrapped, so programs.firefox gets it, and it rebuilds with every
+  # nixpkgs Firefox update.
+  #
+  # Built without PGO and LTO, like Fedora's and Arch Linux ARM's aarch64
+  # Firefox. On aarch64-linux nixpkgs builds Firefox twice for PGO (an
+  # instrumented build, a profiling run, then a full-LTO rebuild); the
+  # instrumented build alone took over four hours on a 4-core CI runner, so the
+  # whole build never finished inside the runner's 6 hour job limit.
+  firefox-unwrapped =
+    (prev.firefox-unwrapped.override {
+      enablePGO = false;
+      enableLTO = false;
+    }).overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ [ (stableFile ./patches/firefox-rdd-v4l2-request.patch) ];
+    });
   # nixpkgs exposes a symlink join here: overriding its src does not replace
   # the inner model derivation. Build the pinned models explicitly, then merge
   # them ahead of the native common UCM definitions.
@@ -523,6 +638,7 @@ in {
         substituteInPlace $lx/$f --replace-quiet /usr/share/speakerguardd/ $out/share/speakerguardd/
       done
       install -Dm644 packaging/session/wiring.py packaging/session/gen.py -t $lx
+      substituteInPlace $lx/gen.py --replace-fail /usr/share/speakerguardd/ $out/share/speakerguardd/
       substituteInPlace $lx/speakerguardd-gate $lx/speakerguardd-provision \
         --replace-fail 'default="aurora-speaker-tuning"' "default=\"$out/bin/aurora-speaker-tuning\""
       substituteInPlace $lx/speakerguardd-gate --replace-fail '["amixer",' '["${final.alsa-utils}/bin/amixer",'
@@ -600,8 +716,9 @@ in {
     installFlags = [ "PREFIX=$(out)" ];
   };
   # The camera denoise filter, a PipeWire user daemon. Backends load from the
-  # package's own lib/aurora-camera-denoise, so a Neural Engine backend has to
-  # be built into this derivation. Settings come from /etc, which
+  # package's own lib/aurora-camera-denoise: cdn-backend-ave.so (the video
+  # encoder's temporal filter, the default where the kernel has it) and
+  # cdn-backend-ane.so (the Neural Engine low-light stage) are built here. Settings come from /etc, which
   # modules/camera-denoise.nix writes.
   aurora-camera-denoise = final.callPackage ./pkgs/camera-denoise.nix {
     src = source "camera-denoise";
@@ -612,6 +729,12 @@ in {
   aurora-kbd-light = final.callPackage ./pkgs/kbd-light.nix {
     src = source "kbd-light";
     pin = pins.kbd-light;
+  };
+  # Bring-up diagnostics, opt-in: modules/diag.nix installs it when
+  # aurora.diag.enable is set.
+  aurora-diag = final.callPackage ./pkgs/aurora-diag.nix {
+    src = source "aurora-diag";
+    pin = pins.aurora-diag;
   };
   # OpenSSH ecdsa-sk keys in the Secure Enclave (aurora-sep-userspace sk/):
   # the provider library, the udev rule giving the sep-key group /dev/sep-key
@@ -649,16 +772,28 @@ in {
       platforms = [ "aarch64-linux" ];
     };
   };
-  # Secure Enclave LUKS2 unlock (aurora-sep-userspace luks/): aurora-sep-cryptenroll
-  # and the cryptsetup token plugin. modules/sep-luks.nix installs it when asked.
+  # Secure Enclave LUKS2 unlock (aurora-sep-userspace luks/): aurora-sep-cryptenroll,
+  # aurora-sep-fde (password-sealed volumes with owners), the cryptsetup token
+  # plugin, pam_aurora_sep_fde and the initrd loader. modules/sep-luks.nix
+  # installs it when asked.
   aurora-sep-luks = final.stdenv.mkDerivation {
     pname = "aurora-sep-luks";
     version = pins.aurora-sep-luks.version;
     src = source "aurora-sep-luks";
     sourceRoot = "${pins.aurora-sep-luks.archive_root}/luks";
     nativeBuildInputs = [ final.pkg-config ];
-    buildInputs = [ final.cryptsetup final.json_c ];
-    makeFlags = [ "PREFIX=${placeholder "out"}" "TOKENDIR=${placeholder "out"}/lib/cryptsetup" ];
+    buildInputs = [ final.cryptsetup final.json_c final.pam ];
+    makeFlags = [
+      "PREFIX=${placeholder "out"}"
+      "TOKENDIR=${placeholder "out"}/lib/cryptsetup"
+      "LIBEXECDIR=${placeholder "out"}/libexec"
+      "PAMDIR=${placeholder "out"}/lib/security"
+      # The default fde.conf; modules/sep-luks.nix links it to /etc/aurora-sep.
+      "SYSCONFDIR=${placeholder "out"}/etc"
+    ];
+    # install-initrd adds the initrd loader and units that
+    # aurora.sepLuks.initrd uses; the dracut/mkinitcpio parts are not needed.
+    installTargets = [ "install" "install-initrd" ];
     # Kernel "user" keys stand in for the SEP. The test exits 77 when the
     # sandbox blocks the keyring. Kernels with af_alg_restrict refuse an
     # unprivileged ccm(aes) bind with ENOENT, which stops the test at its seal
@@ -681,7 +816,11 @@ in {
       runHook postCheck
     '';
     postInstall = ''
-      install -Dm644 ../docs/luks-sep.md $out/share/doc/aurora-sep-luks/luks-sep.md
+      for doc in luks-sep.md luks-sep-initrd.md luks-sep-owners.md; do
+        install -Dm644 ../docs/$doc $out/share/doc/aurora-sep-luks/$doc
+      done
+      # pam_aurora_sep_fde is built only when pkg-config finds pam.
+      test -e $out/lib/security/pam_aurora_sep_fde.so
     '';
     passthru.commit = pins.aurora-sep-luks.commit;
     meta = {
@@ -695,9 +834,9 @@ in {
   # Touch ID as a FIDO2/U2F security key (aurora-sep-userspace fido/).
   # modules/fido.nix runs it with aurora.fido.enable; off by default.
   aurora-fido = let
-    py = final.python3.withPackages (ps: [ ps.cryptography ps.pygobject3 ]);
-    typelibs = final.lib.makeSearchPath "lib/girepository-1.0"
-      [ final.glib.out final.gobject-introspection ];
+    # jeepney: the per-user agent's D-Bus front-end (vault = user).
+    py = final.python3.withPackages (ps: [ ps.cryptography ps.jeepney ]);
+    notificationPath = final.lib.makeBinPath [ final.util-linux final.libnotify final.glib.bin ];
   in final.stdenv.mkDerivation {
     pname = "aurora-fido";
     version = pins.aurora-fido.version;
@@ -714,11 +853,39 @@ in {
     # Unit tests: software stand-ins, no root, no hardware.
     doCheck = true;
     checkTarget = "check";
+    postPatch = ''
+      # The notifier sanitizes PATH before dropping into the user's session.
+      substituteInPlace aurora_fido/touchid.py \
+        --replace-fail '"PATH": "/usr/bin:/bin"' '"PATH": "${notificationPath}"'
+    '';
     postInstall = ''
-      for f in $out/bin/aurora-fido $out/libexec/aurora-fido/aurora-fidod; do
+      for f in $out/bin/aurora-fido $out/libexec/aurora-fido/aurora-fidod \
+               $out/libexec/aurora-fido/aurora-passkeyd; do
         substituteInPlace $f --replace-fail "#!/usr/bin/python3 -I" "#!${py.interpreter} -I"
-        wrapProgram $f --prefix GI_TYPELIB_PATH : ${typelibs}
       done
+    '';
+    doInstallCheck = true;
+    installCheckPhase = ''
+      runHook preInstallCheck
+      ${py.interpreter} - "$out" <<'PY'
+      import os
+      import subprocess
+      import sys
+
+      sys.path.insert(0, os.path.join(sys.argv[1], "lib/aurora-fido"))
+      from aurora_fido.touchid import Notifier
+
+      # Exercise the sanitized subprocess environment, not the build's PATH.
+      env = Notifier()._env(os.getuid())
+      for helper in ("setpriv", "notify-send", "gdbus"):
+          subprocess.run(
+              [helper, "--help"],
+              env=env,
+              check=True,
+              stdout=subprocess.DEVNULL,
+          )
+      PY
+      runHook postInstallCheck
     '';
     passthru.commit = pins.aurora-fido.commit;
     meta = {
@@ -859,6 +1026,76 @@ in {
   aurora-stage2 = final.callPackage ./stage2/package.nix { };
   aurora-bless = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
     cargoBuildFlags = [ "-p" "asahi-bless" ];
-    cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "asahi-nvram" ];
+    cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "aurora-nvram" ];
+  };
+  # NVRAM reader/writer from the aurora-bless workspace; parses the NVRAM v3
+  # stores of current Macs. asahi-nvram stays as a name for old scripts.
+  aurora-nvram = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
+    pname = "aurora-nvram";
+    cargoBuildFlags = [ "-p" "aurora-nvram" ];
+    cargoTestFlags = [ "-p" "aurora-nvram" ];
+    postInstall = ''
+      ln -s aurora-nvram $out/bin/asahi-nvram
+      install -Dm644 aurora-nvram/README.md NEO.md -t $out/share/doc/aurora-nvram
+      install -Dm644 LICENSE $out/share/licenses/aurora-nvram/LICENSE
+    '';
+    passthru.commit = pins.aurora-bless.commit;
+    meta = {
+      description = "Read and write NVRAM variables on Apple Silicon Macs";
+      homepage = "https://github.com/aurora-silicon/aurora-bless";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-nvram";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
+  # Bluetooth pairings made in macOS, copied into BlueZ's storage
+  # (modules/btsync.nix), from the aurora-bless workspace.
+  aurora-btsync = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
+    pname = "aurora-btsync";
+    nativeBuildInputs = [ final.pkg-config ];
+    buildInputs = [ final.dbus ];
+    cargoBuildFlags = [ "-p" "aurora-btsync" ];
+    cargoTestFlags = [ "-p" "aurora-btsync" ];
+    postInstall = ''
+      ln -s aurora-btsync $out/bin/asahi-btsync
+      unit=$out/lib/systemd/system/aurora-btsync.service
+      install -Dm644 aurora-btsync/etc/systemd/system/aurora-btsync.service $unit
+      substituteInPlace $unit --replace-fail /usr/bin/aurora-btsync $out/bin/aurora-btsync
+      ln -s aurora-btsync.service $out/lib/systemd/system/asahi-btsync.service
+      install -Dm644 aurora-btsync/etc/udev/rules.d/96-aurora-btsync.rules $out/lib/udev/rules.d/96-aurora-btsync.rules
+      install -Dm644 aurora-btsync/README.md -t $out/share/doc/aurora-btsync
+      install -Dm644 LICENSE $out/share/licenses/aurora-btsync/LICENSE
+    '';
+    passthru.commit = pins.aurora-bless.commit;
+    meta = {
+      description = "Use the Bluetooth pairings made in macOS on Linux";
+      homepage = "https://github.com/aurora-silicon/aurora-bless";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-btsync";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
+  # The built-in panel's brightness shared with the boot loader through NVRAM
+  # backlight-nits (modules/panel-nits.nix), from the aurora-bless workspace.
+  aurora-panel-nits = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
+    pname = "aurora-panel-nits";
+    cargoBuildFlags = [ "-p" "aurora-panel-nits" ];
+    cargoTestFlags = [ "-p" "aurora-panel-nits" ];
+    postInstall = ''
+      dropin="$out/lib/systemd/system/systemd-backlight@backlight:apple-panel-bl.service.d"
+      install -Dm644 aurora-panel-nits/systemd/aurora-panel-nits.service $out/lib/systemd/system/aurora-panel-nits.service
+      install -Dm644 aurora-panel-nits/systemd/50-aurora-panel-nits.conf "$dropin/50-aurora-panel-nits.conf"
+      install -Dm644 aurora-panel-nits/systemd/90-aurora-panel-nits.rules $out/lib/udev/rules.d/90-aurora-panel-nits.rules
+      substituteInPlace $out/lib/systemd/system/aurora-panel-nits.service "$dropin/50-aurora-panel-nits.conf" \
+        --replace-fail /usr/bin/aurora-panel-nits $out/bin/aurora-panel-nits
+    '';
+    passthru.commit = pins.aurora-bless.commit;
+    meta = {
+      description = "Built-in panel brightness shared with the boot loader through NVRAM";
+      homepage = "https://github.com/aurora-silicon/aurora-bless";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-panel-nits";
+      platforms = [ "aarch64-linux" ];
+    };
   };
 }

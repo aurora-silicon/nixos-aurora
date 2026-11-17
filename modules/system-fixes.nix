@@ -62,6 +62,16 @@ in {
     description = "Keep a Wake-on-LAN/WLAN device that is still activated after wake instead of reconnecting it.";
   };
   config = lib.mkMerge [
+    {
+      # The Apple SoC watchdog (24 MHz, 32-bit counter) cannot time out later
+      # than about 178 s. With systemd's default of 10 min the kernel keeps
+      # feeding it, so a reboot or kexec that stalls with the kernel running
+      # is not reset for over 10 minutes; 2 min is within the hardware range.
+      systemd.settings.Manager = {
+        RebootWatchdogSec = lib.mkDefault "2min";
+        KExecWatchdogSec = lib.mkDefault "2min";
+      };
+    }
     (lib.mkIf config.aurora.systemFixes.malcontentSignal {
       systemd.units = lib.genAttrs (map (name: "${name}.service")
         (daemons ++ [ "malcontent-webd-update" ])) signalFix;

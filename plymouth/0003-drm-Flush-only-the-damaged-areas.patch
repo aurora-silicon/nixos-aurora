@@ -1,0 +1,122 @@
+From d489ea1067a84900b58ad01cfe0633c34cb84bfa Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Wed, 11 Nov 2026 21:09:55 +1100
+Subject: [PATCH] drm: Flush only the damaged areas
+
+end_flush() passes the whole buffer to drmModeDirtyFB() on every
+redraw, even when only a small sprite changed. On drivers that copy
+damage to the scan-out buffer (simpledrm, other shadow-plane drivers)
+each animation frame then converts and writes the entire screen: on a
+2408x1506 boot framebuffer that is a 14.5 MB write per frame from
+plymouthd's thread.
+
+Pass the rectangles that flush_head() copied as the dirty clips (merged
+into a bounding box past 16), and the whole buffer only when the scan
+out buffer was reset or the mode is set on every redraw.
+---
+ src/plugins/renderers/drm/plugin.c | 55 +++++++++++++++++++++++++-----
+ 1 file changed, 47 insertions(+), 8 deletions(-)
+
+diff --git a/src/plugins/renderers/drm/plugin.c b/src/plugins/renderers/drm/plugin.c
+index 52c9c16..a9c476c 100644
+--- a/src/plugins/renderers/drm/plugin.c
++++ b/src/plugins/renderers/drm/plugin.c
+@@ -365,9 +365,15 @@ begin_flush (ply_renderer_backend_t *backend,
+         return buffer->map_address;
+ }
+ 
++/* Clip rectangles passed to one dirty-framebuffer call; more areas are
++ * merged into their bounding box. */
++#define MAX_FLUSH_CLIPS 16
++
+ static void
+ end_flush (ply_renderer_backend_t *backend,
+-           uint32_t                buffer_id)
++           uint32_t                buffer_id,
++           struct drm_clip_rect   *clips,
++           unsigned int            num_clips)
+ {
+         ply_renderer_buffer_t *buffer;
+ 
+@@ -379,12 +385,17 @@ end_flush (ply_renderer_backend_t *backend,
+                 struct drm_clip_rect flush_area;
+                 int ret;
+ 
+-                flush_area.x1 = 0;
+-                flush_area.y1 = 0;
+-                flush_area.x2 = buffer->width;
+-                flush_area.y2 = buffer->height;
++                /* Without areas, flush the whole buffer. */
++                if (num_clips == 0) {
++                        flush_area.x1 = 0;
++                        flush_area.y1 = 0;
++                        flush_area.x2 = buffer->width;
++                        flush_area.y2 = buffer->height;
++                        clips = &flush_area;
++                        num_clips = 1;
++                }
+ 
+-                ret = drmModeDirtyFB (backend->device_fd, buffer->id, &flush_area, 1);
++                ret = drmModeDirtyFB (backend->device_fd, buffer->id, clips, num_clips);
+ 
+                 if (ret == -ENOSYS)
+                         backend->requires_explicit_flushing = false;
+@@ -1736,6 +1747,8 @@ flush_head (ply_renderer_backend_t *backend,
+         ply_pixel_buffer_t *pixel_buffer;
+         char *map_address;
+         bool dirty = false;
++        struct drm_clip_rect clips[MAX_FLUSH_CLIPS];
++        unsigned int num_clips = 0;
+         static enum { PLY_SET_MODE_ON_REDRAWS_UNKNOWN = -1,
+                       PLY_SET_MODE_ON_REDRAWS_DISABLED,
+                       PLY_SET_MODE_ON_REDRAWS_ENABLED } set_mode_on_redraws = PLY_SET_MODE_ON_REDRAWS_UNKNOWN;
+@@ -1782,6 +1795,26 @@ flush_head (ply_renderer_backend_t *backend,
+                 ply_renderer_head_flush_area (head, area_to_flush, map_address);
+                 dirty = true;
+ 
++                if (area_to_flush->width > 0 && area_to_flush->height > 0) {
++                        struct drm_clip_rect clip = {
++                                .x1 = area_to_flush->x,
++                                .y1 = area_to_flush->y,
++                                .x2 = area_to_flush->x + area_to_flush->width,
++                                .y2 = area_to_flush->y + area_to_flush->height,
++                        };
++
++                        if (num_clips < MAX_FLUSH_CLIPS) {
++                                clips[num_clips++] = clip;
++                        } else {
++                                struct drm_clip_rect *last = &clips[MAX_FLUSH_CLIPS - 1];
++
++                                last->x1 = MIN (last->x1, clip.x1);
++                                last->y1 = MIN (last->y1, clip.y1);
++                                last->x2 = MAX (last->x2, clip.x2);
++                                last->y2 = MAX (last->y2, clip.y2);
++                        }
++                }
++
+                 node = ply_list_get_next_node (areas_to_flush, node);
+         }
+ 
+@@ -1791,11 +1824,17 @@ flush_head (ply_renderer_backend_t *backend,
+         }
+ 
+         if (dirty) {
+-                if (reset_scan_out_buffer_if_needed (backend, head))
++                /* A new scan-out buffer, or a mode set on every redraw,
++                 * needs the whole buffer flushed. */
++                if (reset_scan_out_buffer_if_needed (backend, head)) {
+                         ply_trace ("Needed to reset scan out buffer on %ldx%ld renderer head",
+                                    head->area.width, head->area.height);
++                        num_clips = 0;
++                }
++                if (set_mode_on_redraws == PLY_SET_MODE_ON_REDRAWS_ENABLED)
++                        num_clips = 0;
+ 
+-                end_flush (backend, head->scan_out_buffer_id);
++                end_flush (backend, head->scan_out_buffer_id, clips, num_clips);
+         }
+ 
+         ply_region_clear (updated_region);
+-- 
+2.50.1 (Apple Git-155)
+

@@ -170,6 +170,14 @@ in {
       environment.etc."xdg/powerdevilrc" = lib.mkIf config.services.desktopManager.plasma6.enable {
         source = ../sep/powerdevilrc;
       };
+      # One mem request; preserve explicit kernel/user mode selection.
+      # mkDefault leaves owner settings authoritative. MemorySleepMode was
+      # introduced in systemd 256; older packages need only SuspendState.
+      systemd.sleep.settings.Sleep = {
+        SuspendState = lib.mkDefault "mem";
+      } // lib.optionalAttrs (lib.versionAtLeast config.systemd.package.version "256") {
+        MemorySleepMode = lib.mkDefault "";
+      };
       systemd.timers.aurora-sep = {
         description = "Initialize Aurora SEP after persistent storage is available";
         wantedBy = [ "timers.target" ];
@@ -198,6 +206,16 @@ in {
           TimeoutStartSec = 180;
         };
       };
+      # Every sleep that suspends waits for a SEP load still in progress
+      # (see the file). A drop-in only, also where a unit isn't shipped.
+      systemd.units = lib.genAttrs [
+        "systemd-suspend.service"
+        "systemd-hybrid-sleep.service"
+        "systemd-suspend-then-hibernate.service"
+      ] (_: {
+        overrideStrategy = "asDropin";
+        text = builtins.readFile ../sep/sleep-aurora-sep.conf;
+      });
       systemd.services.aurora-touchid-setup = {
         description = "Set up the Touch ID calibration when it is missing or refused";
         documentation = [ "file://${pkgs.aurora-sep}/share/doc/aurora-sep/README.md" ];

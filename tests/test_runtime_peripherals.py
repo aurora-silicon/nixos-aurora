@@ -8,14 +8,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RuntimePeripheralTests(unittest.TestCase):
-    def admit(self, root, *, ready, firmware=True, aliases=()):
+    def admit(self, root, *, ready, firmware=True, aliases=(), bluetooth=True,
+              board=b"apple,j614s\0apple,t6040\0", touch_bar=None):
         compatible = root / "compatible"
-        compatible.write_bytes(b"apple,j614s\0apple,t6040\0")
+        compatible.write_bytes(board)
         fw = root / "firmware"
         fw.mkdir()
         if firmware:
             (fw / "brcm").mkdir()
             (fw / "brcm/fixture.bin").write_bytes(b"fixture")
+        if touch_bar is not None:
+            (fw / "apple").mkdir()
+            (fw / f"apple/dfrmtfw-{touch_bar}.bin").write_bytes(b"fixture")
         pci = root / "pci"
         pci.mkdir()
         for index, alias in enumerate(aliases):
@@ -46,6 +50,7 @@ class RuntimePeripheralTests(unittest.TestCase):
             AURORA_MODPROBE=str(modprobe),
             AURORA_TEST_CALLS=str(calls),
             AURORA_RUNTIME_FIRMWARE_READY=str(int(ready)),
+            AURORA_ADMIT_BLUETOOTH=str(int(bluetooth)),
         )
         result = subprocess.run(
             ["sh", str(ROOT / "firmware/aurora-peripheral-firmware.sh")],
@@ -78,6 +83,43 @@ class RuntimePeripheralTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             calls = self.admit(Path(temporary), ready=True)
             self.assertEqual(calls, ["dockchannel-hid", "aop", "aop_als"])
+
+    def test_bluetooth_waits_for_bluetooth_admission(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            calls = self.admit(
+                Path(temporary),
+                ready=True,
+                bluetooth=False,
+                aliases=("wifi", "bluetooth"),
+            )
+            self.assertEqual(calls, ["dockchannel-hid", "aop", "brcmfmac", "aop_als"])
+
+    def test_touch_bar_follows_the_runtime_firmware_path(self):
+        # J293: Broadcom radios and the Touch Bar digitizer all read vendorfw
+        # while probing, so the runtime pass loads them after path restoration.
+        with tempfile.TemporaryDirectory() as temporary:
+            calls = self.admit(
+                Path(temporary),
+                ready=True,
+                board=b"apple,j293\0apple,t8103\0",
+                touch_bar="j293",
+                aliases=("wifi", "bluetooth"),
+            )
+            self.assertEqual(
+                calls,
+                ["dockchannel-hid", "aop", "brcmfmac", "hci_bcm4377", "apple_z2", "aop_als"],
+            )
+
+    def test_initrd_never_probes_the_touch_bar(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            calls = self.admit(
+                Path(temporary),
+                ready=False,
+                board=b"apple,j493\0apple,t8112\0",
+                touch_bar="j493",
+                aliases=("wifi", "bluetooth"),
+            )
+            self.assertEqual(calls, ["dockchannel-hid", "aop"])
 
     def test_no_vendor_radio_firmware_defers_broadcom(self):
         with tempfile.TemporaryDirectory() as temporary:

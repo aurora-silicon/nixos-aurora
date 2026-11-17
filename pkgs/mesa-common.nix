@@ -1,7 +1,7 @@
 # Source, compiler and dependency settings shared by the explicit Mesa outputs.
 { lib, mesa, src, version, llvmPackages, spirv-tools, stdenv
 , mesa-libclc, spirv-llvm-translator, lm_sensors, libunwind
-, rustc, rust-bindgen, rust-cbindgen, valgrind-light, writeText
+, rustc, rust-bindgen, rust-cbindgen, valgrind-light
 , commit, guest ? false }:
 (mesa.override { stdenv = if guest then stdenv else llvmPackages.stdenv; }).overrideAttrs (old: {
   inherit src version;
@@ -10,8 +10,8 @@
     // lib.optionalAttrs guest {
       NIX_CFLAGS_COMPILE = "-ffile-prefix-map=/nix/store=/usr/src/nix -ffile-prefix-map=/build=/usr/src/mesa";
     };
-  patches = lib.optionals guest [ (writeText "mesa-hk-tests-bind-size-t.patch"
-    (builtins.readFile ../patches/mesa-hk-tests-bind-size-t.patch)) ];
+  # The i686 BO-bind test fix is upstream since aurora-silicon/mesa#174.
+  patches = [ ];
   outputs = [ "out" ];
   # Guest debug outputs would retain host source paths. Preserve the build
   # IDs the drivers need explicitly, while shipping stripped guest libraries.
