@@ -274,9 +274,9 @@ in {
       systemd.services.aurora-sep-greeter-fingerprint = {
         description = "Offer fingerprint at the GNOME login screen";
         documentation = [ "file://${pkgs.aurora-sep}/share/doc/aurora-sep/README.md" ];
-        # The login screen asks fprintd for the reader once, as it comes up.
-        wants = [ "aurora-sep-ready.service" ];
-        after = [ "aurora-sep-ready.service" ];
+        # Only prepares the login screen's shell, so it never waits for Touch
+        # ID: when Touch ID comes up after the login screen has asked for the
+        # reader, aurora-sep-greeter-refresh shows the login screen again.
         before = [ "display-manager.service" ];
         wantedBy = [ "display-manager.service" ];
         path = [ pkgs.coreutils pkgs.gnugrep pkgs.gawk pkgs.glib.dev ];
@@ -286,6 +286,20 @@ in {
           RemainAfterExit = true;
           ExecStart = "${pkgs.aurora-sep}/libexec/aurora-sep-greeter-fingerprint";
           ExecStop = "${pkgs.aurora-sep}/libexec/aurora-sep-greeter-fingerprint stop";
+        };
+      };
+      systemd.services.aurora-sep-greeter-refresh = {
+        description = "Offer fingerprint on a login screen that came up before Touch ID";
+        documentation = [ "file://${pkgs.aurora-sep}/share/doc/aurora-sep/README.md" ];
+        # Runs once both are up. Requisite: when Touch ID did not come up,
+        # there is nothing to offer and the login screen stays as it is.
+        after = [ "aurora-sep-ready.service" "display-manager.service" ];
+        requisite = [ "aurora-sep-ready.service" ];
+        wantedBy = [ "display-manager.service" ];
+        path = [ pkgs.coreutils pkgs.gawk pkgs.systemd ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${pkgs.aurora-sep}/libexec/aurora-sep-greeter-fingerprint refresh";
         };
       };
     })
