@@ -39,17 +39,9 @@
     boot.loader.grub.efiSupport = true;
     boot.loader.grub.efiInstallAsRemovable = true;
     boot.loader.grub.device = "nodev";
-    # On these chips MTE needs its tag storage reserved: aura marks that with
-    # /chosen/aurora,mte-tag-storage. Without the mark MTE stays off.
-    boot.loader.grub.extraInstallCommands = ''
-      if ${pkgs.coreutils}/bin/tr '\0' '\n' < /proc/device-tree/compatible 2>/dev/null \
-          | ${pkgs.gnugrep}/bin/grep -qxE 'apple,(t6050|t8142)' &&
-          [ ! -e /proc/device-tree/chosen/aurora,mte-tag-storage ]; then
-        for cfg in ${lib.concatMapStringsSep " " (b: lib.escapeShellArg "${b.path}/grub/grub.cfg") config.boot.loader.grub.mirroredBoots}; do
-          ${pkgs.gnused}/bin/sed -i -E '/^[[:space:]]*linux[[:space:]]/{/[[:space:]]arm64\.nomte([[:space:]]|$)/!s/$/ arm64.nomte/}' "$cfg"
-        done
-      fi
-    '';
+    # No arm64.nomte: the kernel keeps MTE off by itself on an Apple SoC whose
+    # device tree reserves no MTE tag storage (apple,mte-tag-storage under
+    # /reserved-memory), and aura adds that reservation.
     # Every generation, the image's included, records its kernel's DT ABI
     # generation (kernel/dtb-abi), so Stage 2 updates know which device trees
     # each configuration GRUB lists can boot (modules/installed.nix). A kernel
