@@ -21,6 +21,12 @@ assert builtins.elem "dockchannel-hid" cfg.boot.blacklistedKernelModules;
 assert builtins.all (module: builtins.elem module cfg.boot.blacklistedKernelModules)
   [ "brcmfmac" "hci_bcm4377" "apple_z2" "aop_als" ];
 assert cfg.boot.initrd.systemd.services.aurora-vendor-firmware.serviceConfig.ExecStart == executable;
+# The extraction waits for the ESP device itself, not for udev to settle.
+assert !(builtins.elem "systemd-udev-settle.service"
+  (cfg.boot.initrd.systemd.services.aurora-vendor-firmware.after
+   ++ cfg.boot.initrd.systemd.services.aurora-vendor-firmware.wants));
+assert builtins.elem "systemd-udev-trigger.service"
+  cfg.boot.initrd.systemd.services.aurora-vendor-firmware.after;
 assert cfg.systemd.services.aurora-vendor-firmware.serviceConfig.ExecStart == "${executable} runtime";
 assert builtins.all (tool: builtins.any (entry: toString entry.source == toString tool)
   cfg.boot.initrd.systemd.storePaths)
