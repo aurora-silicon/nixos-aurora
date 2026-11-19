@@ -34,16 +34,16 @@ p=json.load(open(sys.argv[1]))[sys.argv[2]]
 print(p['rootUUID'],p['bootUUID'],p['efiUUID'])
 PY
 )
-# The table goes into the file before the loop device exists, so losetup reads
-# it once and nothing has to re-read it on a device that is already attached.
-printf 'label: gpt\n\nstart=2048,size=131072,type=U\nsize=262144,type=BC13C2FF-59E6-4262-A352-B275FD6F7172\ntype=B921B045-1DF0-41C3-AF44-4C6F280D3FAE\n' | sfdisk --sector-size 4096 "$image"
 loop=$(losetup --find --show --partscan --sector-size 4096 "$image")
-# --partscan reads the partition table before losetup returns, and the kernel
-# creates each partition's node in devtmpfs as it adds the partition. Nothing
-# here reads udev's database or /dev/disk links, so there is no udev event to
-# wait for; only check that the partitions are there.
+# The table is written through the 4096-byte-sector loop device: the runner's
+# sfdisk (util-linux 2.39) has no --sector-size to write the file directly.
+printf 'label: gpt\n\nstart=2048,size=131072,type=U\nsize=262144,type=BC13C2FF-59E6-4262-A352-B275FD6F7172\ntype=B921B045-1DF0-41C3-AF44-4C6F280D3FAE\n' | sfdisk "$loop"
+# sfdisk makes the kernel re-read the table (BLKRRPART) before it exits, and
+# the kernel creates each partition's node in devtmpfs as it adds the
+# partition. Nothing here reads udev's database or /dev/disk links, so there
+# is no udev event to wait for; only check that the partitions are there.
 for partition in "${loop}p"{1..3}; do
-  [[ -b $partition ]] || { echo "losetup --partscan left no $partition" >&2; exit 1; }
+  [[ -b $partition ]] || { echo "the new partition table left no $partition" >&2; exit 1; }
 done
 mkfs.vfat -F32 -i "${efi_uuid//-/}" -n AURORA_EFI "${loop}p1"
 mkfs.ext4 -F -U "$boot_uuid" -L AURORA_BOOT "${loop}p2"
