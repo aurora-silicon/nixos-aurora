@@ -7,6 +7,7 @@
 - [Gaming](gaming.md): native Steam, FEX, Proton and Aurora Play.
 - [Installed-system updates and recovery](updates.md#installed-systems): channels, rebuilds and Stage 2 rollback.
 - [ANE setup](ane.md#nixos-firmware-handoff): optional tools and owner-supplied firmware.
+- [aurora-diag](aurora-diag.md): optional bring-up diagnostics and kernel regression checks.
 
 ## Maintain the repository
 

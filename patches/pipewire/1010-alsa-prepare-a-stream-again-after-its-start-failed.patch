@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 09:43:03 +1100
+Subject: [PATCH] alsa: prepare a stream again after its start failed
+
+spa_alsa_start() prepares the PCM and, for playback without timer
+scheduling (and for capture), starts it at once. When the driver
+refuses that start, as Aurora's macaudio does for a speaker PCM while
+speaker protection is not granted, spa_alsa_start() returned with the
+stream not started but still marked prepared. spa_alsa_pause() leaves a
+stream that never started alone, and so does spa_alsa_close(), so the
+flag survived Suspend, close and reopen. Every later start skipped
+do_prepare() and the silence it writes, and ALSA refused to start a
+playback PCM with an empty buffer: -EPIPE on every start, for the life
+of the node. On a MacBook Air (J413) one capture of the idle speaker
+sink's monitor, started before any grant, left that sink unable to
+start until PipeWire restarted.
+
+Drop the stream and clear the prepared flag when the start fails, and
+clear it when the PCM is closed.
+
+Signed-off-by: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Assisted-by: LLM
+---
+ spa/plugins/alsa/alsa-pcm.c | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/spa/plugins/alsa/alsa-pcm.c b/spa/plugins/alsa/alsa-pcm.c
+index 3db6410..56fd1a8 100644
+--- a/spa/plugins/alsa/alsa-pcm.c
++++ b/spa/plugins/alsa/alsa-pcm.c
+@@ -1299,6 +1299,8 @@ int spa_alsa_close(struct state *state)
+ 	if ((err = snd_pcm_close(state->hndl)) < 0)
+ 		spa_log_warn(state->log, "%s: close failed: %s", state->name,
+ 				snd_strerror(err));
++	/* a reopened PCM is prepared again, whatever happened before the close */
++	state->prepared = false;
+ 
+ 	if (!state->disable_tsched)
+ 		spa_system_close(state->data_system, state->timerfd);
+@@ -3981,7 +3983,7 @@ int spa_alsa_start(struct state *state)
+ 	 * goes off later */
+ 	if (state->stream == SND_PCM_STREAM_CAPTURE) {
+ 		if ((err = do_start(state)) < 0)
+-			return err;
++			goto not_started;
+ 	}
+ 
+ 	/* playback will start after first write. Without tsched, we start
+@@ -3989,13 +3991,23 @@ int spa_alsa_start(struct state *state)
+ 	if (state->stream == SND_PCM_STREAM_PLAYBACK) {
+ 		if (state->disable_tsched || state->start_delay > 0)
+ 			if ((err = do_start(state)) < 0)
+-				return err;
++				goto not_started;
+ 	}
+ 
+ 	state->started = true;
+ 	spa_loop_locked(state->data_loop, do_state_sync, 0, NULL, 0, state);
+ 
+ 	return 0;
++
++not_started:
++	/* The stream never started, so spa_alsa_pause() will not reset it:
++	 * drop it and prepare it again on the next start. Left prepared, the
++	 * next start skips do_prepare() and its silence, and a playback PCM
++	 * with an empty buffer refuses every start with -EPIPE until the node
++	 * is destroyed. */
++	do_drop(state);
++	state->prepared = false;
++	return err;
+ }
+ 
+ static struct state *find_state(uint32_t id)

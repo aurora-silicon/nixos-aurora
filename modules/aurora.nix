@@ -2,9 +2,9 @@
 {
   imports = [ ./ane.nix ./firmware.nix ./platform.nix ./audio.nix ./system-fixes.nix
     ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix ./dbus.nix
-    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix ./fido.nix ./awdl.nix ./sep-luks.nix
-    ./userpages.nix ./boot-splash.nix ./speakerguardd-v2.nix ./speaker-upgrade.nix ./steam.nix
-    ./power-budget.nix ];
+    ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix ./panel-nits.nix ./btsync.nix ./fido.nix ./awdl.nix ./sep-luks.nix
+    ./userpages.nix ./boot-splash.nix ./speakerguardd-v2.nix ./speaker-upgrade.nix ./wifi-firmware.nix ./steam.nix
+    ./power-budget.nix ./gamemode.nix ./diag.nix ./secure-boot.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";
@@ -39,6 +39,15 @@
     boot.loader.grub.efiSupport = true;
     boot.loader.grub.efiInstallAsRemovable = true;
     boot.loader.grub.device = "nodev";
+    # MTE stays off on chips whose tag storage no boot loader reserves yet.
+    boot.loader.grub.extraInstallCommands = ''
+      if ${pkgs.coreutils}/bin/tr '\0' '\n' < /proc/device-tree/compatible 2>/dev/null \
+          | ${pkgs.gnugrep}/bin/grep -qxE 'apple,(t6050|t8142)'; then
+        for cfg in ${lib.concatMapStringsSep " " (b: lib.escapeShellArg "${b.path}/grub/grub.cfg") config.boot.loader.grub.mirroredBoots}; do
+          ${pkgs.gnused}/bin/sed -i -E '/^[[:space:]]*linux[[:space:]]/{/[[:space:]]arm64\.nomte([[:space:]]|$)/!s/$/ arm64.nomte/}' "$cfg"
+        done
+      fi
+    '';
     # Every generation, the image's included, records its kernel's DT ABI
     # generation (kernel/dtb-abi), so Stage 2 updates know which device trees
     # each configuration GRUB lists can boot (modules/installed.nix). A kernel
@@ -107,6 +116,6 @@
       && !config.aurora.openssh.startAtBoot) { wantedBy = lib.mkForce [ ]; };
     systemd.services.sshd-keygen = lib.mkIf (config.services.openssh.enable && config.services.openssh.generateHostKeys
       && !config.aurora.openssh.startAtBoot) { wantedBy = lib.mkForce [ ]; };
-    environment.systemPackages = [ pkgs.aurora-bless pkgs.git pkgs.cryptsetup pkgs.btrfs-progs ];
+    environment.systemPackages = [ pkgs.aurora-bless pkgs.aurora-nvram pkgs.git pkgs.cryptsetup pkgs.btrfs-progs ];
   };
 }

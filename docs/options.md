@@ -109,6 +109,29 @@ The omdrop-awdl package to use.
 
 **Declared in:** [awdl.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/awdl.nix)
 
+## `aurora.btsync.enable`
+
+Use the Bluetooth pairings made in macOS: when the NVRAM device appears,
+aurora-btsync copies them into BlueZ's storage before bluetoothd starts
+and refreshes the keys of devices macOS paired again. Pairings made only
+on Linux are left alone. False leaves BlueZ's storage to bluetoothd.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [btsync.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/btsync.nix)
+
+## `aurora.btsync.package`
+
+The aurora-btsync package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-btsync`
+
+**Declared in:** [btsync.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/btsync.nix)
+
 ## `aurora.cameraDenoise.enable`
 
 Start the denoise filter with each user's PipeWire service and enable
@@ -235,6 +258,31 @@ enabled in all three profiles.
 
 **Declared in:** [aurora.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/aurora.nix)
 
+## `aurora.diag.enable`
+
+Install aurora-diag, the bring-up and regression tool: sensors,
+clocks, hardware blocks, services and GPU APIs with what works and
+what does not, `check`, `snapshot`, `diff` and `report` for
+comparing kernels, and `aurora-panic-log` for the last panic iBoot
+kept. Fedora and ALARM ship the same commit as the opt-in
+`aurora-diag` package. Off by default.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [diag.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/diag.nix)
+
+## `aurora.diag.package`
+
+The aurora-diag package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-diag`
+
+**Declared in:** [diag.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/diag.nix)
+
 ## `aurora.fexMesa.enable`
 
 Mount x86_64 and i686 Aurora Mesa over the guest rootfs at
@@ -277,11 +325,11 @@ because this path is an overlay mount's lower layer.
 
 Run aurora-fidod, which makes this Mac's Secure Enclave and Touch ID a
 FIDO2/U2F security key: WebAuthn and passkeys in browsers, SSH
-ecdsa-sk keys, pam_u2f and systemd-cryptenroll --fido2-device. Every
-operation asks for a Touch ID match. Keys live in the Secure Enclave
-when the kernel has /dev/sep-key and are sealed by it otherwise (root
-on this Mac can copy sealed keys); `aurora-fido status` says which.
-Off by default. Needs Touch ID (fprintd with an enrolled finger).
+ecdsa-sk keys, pam_u2f and systemd-cryptenroll --fido2-device. Keys
+live in the Secure Enclave, which checks the Touch ID match inside
+every signature itself, so root cannot sign without a finger. The
+service does not start on a kernel without /dev/sep-key. Off by
+default. Needs an enrolled Touch ID finger.
 
 **Type:** boolean
 
@@ -304,10 +352,10 @@ The aurora-fido package to use.
 /etc/aurora-fido/aurora-fido.conf, by section ([touchid],
 [authenticator], [keys]). Unset keys keep the daemon's defaults; see
 docs/fido.md in aurora-sep-userspace. touchid.policy picks who may
-approve new credentials, as on macOS: "touchid-or-password" (default:
-Touch ID, or your password in the polkit dialog), "touchid-any" or
-"touchid-current" (Touch ID only; the latter retires a credential
-when the enrolled fingers change).
+approve new credentials, enforced by the Secure Enclave: "auto"
+(default: touchid-or-password where the enclave can check your
+password, else touchid-any), "touchid-any" or "touchid-current"
+(the latter retires a credential when the enrolled fingers change).
 
 **Type:** attribute set of attribute set of (string or signed integer or boolean)
 
@@ -317,9 +365,6 @@ when the enrolled fingers change).
 
 ```nix
 {
-  keys = {
-    store = "sep-key";
-  };
   touchid = {
     policy = "touchid-current";
   };
@@ -538,6 +583,31 @@ manual or socket activation remains available. This does not open port
 
 **Declared in:** [aurora.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/aurora.nix)
 
+## `aurora.panelNits.enable`
+
+Share the built-in panel's brightness with the boot loader and macOS
+through the NVRAM backlight-nits variable: the panel starts at the boot
+loader's level instead of a level systemd-backlight saved, and the level
+the user picks is stored back after 5 s without a change, at most once a
+minute and at shutdown. Machines without the panel backlight or the NVRAM
+device skip it. False keeps systemd-backlight's own restore.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [panel-nits.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/panel-nits.nix)
+
+## `aurora.panelNits.package`
+
+The aurora-panel-nits package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-panel-nits`
+
+**Declared in:** [panel-nits.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/panel-nits.nix)
+
 ## `aurora.plasmaSetup.enable`
 
 Create the first owner account with Plasma Setup.
@@ -562,6 +632,121 @@ Balanced and Performance are untouched.
 **Default:** `config.services.power-profiles-daemon.enable`
 
 **Declared in:** [power-budget.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/power-budget.nix)
+
+## `aurora.secureBoot.adoptInstallerKey`
+
+At first boot, move the Stage 2 key the installer left on the ESP
+(aurora/secboot/stage2.key, owner-managed installs) into keyDir and
+wipe the ESP copy (aurora-secboot-adopt.service). Works without
+enable, so the key never stays on the unencrypted ESP.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.enable`
+
+Build a signed unified kernel image (UKI) for each boot generation at
+every bootloader install, with aurora-secboot: the generation's kernel,
+its initrd (boot.initrd.secrets included) and its kernel parameters
+plus init= and lockdown=, minus debug and shell parameters. UKIs go to
+ESP/EFI/Linux/aurora-nixos-<hash>.efi and are signed with the db key in
+keyDir. The keys stay in keyDir and never enter the Nix store. GRUB
+stays the boot loader unless securePath is set. Writes
+/etc/aurora/secboot.conf; `aurora-secboot status` reports the chain.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.generations`
+
+Number of newest system generations that keep a UKI, besides the
+default one. Each UKI holds a kernel and an initrd, so this bounds the
+space taken on the ESP.
+
+**Type:** positive integer, meaning >0
+
+**Default:** `3`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.keyDir`
+
+Directory with the signing keys (db.key/db.crt, KEK, PK and the Stage 2
+key), root only. It must not be in the Nix store.
+
+**Type:** string
+
+**Default:** `"/var/lib/aurora/secboot/keys"`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.keyOwner`
+
+Who signs this Mac's boot chain, as chosen at install: Aurora's release
+keys (no private key on the machine, locally built UKIs stay unsigned),
+the owner's keys made on the machine (`aurora-secboot keys create`), or
+both.
+
+**Type:** one of "aurora", "owner", "both"
+
+**Default:** `"aurora"`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.lockdown`
+
+Kernel lockdown level on the UKI command line. integrity refuses
+unsigned modules, unsigned kexec images and raw memory or I/O port
+access; confidentiality also blocks reading kernel memory.
+
+**Type:** one of "integrity", "confidentiality"
+
+**Default:** `"integrity"`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.package`
+
+The aurora-secboot package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-secboot`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.securePath`
+
+Boot the default generation's signed UKI directly: it becomes
+ESP/EFI/BOOT/BOOTAA64.EFI, with GRUB kept as BOOTAA64.EFI.aurora-shim
+and put back when this is turned off. Needs owner keys (keyOwner
+"owner" or "both") and a UKI that verifies against db.crt; the
+bootloader install fails otherwise. Signatures are only checked once
+U-Boot and Stage 1 enforce them.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
+
+## `aurora.secureBoot.ukiBuild`
+
+Build UKIs at bootloader installs: auto builds them only when keyDir
+has db.key (so they are signed), yes builds unsigned ones too, no
+builds none and removes the ones this module made.
+
+**Type:** one of "auto", "yes", "no"
+
+**Default:** `"auto"`
+
+**Declared in:** [secure-boot.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/secure-boot.nix)
 
 ## `aurora.sep.greeterFingerprint.enable`
 
@@ -592,13 +777,83 @@ by aurora-touchid-boot.service at every boot.
 
 **Declared in:** [sep.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep.nix)
 
+## `aurora.sepLuks.bootChain`
+
+What the token plugin does before it asks the Secure Enclave for a
+volume key (fde.conf boot-chain). audit unlocks and logs one line
+when the boot chain is not verified from an enforcing Stage 1 on
+(/sys/firmware/aurora/boot_security). require leaves the volume to its
+passphrase or recovery key on such a boot. Set require only on a Mac
+whose `aurora-sep-fde boot-chain` reports a verified chain, and keep a
+passphrase or offline recovery keyslot on every volume: otherwise
+every boot asks for them. The initrd carries the same file.
+
+**Type:** one of "audit", "require"
+
+**Default:** `"audit"`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
 ## `aurora.sepLuks.enable`
 
-Install aurora-sep-cryptenroll and its libcryptsetup token plugin, which
-unlock LUKS2 volumes with this Mac's Secure Enclave the way
-systemd-cryptenroll --tpm2-device=auto does with a TPM. Nothing is
-enrolled by this option: run aurora-sep-cryptenroll for each volume.
-The root volume is not supported yet.
+Install aurora-sep-cryptenroll, aurora-sep-fde and the libcryptsetup
+token plugin, which unlock LUKS2 volumes with this Mac's Secure Enclave.
+aurora-sep-cryptenroll seals a volume to the Mac, the way
+systemd-cryptenroll --tpm2-device=auto does with a TPM. aurora-sep-fde
+seals it to users' passwords, checked by the Secure Enclave (the
+FileVault model): each user gets their own keyslot, and volume owners
+add, remove and reset users. Nothing is enrolled by this option: run
+either tool for each volume. /etc/aurora-sep/fde.conf comes from the
+package, with bootChain applied, unless
+environment.etc."aurora-sep/fde.conf" is set.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.initrd.enable`
+
+Open Secure Enclave volumes in the initrd too, the root volume included.
+Needs a kernel whose apple_sep has the
+key-store-only attach phase (the keystore_only parameter); with an
+older kernel the initrd leaves the driver alone and those volumes ask
+for their passphrase. For volumes sealed by aurora-sep-cryptenroll the
+SEP key store files from /var/lib go into the initrd through
+boot.initrd.secrets (never the Nix store), so they must exist when the
+boot loader is installed: enable Touch ID or run the SEP once first.
+Rebuild after the key store changes. Every volume keeps its passphrase
+or recovery key.
+
+**Type:** boolean
+
+**Default:** `false`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.initrd.keyStore`
+
+Copy the SEP key store (/var/lib/aurora-sep-keybag.bin and
+/var/lib/aurora-sep-refkey.bin) into the initrd as boot.initrd.secrets,
+for volumes sealed by aurora-sep-cryptenroll. Turn it off on a system
+whose initrd volumes are all sealed to passwords
+(initrd.passwordUnlock) and that has no key store yet.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.initrd.passwordUnlock`
+
+Also open volumes sealed to a user's password by aurora-sep-fde in the
+initrd: apple_sep loads there with keystore_only=2, which unlocks the
+user's key bag with the password typed at the prompt. Needs a kernel
+whose keystore_only parameter offers per-user key bags. Those tokens
+carry their wrapped key bag in the LUKS2 header, so this mode needs no
+key store copies.
 
 **Type:** boolean
 
@@ -616,9 +871,57 @@ The aurora-sep-luks package to use.
 
 **Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
 
+## `aurora.sepLuks.passwordSync.enable`
+
+Keep a user's disk password equal to their login password: after
+pam_unix changed a password (passwd, GNOME Settings), the
+pam_aurora_sep_fde module re-wraps the user's key bag in the Secure
+Enclave and writes it to every volume listed in
+/etc/aurora-sep/fde-volumes. The password stacks of
+passwordSync.services run it after pam_unix, which becomes
+authoritative there: a failed pam_unix change fails the stack
+instead of falling through to later password modules. A change
+without the old password (root running passwd for another user,
+chpasswd) leaves the disk password as it was and says how a volume
+owner resets it.
+
+**Type:** boolean
+
+**Default:** `config.aurora.sepLuks.enable`
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
+## `aurora.sepLuks.passwordSync.services`
+
+PAM services whose password changes also change the disk password.
+passwd covers passwd and GNOME Settings; add the login services to
+follow a change of an expired password at login.
+
+**Type:** list of string
+
+**Default:**
+
+```nix
+[
+  "passwd"
+]
+```
+
+**Example:**
+
+```nix
+[
+  "passwd"
+  "login"
+  "gdm-password"
+]
+```
+
+**Declared in:** [sep-luks.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/sep-luks.nix)
+
 ## `aurora.speakerguardd.upgrade.enable`
 
-Install aurora-speaker-upgrade (the legacy-to-speakerguardd-v2 upgrade tool); it never runs by itself. speakerguardd v2 is a preview. It does not fully match macOS yet. The legacy protection (speakersafetyd, speakerguardd 0.1) is the supported default and stays installed. To go back at any time: sudo aurora-speaker-upgrade --revert.
+Install aurora-speaker-upgrade (the legacy-to-speakerguardd-v2 upgrade tool); it never runs by itself.
 
 **Type:** boolean
 
@@ -628,7 +931,7 @@ Install aurora-speaker-upgrade (the legacy-to-speakerguardd-v2 upgrade tool); it
 
 ## `aurora.speakerguardd.v2.enable`
 
-Install speakerguardd 1.0 (preview) beside the 0.1 speakerguardd and
+Install speakerguardd 1.0 beside the 0.1 speakerguardd and
 speakersafetyd, with its gate on both stacks. Nothing changes for the
 speakers by itself: the gate keeps speakersafetyd in charge until
 aurora-speaker-upgrade (aurora.speakerguardd.upgrade.enable) has
@@ -797,3 +1100,13 @@ while retaining the launcher. Kernel-command-line changes need a reboot.
 **Default:** `true`
 
 **Declared in:** [userpages.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/userpages.nix)
+
+## `aurora.wifiFirmware.followMacOS`
+
+Keep the ESP's Wi-Fi firmware on the installed macOS's, as macOS does (aurora-wifi-firmware).
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [wifi-firmware.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/wifi-firmware.nix)

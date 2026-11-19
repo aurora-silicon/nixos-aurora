@@ -121,8 +121,9 @@ when the firewall reloads.
 Vendor firmware and calibration are read from this Mac's EFI partition at
 boot into `/run/aurora-firmware`; they are not embedded in the distributable
 Nix-store closure. Peripheral admission follows the handoff, and Bluetooth is
-admitted by the runtime service before BlueZ. Broadcom radios and the ALS wait
-for successful extraction and the real-root firmware search path. PCI aliases
+admitted by the runtime service before BlueZ. Broadcom radios, the Touch Bar
+digitizer and the ALS wait for successful extraction and the real-root firmware
+search path. PCI aliases
 select the installed Broadcom drivers. ALS calibration remains optional where
 the sensor supports operation without it.
 Model-specific speaker protection remains enabled.
@@ -145,6 +146,7 @@ settings; they do not need separate imports. Full option details are in the
 | `branding.nix` | Aurora artwork and Plasma's About page. No Aurora-specific options. |
 | `camera-denoise.nix` | PipeWire camera filter. `aurora.cameraDenoise.enable`, `package` and `settings`; per-user configuration takes precedence. |
 | `dbus.nix` | Removes duplicate service-directory lookups from the system/session bus configuration. No Aurora-specific options. |
+| `diag.nix` | Opt-in aurora-diag, the bring-up and regression tool, and `aurora-panic-log`. `aurora.diag.enable` and `package`; off by default. See [aurora-diag](aurora-diag.md). |
 | `fex-mesa.nix` | Read-only guest Mesa layer, remounted across switches and rollbacks. `aurora.fexMesa.enable`, `package` and `rootfs`; an absent guest rootfs skips the mount. |
 | `fido.nix` | Opt-in Secure Enclave/Touch ID FIDO2/U2F service. `aurora.fido.enable`, `package` and `settings`; requires an enrolled finger. See the option reference for key-storage limits. |
 | `firmware.nix` | Initrd/runtime vendor-firmware extraction, peripheral ordering and firmware-search-path restoration after activation. No Aurora-specific options. |
@@ -152,13 +154,17 @@ settings; they do not need separate imports. Full option details are in the
 | `flatpak.nix` | Installs and pins the local Aurora GL extensions for the locked Freedesktop runtimes. `aurora.flatpak.enable` and `package`; it does not add an application repository. |
 | `gnome-initial-setup.nix` | GNOME owner-account setup when an image layout is present. `aurora.gnomeInitialSetup.enable`; requires GDM and mutable users. |
 | `kbd-light.nix` | Ambient-light keyboard backlight control. `aurora.kbdLight.enable`, `package` and `settings`; the service skips machines without a keyboard backlight. |
+| `panel-nits.nix` | Built-in panel brightness shared with the boot loader and macOS through NVRAM `backlight-nits`: the panel starts at the loader's level, and the user's level is stored back (rate limited). `aurora.panelNits.enable` and `package`; machines without the panel backlight or the NVRAM device skip it. |
+| `btsync.nix` | Bluetooth pairings made in macOS, copied from NVRAM into BlueZ's storage before bluetoothd starts; keys of devices macOS paired again are refreshed and Linux-only pairings are left alone. `aurora.btsync.enable` and `package`. |
 | `parity.nix` | Records payload paths and source identities for finished-image verification. No Aurora-specific options. |
 | `plasma-setup.nix` | KDE owner-account setup when an image layout is present. `aurora.plasmaSetup.enable`; requires Plasma Login Manager and mutable users. |
 | `platform.nix` | Bluetooth, UPower, regulatory data, speaker protection and model-specific platform rules. No Aurora-specific options. |
+| `secure-boot.nix` | Opt-in signed UKIs for the secure boot path. `aurora.secureBoot.enable` writes `/etc/aurora/secboot.conf` and, after every bootloader install, runs `aurora-secboot uki build` for the default generation and the newest `generations` ones (kernel, initrd with its secrets, kernel parameters with `init=` and `lockdown=`), signed with the db key in `keyDir`, which stays out of the Nix store. UKIs of dropped generations are removed. `securePath` (owner keys only) makes the default generation's UKI `EFI/BOOT/BOOTAA64.EFI` and puts GRUB back when turned off. `adoptInstallerKey` (on by default, also without `enable`) moves an owner Stage 2 key the installer left on the ESP into `keyDir` at first boot. |
 | `sep.nix` | Touch ID/PAM integration; ordinary login still uses a password. `aurora.sep.greeterFingerprint.enable` adds GNOME greeter authentication. Logind defaults a short power-key press to suspend. The Secure Enclave OpenSSH provider is installed; device access requires explicitly configured `sep-key` group membership. See [Touch ID setup](../sep/README.md). |
-| `sep-luks.nix` | Opt-in Secure Enclave LUKS2 unlock. `aurora.sepLuks.enable` and `package` install aurora-sep-cryptenroll and its cryptsetup token plugin; nothing is enrolled until it is run on a volume, the passphrase keyslot is kept, and the root volume is not supported yet. |
-| `speaker-upgrade.nix` | `aurora.speakerguardd.upgrade.enable` installs the migration tool and units without starting migration. Enable `aurora.speakerguardd.v2.enable` separately for v2 services, then follow the [preview procedure](speakerguardd-v2-preview.md). |
-| `speakerguardd-v2.nix` | Opt-in preview through `aurora.speakerguardd.v2.enable` and `package`. Legacy protection remains installed and gated; v2 takes over only after manual migration and successful checks. Off by default. See the [preview limitations](speakerguardd-v2-preview.md). |
+| `sep-luks.nix` | Opt-in Secure Enclave LUKS2 unlock. `aurora.sepLuks.enable` and `package` install aurora-sep-cryptenroll (volumes sealed to the Mac), aurora-sep-fde (volumes sealed to users' passwords, with volume owners and a recovery key) and the cryptsetup token plugin; nothing is enrolled until one is run on a volume. `passwordSync` (on with `enable`) runs pam_aurora_sep_fde after pam_unix in `passwd`, so a password change also changes the disk password. `initrd.enable` opens those volumes in the initrd, root included; `initrd.passwordUnlock` loads apple_sep there with `keystore_only=2` for password-sealed volumes. `bootChain` (`audit` by default, or `require`) sets the `boot-chain` line of `fde.conf`, which the initrd also carries. See `docs/luks-sep-owners.md` and `docs/luks-sep-initrd.md` in aurora-sep-userspace. |
+| `speaker-upgrade.nix` | `aurora.speakerguardd.upgrade.enable` installs the migration tool and units without starting migration. Enable `aurora.speakerguardd.v2.enable` separately for v2 services, then follow the [procedure](speakerguardd-v2.md). |
+| `speakerguardd-v2.nix` | Opt-in through `aurora.speakerguardd.v2.enable` and `package`. Legacy protection remains installed and gated; v2 takes over only after manual migration and successful checks. Off by default. See [speakerguardd v2](speakerguardd-v2.md). |
 | `steam.nix` | Adapts the standard `programs.steam` module to ARM64 host graphics/audio. Steam is not enabled automatically; x86-only `extest` injection is rejected. |
 | `system-fixes.nix` | Malcontent shutdown and persistent NetworkManager dispatcher fixes through `aurora.systemFixes.*`, plus swapfile ordering. |
 | `userpages.nix` | The kernel's per-process page-size launcher and `user4k=on`. `aurora.userpages.enable`; an explicit `user4k=off` kernel parameter takes precedence. |
+| `wifi-firmware.nix` | Broadcom Wi-Fi firmware that follows the installed macOS, as on macOS: at every boot aurora-wifi-firmware reads the macOS system volume read only and, when its Wi-Fi firmware differs from the ESP's, puts it on the ESP for the next boot with a backup; the next boot checks brcmfmac came up with it and restores the backup if not. `aurora.wifiFirmware.followMacOS` (on by default). Macs without a Broadcom radio skip it. |

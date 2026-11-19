@@ -44,10 +44,12 @@ NEEDS = {
     'flatpak-gl': ['mesa-aurora'],
     'alsa-utils': ['alsa-utils'],
     'pipewire': [],  # nixpkgs' pinned release, with the local patches
+    'firefox': [],  # nixpkgs' pinned release, with the RDD V4L2 Request patch
     'audio': ['aurora-audio'],
     'ucm': ['alsa-ucm-conf-aurora'],
     'firstboot': ['aurora-firstboot'],
     'power-budget': ['aurora-firstboot'],  # same aurora-platform archive
+    'secboot': ['aurora-secboot'],
     'libfprint': ['libfprint'],
     'fprintd': [],  # nixpkgs' pinned release, with the local companion patch
     'avd-fw': ['avd-fw'],
@@ -58,7 +60,11 @@ NEEDS = {
     'speakerguardd': ['speakerguardd'],
     'speakerguardd-v2': ['speakerguardd-v2'],
     'speaker-upgrade': ['aurora-speaker-upgrade', 'speakerguardd-v2'],
+    'wifi-firmware': ['aurora-wifi-firmware'],
     'mutter': [],
+    'iio-sensor-proxy': [],  # nixpkgs' pinned release, with the local patch
+    'gnome-settings-daemon': [],  # nixpkgs' pinned release, with the local patch
+    'kwin': [],  # nixpkgs' pinned release, with the local patch
     'docker': [],  # nixpkgs' pinned release, with the local engine patch
     'speakersafetyd': [],
     'bankstown': ['bankstown'],
@@ -66,6 +72,10 @@ NEEDS = {
     'aurora-bless': ['aurora-bless'],
     'camera-denoise': ['camera-denoise'],
     'kbd-light': ['kbd-light'],
+    'panel-nits': ['aurora-bless'],
+    'nvram': ['aurora-bless'],
+    'btsync': ['aurora-bless'],
+    'diag': ['aurora-diag'],
     'fido': ['aurora-fido'],
     'sep-sk': ['aurora-sep-sk'],
     'sep-luks': ['aurora-sep-luks'],

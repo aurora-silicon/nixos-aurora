@@ -10,7 +10,7 @@ on:
         description: Successful Native image workflow run ID
         required: true
       delivery-revision:
-        description: Optional models58 refresh of the verified legacy-audio delivery
+        description: Optional authenticated cohort refresh (models58 or models65)
         type: string
         default: ''
 permissions:
@@ -20,7 +20,7 @@ permissions:
   attestations: write
 jobs:
   delivery:
-    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@69178da4caa503e69a44bda5dd4fe91f12c50cb8
+    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@e2d34963b1ad1f0ce5c2599a28c0c6018391b5a4
     with:
       profile: ${{ inputs.profile }}
       image-run: ${{ inputs.image-run }}

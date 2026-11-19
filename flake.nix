@@ -43,13 +43,16 @@
         inherit (pkgs)
           plymouth docker libfprint fprintd omarchy-ane-tools mil-hwx-compiler upower
           fex steam mesa speakerguardd mutter speakersafetyd aurora-bless
-          plymouth-theme-aurora omdrop-awdl speakerguardd-v2;
+          plymouth-theme-aurora omdrop-awdl speakerguardd-v2 iio-sensor-proxy
+          gnome-settings-daemon;
         logos = pkgs.aurora-logos;
         firstboot = pkgs.aurora-firstboot;
         power-budget = pkgs.aurora-power-budget;
+        secboot = pkgs.aurora-secboot;
         sep = pkgs.aurora-sep;
         avd-fw = pkgs.aurora-avd-firmware;
         speaker-upgrade = pkgs.aurora-speaker-upgrade;
+        wifi-firmware = pkgs.aurora-wifi-firmware;
         libva-v4l2-request-avd = pkgs.libvaV4l2RequestAvd;
         bindgen = pkgs.aurora-bindgen;
         aura = pkgs.m1n1;
@@ -75,14 +78,20 @@
         ucm = pkgs.alsa-ucm-conf-asahi;
         fex-mesa = pkgs.aurora-fex-mesa;
         flatpak-gl = pkgs.aurora-flatpak-gl;
+        kwin = pkgs.kdePackages.kwin;
         bankstown = pkgs.bankstown-lv2;
         neo-platform = pkgs.aurora-neo-platform-config;
         camera-denoise = pkgs.aurora-camera-denoise;
         kbd-light = pkgs.aurora-kbd-light;
+        panel-nits = pkgs.aurora-panel-nits;
+        nvram = pkgs.aurora-nvram;
+        btsync = pkgs.aurora-btsync;
+        diag = pkgs.aurora-diag;
         fido = pkgs.aurora-fido;
         sep-sk = pkgs.aurora-sep-sk;
         xart = pkgs.aurora-xart;
         sep-luks = pkgs.aurora-sep-luks;
+        firefox = pkgs.firefox-unwrapped;
       };
       # The payload runs in an ARM machine's x86 guest, and is built on x86.
       packages.x86_64-linux.fex-mesa = pkgs.aurora-fex-mesa;

@@ -7,6 +7,10 @@ stdenv.mkDerivation {
   postInstall = ''
     substituteInPlace $out/lib/systemd/system/aurora-kbd-light.service \
       --replace-fail "ExecStart=/usr/bin/aurora-kbd-light" "ExecStart=$out/bin/aurora-kbd-light"
+    # The unit's boot start comes before the keyboard backlight LED and the
+    # light sensor exist; udev starts it again when either appears (the same
+    # rule as alarm-aurora's and fedora-aurora's packages).
+    install -Dm644 ${./90-aurora-kbd-light.rules} $out/lib/udev/rules.d/90-aurora-kbd-light.rules
   '';
   passthru.commit = pin.commit;
   meta = {
