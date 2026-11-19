@@ -108,9 +108,12 @@ deadline=$((start + ready_timeout))
 # (key_construction_mutex), and a trusted key made before the enclave's
 # bring-up has ended waits there for it, up to 90 s. Meanwhile no other key
 # can be created, and systemd creates one for each service it starts, so the
-# whole boot would stall behind the probe below. diag/keystore leaves
-# "unknown" once the bring-up has ended, so wait for that first. The driver
-# sends no event when it changes (no sysfs_notify, no uevent), so this polls;
+# whole boot would stall behind the probe below. So wait first for
+# diag/keystore to leave "unknown": "open" once the key store has opened,
+# which leaves only the last bring-up steps (keybag provisioning, publishing
+# the device nodes) for the probe to wait for, or "closed" once the bring-up
+# has ended without it. The driver sends no event when it changes (no
+# sysfs_notify, no uevent), so this polls;
 # https://github.com/aurora-silicon/linux/issues/2313 tracks both.
 keystore=$(diag_attr keystore)
 while [ "$keystore" = unknown ]; do
@@ -122,15 +125,16 @@ while [ "$keystore" = unknown ]; do
     keystore=$(diag_attr keystore)
 done
 
-# The bring-up opens the key store once per boot; closed is final.
+# The bring-up opens the key store at most once per boot; closed is final.
 if [ "$keystore" = closed ]; then
     log "the enclave's key store did not open this boot, so no trusted key can be sealed; run 'aurora-sep status'"
     exit 1
 fi
 
-# Seal a new trusted key and load it back. The bring-up has ended (or, on a
-# kernel without diag/keystore, the kernel itself waits for it in the first
-# call), so the answer is final for this boot: a retry gets the same one.
+# Seal a new trusted key and load it back. The first call waits in the
+# kernel for the rest of the bring-up (on a kernel without diag/keystore, for
+# all of it), and after that the driver's answer is final for this boot: a
+# retry gets the same one.
 probe() {
     key_id=$(printf 'new 32' | keyctl padd trusted aurora-sep-check @s 2>/dev/null) || return 1
     ok=1
