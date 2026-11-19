@@ -22,7 +22,7 @@ import sys
 DTB_MAGIC = b'\xd0\x0d\xfe\xed'
 BOARD_FILE = re.compile(r'boot-(j[0-9]+[a-z]*)\.bin')
 # The boards assemble-distribution-payload.py requires in every payload.
-REQUIRED_BOARDS = ('j700', 'j616s', 'j614s')
+REQUIRED_BOARDS = ('j700', 'j616s', 'j614s', 'j616c', 'j614c')
 # Aura's Stage 2 slot on these Macs.
 MAX_STAGE2_BYTES = 16 * 1024 * 1024
 
