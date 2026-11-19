@@ -37,7 +37,7 @@ class ImageParityTests(unittest.TestCase):
                           ('flatpakGL', 'aurora-mesa-commit.26.08')):
             self.write(self.metadata[key] + '/' + file, COMMIT + '\n')
         for arch in ('lib64', 'lib'):
-            self.write(f'/nix/store/fexMesa/usr/{arch}/libvulkan_asahi.so', b'ELF')
+            self.write(f'/nix/store/fexMesa/usr/{arch}/libvulkan_aurora.so', b'ELF')
         self.write('/nix/store/alsaUtils/bin/alsactl', b'ELF')
         self.write('/nix/store/ucm/share/alsa/ucm2/conf.d/aop_audio/3chan/HiFi.conf',
                    'JackControl "Internal Mic Jack"\n')

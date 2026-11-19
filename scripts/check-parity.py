@@ -82,7 +82,7 @@ def check(root):
         if (root.text(f'{data[key]}/{file}') or '').strip() != commit:
             raise ValueError(f'{key}/{file}: missing or stale image payload')
     for arch in ('lib64', 'lib'):
-        if not root.path(f'{data["fexMesa"]}/usr/{arch}/libvulkan_asahi.so').is_file():
+        if not root.path(f'{data["fexMesa"]}/usr/{arch}/libvulkan_aurora.so').is_file():
             raise ValueError(f'FEX Mesa {arch} is missing')
     if not root.path(f'{data["alsaUtils"]}/bin/alsactl').is_file():
         raise ValueError('the patched ALSA utilities are missing')

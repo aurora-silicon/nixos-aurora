@@ -1,5 +1,5 @@
-{ lib, m1n1, rustPlatform, llvmPackages, buildPackages, src, pin, auraMonitorFree }:
-(m1n1.override { customLogo = null; }).overrideAttrs (old:
+{ lib, upstream, rustPlatform, llvmPackages, buildPackages, src, pin, auraMonitorFree }:
+(upstream.override { customLogo = null; }).overrideAttrs (old:
 let customLogo = lib.elem "LOGO=custom" old.makeFlags;
 in {
   pname = "aura";
@@ -11,7 +11,7 @@ in {
     outputHashes."fatfs-0.4.0" = "sha256-r1STNZupll2U5MppT0gNmEKDl9gevRTYZFOAVimtZxU=";
   };
   # Keep the upstream customLogo override API, but link Aura's three raw
-  # built-in sizes instead of appending m1n1's two-size logo payload.
+  # built-in sizes instead of appending the upstream derivation's two-size logo payload.
   postPatch = lib.optionalString customLogo (old.postPatch + ''
     for size in 48 128 256; do
       magick data/custom_256.png -background black -alpha remove -alpha off \
@@ -48,8 +48,11 @@ in {
     make $makeFlags ESP_STAGE2=1
   '';
   installPhase = ''
-    mkdir -p $out/lib/m1n1 $out/share/aura/stage1
-    cp build/aura.bin $out/lib/m1n1/m1n1.bin
+    mkdir -p $out/lib/aura $out/share/aura/stage1
+    cp build/aura.bin $out/lib/aura/aura.bin
+    # nixos-apple-silicon's boot module reads this path from the m1n1 package.
+    mkdir -p $out/lib/m1n1
+    ln -s ../aura/aura.bin $out/lib/m1n1/m1n1.bin
     cp stage1/* $out/share/aura/stage1/
     # aura's own Stage 1 and signing tools, for aurora-secboot stage1 build and
     # its stage2 hook (AURORA_SECBOOT_AURA_DIR=$out/share/aura).
@@ -65,7 +68,7 @@ in {
     fi
     ${lib.optionalString auraMonitorFree "touch $out/share/aura/monitor-free"}
   '';
-  doCheck = false; # Upstream m1n1's Python suite is not the Aura test suite.
+  doCheck = false; # The upstream derivation's Python suite is not the Aura test suite.
   meta = old.meta // {
     description = "Aura bootloader for Apple Silicon";
     homepage = "https://github.com/aurora-silicon/aura";

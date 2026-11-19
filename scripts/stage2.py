@@ -1,4 +1,4 @@
-"""The shared Aura + device trees + gzip U-Boot + m1n1 options format."""
+"""The shared Aura + device trees + gzip U-Boot + aura options format."""
 import re
 import struct
 import zlib

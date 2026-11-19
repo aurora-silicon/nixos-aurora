@@ -6,7 +6,7 @@
  * The plugin's latency port must equal that delay, both right after the first
  * run() and after a setting changes while it runs.  The loudness compensator
  * is checked at every FFT size in both modes.  The other plugins are the ones
- * the Asahi speaker graphs use, checked with their lookahead settings.
+ * the Aurora speaker graphs use, checked with their lookahead settings.
  *
  * Run with LV2_PATH pointing at the bundles to test.  Exit status 0 means
  * every case matched.

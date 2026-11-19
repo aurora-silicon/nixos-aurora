@@ -25,7 +25,7 @@ let
   # The aura build installed.nix puts at the front of Stage 2, whose
   # share/aura holds the Stage 1 images and aura's signing tools that
   # `aurora-secboot stage1 build` and its stage2 hook use.
-  aura = pkgs.m1n1.override (lib.optionalAttrs (config.boot.m1n1CustomLogo != null) {
+  aura = pkgs.aura.override (lib.optionalAttrs (config.boot.m1n1CustomLogo != null) {
     customLogo = config.boot.m1n1CustomLogo;
   });
   # aurora-secboot as installed and as the Stage 2 updater runs it: with this

@@ -11,11 +11,11 @@ runCommand "aurora-fex-mesa-${pin.version}-${builtins.substring 0 12 pin.commit}
   chmod -R u+w $out/usr/share
   cp -a --update=none ${mesa32}/usr/share/. $out/usr/share/
   echo ${pin.commit} > $out/.aurora-mesa-commit
-  for library in $out/usr/lib64/libgallium*.so $out/usr/lib64/libvulkan_asahi.so; do
+  for library in $out/usr/lib64/libgallium*.so $out/usr/lib64/libvulkan_aurora.so; do
     readelf -h "$library" | grep -q 'Advanced Micro Devices X86-64'
     readelf -n "$library" | grep -Eq 'Build ID: [0-9a-f]{40}'
   done
-  for library in $out/usr/lib/libgallium*.so $out/usr/lib/libvulkan_asahi.so; do
+  for library in $out/usr/lib/libgallium*.so $out/usr/lib/libvulkan_aurora.so; do
     readelf -h "$library" | grep -q 'Intel 80386'
     readelf -n "$library" | grep -Eq 'Build ID: [0-9a-f]{40}'
   done

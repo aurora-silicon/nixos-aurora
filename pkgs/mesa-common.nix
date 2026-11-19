@@ -40,8 +40,8 @@
     !(lib.elem (lib.getName input) (map lib.getName [ rustc rust-bindgen rust-cbindgen ])))
     old.nativeBuildInputs else old.nativeBuildInputs;
   mesonFlags = [
-    "-Dplatforms=x11,wayland" "-Dgallium-drivers=asahi,zink,softpipe"
-    "-Dvulkan-drivers=asahi" "-Dvulkan-layers=" "-Dglvnd=enabled"
+    "-Dplatforms=x11,wayland" "-Dgallium-drivers=aurora,zink,softpipe"
+    "-Dvulkan-drivers=aurora" "-Dvulkan-layers=" "-Dglvnd=enabled"
     "-Degl=enabled" "-Dgbm=enabled" "-Dglx=dri" "-Dgles1=enabled"
     "-Dgallium-rusticl=false" "-Dgles2=enabled" "-Dvideo-codecs=${if guest then "" else "all"}" "-Dexpat=enabled"
     "-Dzstd=enabled" "-Dlmsensors=${if guest then "disabled" else "enabled"}" "-Dlibunwind=disabled"
