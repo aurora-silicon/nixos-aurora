@@ -46,19 +46,6 @@ omits Aurora's additional entry.
 
 **Declared in:** [audio.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/audio.nix)
 
-## `aurora.audio.pipewireFixes`
-
-Run the PipeWire daemon from aurora-pipewire, nixpkgs' PipeWire with
-the filter-graph volume and latency fixes and the AirPlay sender fixes
-that Fedora and Arch Linux ARM carry. Without it, an update that repeats
-the current volume or mute state applies the speaker volume twice.
-
-**Type:** boolean
-
-**Default:** `true`
-
-**Declared in:** [audio.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/audio.nix)
-
 ## `aurora.audio.skipLockedControls`
 
 Select and install Aurora's ALSA utilities, whose restore skips controls
@@ -999,46 +986,11 @@ This validates contents, not which boards are included by the kernel.
 
 **Declared in:** [installed.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/installed.nix)
 
-## `aurora.systemFixes.drkonqiOrdering`
-
-Break the ordering cycle that drkonqi's coredump cleanup timer and sentry
-path units create, which makes systemd delete a stop job every time a
-Plasma session stops (KDE bug 528003). Used only with Plasma; false
-retains the packaged units unchanged.
-
-**Type:** boolean
-
-**Default:** `true`
-
-**Declared in:** [system-fixes.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/system-fixes.nix)
-
 ## `aurora.systemFixes.malcontentSignal`
 
 Add the signal-handling and exit-status drop-ins for malcontent's optional
 daemons. This does not start or install absent daemons; false omits the
 drop-ins and retains their packaged behavior.
-
-**Type:** boolean
-
-**Default:** `true`
-
-**Declared in:** [system-fixes.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/system-fixes.nix)
-
-## `aurora.systemFixes.nmDispatcherPersist`
-
-Run NetworkManager's dispatcher with `--persist` and stop it after
-NetworkManager, avoiding failed event activation during shutdown. Used
-only when NetworkManager is enabled; false retains its packaged lifecycle.
-
-**Type:** boolean
-
-**Default:** `true`
-
-**Declared in:** [system-fixes.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/system-fixes.nix)
-
-## `aurora.systemFixes.nmKeepWakeOnLan`
-
-Keep a Wake-on-LAN/WLAN device that is still activated after wake instead of reconnecting it.
 
 **Type:** boolean
 
