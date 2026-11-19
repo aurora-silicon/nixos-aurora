@@ -15,7 +15,7 @@ in assert lib.assertMsg (!config.aurora.speakerguardd.v2.enable)
    # actual packaged unit files in the derivation below.
    assert lib.assertMsg (lib.all (package: lib.elem package config.systemd.packages)
      [ profile.pkgs.speakersafetyd profile.pkgs.speakerguardd ]
-     && !(guarded "speakersafetyd.service") && !(guarded "speakerguardd.service"))
+     && !(guarded "speakersafetyd.service") && !(guarded "speakerguardd@.service"))
      "Legacy daemons must remain available without the v2 gate";
    assert lib.assertMsg (lib.hasInfix "use-feedback-guard" (unit "speakersafetyd.service").text)
      "Keep the board-specific legacy protection selector";
@@ -23,7 +23,9 @@ in assert lib.assertMsg (!config.aurora.speakerguardd.v2.enable)
      "The image kernel must support legacy speaker protection";
    pkgs.runCommandNoCC "aurora-legacy-speaker-graphs" { } ''
      test -s ${profile.pkgs.speakersafetyd}/lib/systemd/system/speakersafetyd.service
-     test -s ${profile.pkgs.speakerguardd}/lib/systemd/system/speakerguardd.service
+     test -s ${profile.pkgs.speakerguardd}/lib/systemd/system/speakerguardd@.service
+     grep -q -- '--owns-card --defer-to ${profile.pkgs.speakersafetyd}/share/speakersafetyd$' \
+       ${profile.pkgs.speakerguardd}/lib/systemd/system/speakerguardd@.service
      for board in j316 j413 j616 j700; do
        test -s ${profile.pkgs.asahi-audio}/share/asahi-audio/$board/graph.json
      done
