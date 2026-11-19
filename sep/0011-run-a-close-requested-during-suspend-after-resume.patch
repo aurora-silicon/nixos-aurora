@@ -1,0 +1,206 @@
+From: Aurora J815 bring-up
+Subject: [PATCH] Run a close requested during suspend once the device resumes
+
+fp_device_close() refused with FP_DEVICE_ERROR_BUSY while the device was
+suspended. When the system suspends during a lock-screen verify, fprintd
+cancels the verify (the driver has no suspend handler) and the screen
+locker's pam_fprintd releases the device right away, still inside the
+suspend: the Release fails as busy, pam_fprintd does not retry, and the
+device stays open with no owner. Every later Claim then fails as already
+open, so sudo, the lock screen and System Settings (delete/re-enrol) can
+no longer use the reader until fprintd restarts (J815 boot 0f4c4bbd,
+2026-11-11: s2idle at 254.9 s, Release refused, every Claim afterwards
+failed).
+
+Keep such a close and run it once the resume task has completed. A
+second close while one is pending is still refused as busy, and a device
+removed while suspended runs it at its (failed) resume.
+
+---
+diff --git a/libfprint/fp-device-private.h b/libfprint/fp-device-private.h
+index c8253c6..8ab3b83 100644
+--- a/libfprint/fp-device-private.h
++++ b/libfprint/fp-device-private.h
+@@ -91,6 +91,8 @@ typedef struct
+   /* Suspend/resume tasks */
+   GTask  *suspend_resume_task;
+   GError *suspend_error;
++  /* A close requested while suspended, run once the device resumes */
++  GTask  *deferred_close_task;
+ 
+   /* Device temperature model information and state */
+   GSource      *temp_timeout;
+diff --git a/libfprint/fp-device.c b/libfprint/fp-device.c
+index 4994774..5ba2f99 100644
+--- a/libfprint/fp-device.c
++++ b/libfprint/fp-device.c
+@@ -963,6 +963,41 @@ fp_device_open_finish (FpDevice     *device,
+   return g_task_propagate_boolean (G_TASK (result), error);
+ }
+ 
++static void
++run_deferred_close (FpDevice *device)
++{
++  g_autoptr(GTask) task = NULL;
++  FpDevicePrivate *priv = fp_device_get_instance_private (device);
++
++  task = g_steal_pointer (&priv->deferred_close_task);
++  if (task == NULL)
++    return;
++
++  if (g_task_return_error_if_cancelled (task))
++    return;
++
++  if (!priv->is_open)
++    {
++      g_task_return_error (task,
++                           fpi_device_error_new (FP_DEVICE_ERROR_NOT_OPEN));
++      return;
++    }
++
++  if (priv->current_task || priv->is_suspended)
++    {
++      g_task_return_error (task,
++                           fpi_device_error_new (FP_DEVICE_ERROR_BUSY));
++      return;
++    }
++
++  g_debug ("Running the close deferred over the suspend");
++  priv->current_action = FPI_DEVICE_ACTION_CLOSE;
++  priv->current_task = g_steal_pointer (&task);
++  setup_task_cancellable (device);
++
++  FP_DEVICE_GET_CLASS (device)->close (device);
++}
++
+ /**
+  * fp_device_close:
+  * @device: a #FpDevice
+@@ -994,13 +1029,25 @@ fp_device_close (FpDevice           *device,
+       return;
+     }
+ 
+-  if (priv->current_task || priv->is_suspended)
++  if (priv->current_task || priv->deferred_close_task)
+     {
+       g_task_return_error (task,
+                            fpi_device_error_new (FP_DEVICE_ERROR_BUSY));
+       return;
+     }
+ 
++  /* A client that releases the device while the system suspends (a lock
++   * screen whose verify the suspend just cancelled) would get BUSY and
++   * never retry, leaving the device open with no owner: every later open
++   * then fails as already open until the daemon restarts. Run such a close
++   * once the device has resumed instead. */
++  if (priv->is_suspended)
++    {
++      g_debug ("Deferring the close until the device resumes");
++      priv->deferred_close_task = g_steal_pointer (&task);
++      return;
++    }
++
+   priv->current_action = FPI_DEVICE_ACTION_CLOSE;
+   priv->current_task = g_steal_pointer (&task);
+   setup_task_cancellable (device);
+@@ -1048,7 +1095,8 @@ fp_device_close_finish (FpDevice     *device,
+  * code of #FP_DEVICE_ERROR_BUSY before the suspend async routine finishes.
+  *
+  * Any operation started while the device is suspended will fail with
+- * #FP_DEVICE_ERROR_BUSY, this includes calls to open or close the device.
++ * #FP_DEVICE_ERROR_BUSY, this includes calls to open the device. A close
++ * requested while suspended is run once the device has resumed.
+  */
+ void
+ fp_device_suspend (FpDevice           *device,
+@@ -1141,9 +1189,14 @@ fp_device_resume (FpDevice           *device,
+       priv->is_suspended = FALSE;
+       g_task_return_error (task,
+                            fpi_device_error_new (FP_DEVICE_ERROR_REMOVED));
++      run_deferred_close (device);
+       return;
+     }
+ 
++  /* A close requested while suspended runs once the resume has completed. */
++  g_signal_connect_object (task, "notify::completed",
++                           G_CALLBACK (run_deferred_close), device,
++                           G_CONNECT_SWAPPED);
+   priv->suspend_resume_task = g_steal_pointer (&task);
+ 
+   fpi_device_resume (device);
+diff --git a/tests/test-fpi-device.c b/tests/test-fpi-device.c
+index 35faa9c..7e07535 100644
+--- a/tests/test-fpi-device.c
++++ b/tests/test-fpi-device.c
+@@ -2958,6 +2958,63 @@ test_driver_removed_while_suspended (void)
+   g_assert_false (fp_device_is_open (device));
+ }
+ 
++static void
++on_close_done (FpDevice *device, GAsyncResult *res, gpointer user_data)
++{
++  GError **error = user_data;
++  gboolean ok = fp_device_close_finish (device, res, error);
++
++  g_assert_true (ok == (*error == NULL));
++  g_object_set_data (G_OBJECT (device), "close-done", GINT_TO_POINTER (1));
++}
++
++/* A client that releases the device while the system suspends (a lock screen
++ * whose verify the suspend cancelled) must not leave it open forever: the
++ * close waits for the resume instead of failing as busy. */
++static void
++test_driver_close_while_suspended (void)
++{
++  g_autoptr(FpAutoResetClass) dev_class = auto_reset_device_class ();
++  g_autoptr(FpDevice) device = NULL;
++  g_autoptr(GError) error = NULL;
++  FpiDeviceFake *fake_dev;
++
++  device = g_object_new (FPI_TYPE_DEVICE_FAKE, NULL);
++  fake_dev = FPI_DEVICE_FAKE (device);
++  g_assert_true (fp_device_open_sync (device, NULL, NULL));
++
++  g_assert_true (fp_device_suspend_sync (device, NULL, &error));
++  g_assert_no_error (error);
++
++  fake_dev->last_called_function = NULL;
++  fp_device_close (device, NULL, (GAsyncReadyCallback) on_close_done, &error);
++  while (g_main_context_iteration (NULL, FALSE))
++    continue;
++  /* Not run and not refused while suspended */
++  g_assert_null (g_object_get_data (G_OBJECT (device), "close-done"));
++  g_assert_null (fake_dev->last_called_function);
++  g_assert_true (fp_device_is_open (device));
++
++  /* A second close meanwhile is refused as busy */
++  g_assert_false (fp_device_close_sync (device, NULL, &error));
++  g_assert_error (error, FP_DEVICE_ERROR, FP_DEVICE_ERROR_BUSY);
++  g_clear_error (&error);
++
++  g_assert_true (fp_device_resume_sync (device, NULL, &error));
++  g_assert_no_error (error);
++  while (g_main_context_iteration (NULL, FALSE))
++    continue;
++
++  g_assert_nonnull (g_object_get_data (G_OBJECT (device), "close-done"));
++  g_assert_no_error (error);
++  g_assert (fake_dev->last_called_function == dev_class->close);
++  g_assert_false (fp_device_is_open (device));
++
++  /* And it can be opened again */
++  g_assert_true (fp_device_open_sync (device, NULL, NULL));
++  g_assert_true (fp_device_close_sync (device, NULL, NULL));
++}
++
+ static void
+ test_driver_identify_warmup_cooldown (void)
+ {
+@@ -4285,6 +4342,7 @@ main (int argc, char *argv[])
+   g_test_add_func ("/driver/identify/suspend_busy_error", test_driver_identify_suspend_busy_error);
+   g_test_add_func ("/driver/identify/suspend_while_idle", test_driver_identify_suspend_while_idle);
+   g_test_add_func ("/driver/removed_while_suspended", test_driver_removed_while_suspended);
++  g_test_add_func ("/driver/close_while_suspended", test_driver_close_while_suspended);
+ 
+   g_test_add_func ("/driver/identify/warmup_cooldown", test_driver_identify_warmup_cooldown);
+ 

@@ -236,6 +236,8 @@ in {
       ./sep/0008-aurora-report-the-touch-id-lockout-as-locked-out.patch
       ./sep/0009-aurora-say-why-touch-id-needs-the-password.patch
       ./sep/0010-let-a-front-end-ask-whether-the-reader-needs-the-password.patch
+      # From alarm-aurora (aurora-silicon/alarm-aurora#254).
+      ./sep/0011-run-a-close-requested-during-suspend-after-resume.patch
     ];
     postPatch = (old.postPatch or "") + ''
       install -Dm644 ${stableFile ./sep/apple-sep.h} aurora-uapi/linux/apple-sep.h
