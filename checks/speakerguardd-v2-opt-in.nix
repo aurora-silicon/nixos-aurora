@@ -24,7 +24,7 @@ in assert lib.assertMsg (lib.all (entry: entry.assertion) on.assertions
      "enable = true must install speakerguardd 1.0";
    assert lib.assertMsg (builtins.elem "multi-user.target" (unit "speakerguardd-v2.service").wantedBy)
      "speakerguardd-v2.service must be wanted by multi-user.target when enabled";
-   assert lib.assertMsg (gated "speakersafetyd" && gated "speakerguardd"
+   assert lib.assertMsg (gated "speakersafetyd" && gated "speakerguardd@"
      && lib.hasInfix "use-feedback-guard" (unit "speakersafetyd.service").text)
      "the legacy daemons stay enabled behind the gate, beside their own ExecCondition";
    assert lib.assertMsg (!on.aurora.speakerguardd.upgrade.enable)

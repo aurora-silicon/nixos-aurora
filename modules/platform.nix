@@ -47,7 +47,8 @@
       text = builtins.readFile ./64-aurora-trackpad-clicks.rules;
     })
   ];
-  # The sense-PCM udev rule starts the feed-forward guardian only on J700.
+  # The sense-PCM udev rule wants speakerguardd@<card> for every macaudio
+  # card; it runs only where speakerguardd has the card's profile.
   systemd.services.speakersafetyd.serviceConfig = {
     # Preserve the board-specific legacy daemon selector.
     ExecCondition = [ "${pkgs.speakerguardd}/libexec/speakerguardd/use-feedback-guard" ];

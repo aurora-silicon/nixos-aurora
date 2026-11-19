@@ -575,8 +575,11 @@ in {
     '';
   });
   speakerguardd = rustPackage "speakerguardd" ./locks/speakerguardd.Cargo.lock {
-    # The binary names its source in -V and the journal. The unit keeps its
-    # own start limit (five attempts in 60 s); only the J700 model is named.
+    # The binary names its source in -V and the journal. The unit is the
+    # per-card template (speakerguardd#197): udev wants an instance for every
+    # macaudio card, and its start condition runs it only for a card with a
+    # profile here and none from speakersafetyd, whose profiles are in its
+    # store path here, not /usr/share.
     env.SPEAKERGUARDD_COMMIT = builtins.substring 0 12 pins.speakerguardd.commit;
     nativeBuildInputs = [ final.pkg-config ];
     buildInputs = [ final.alsa-lib ];
@@ -584,9 +587,13 @@ in {
       mkdir -p $out/share/speakerguardd
       cp -r conf/* $out/share/speakerguardd/
       mkdir -p $out/lib/systemd/system $out/lib/udev/rules.d $out/libexec/speakerguardd
-      substitute speakerguardd.service $out/lib/systemd/system/speakerguardd.service \
-        --replace-fail "ExecStart=/usr/bin/speakerguardd -c /usr/share/speakerguardd --wait-for-card 30" \
-          "ExecStart=$out/bin/speakerguardd -c $out/share/speakerguardd -C AppleJ700 --wait-for-card 30"
+      substitute speakerguardd@.service $out/lib/systemd/system/speakerguardd@.service \
+        --replace-fail "ExecCondition=/usr/bin/speakerguardd -c /usr/share/speakerguardd -C %I --owns-card" \
+          "ExecCondition=$out/bin/speakerguardd -c $out/share/speakerguardd -C %I --owns-card --defer-to ${final.speakersafetyd}/share/speakersafetyd" \
+        --replace-fail "ExecStart=/usr/bin/speakerguardd -c /usr/share/speakerguardd -C %I --wait-for-card 30" \
+          "ExecStart=$out/bin/speakerguardd -c $out/share/speakerguardd -C %I --wait-for-card 30"
+      ! grep -q /usr/ $out/lib/systemd/system/speakerguardd@.service
+      test -d ${final.speakersafetyd}/share/speakersafetyd/apple
       cp 95-speakerguardd.rules $out/lib/udev/rules.d/
       cp ${stableFile ./firmware/use-feedback-guard} $out/libexec/speakerguardd/use-feedback-guard
       chmod +x $out/libexec/speakerguardd/use-feedback-guard

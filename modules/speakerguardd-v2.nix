@@ -74,7 +74,8 @@ in {
     # The older daemons start only where v2 does not run and the kernel has
     # no v2 interface.
     systemd.services.speakersafetyd = legacyGate;
-    systemd.services.speakerguardd = legacyGate;
+    # The 0.1 daemon's per-card template (speakerguardd#197).
+    systemd.services."speakerguardd@" = legacyGate;
   })
   (lib.mkIf (!cfg.enable) {
       # The preview linked its generated PipeWire and WirePlumber configuration
