@@ -24,10 +24,6 @@ stdenvNoCC.mkDerivation {
     substituteInPlace $out/libexec/aurora-sep-greeter-fingerprint \
       --replace-fail 'for f in /usr/lib64/gnome-shell/libshell-*.so' \
         'for f in "''${AURORA_SEP_GNOME_SHELL:-/nonexistent}"/lib/gnome-shell/libshell-*.so /usr/lib64/gnome-shell/libshell-*.so'
-    # The display manager unit is display-manager.service here (no gdm.service).
-    substituteInPlace $out/libexec/aurora-sep-greeter-fingerprint \
-      --replace-fail 'systemctl -q is-active gdm.service' 'systemctl -q is-active display-manager.service' \
-      --replace-fail 'exec systemctl restart gdm.service' 'exec systemctl restart display-manager.service'
     for helper in extract-mesa-calibration sensor-present touchid-setup-needed touchid-publish; do
       install -Dm755 "$helper" "$out/libexec/aurora/$helper"
     done

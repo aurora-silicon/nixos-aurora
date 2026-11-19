@@ -274,9 +274,12 @@ in {
       systemd.services.aurora-sep-greeter-fingerprint = {
         description = "Offer fingerprint at the GNOME login screen";
         documentation = [ "file://${pkgs.aurora-sep}/share/doc/aurora-sep/README.md" ];
-        # Only prepares the login screen's shell, so it never waits for Touch
-        # ID: when Touch ID comes up after the login screen has asked for the
-        # reader, aurora-sep-greeter-refresh shows the login screen again.
+        # Only prepares the login screen's shell, so it does not wait for
+        # Touch ID. The login screen right after boot takes the password
+        # anyway: as on macOS, where Touch ID is offered only after one
+        # password login since the restart, aurora-sep keeps
+        # require_password_after_boot = yes. Later login screens (after a log
+        # out) and the lock screen find the reader once it is up.
         before = [ "display-manager.service" ];
         wantedBy = [ "display-manager.service" ];
         path = [ pkgs.coreutils pkgs.gnugrep pkgs.gawk pkgs.glib.dev ];
@@ -286,20 +289,6 @@ in {
           RemainAfterExit = true;
           ExecStart = "${pkgs.aurora-sep}/libexec/aurora-sep-greeter-fingerprint";
           ExecStop = "${pkgs.aurora-sep}/libexec/aurora-sep-greeter-fingerprint stop";
-        };
-      };
-      systemd.services.aurora-sep-greeter-refresh = {
-        description = "Offer fingerprint on a login screen that came up before Touch ID";
-        documentation = [ "file://${pkgs.aurora-sep}/share/doc/aurora-sep/README.md" ];
-        # Runs once both are up. Requisite: when Touch ID did not come up,
-        # there is nothing to offer and the login screen stays as it is.
-        after = [ "aurora-sep-ready.service" "display-manager.service" ];
-        requisite = [ "aurora-sep-ready.service" ];
-        wantedBy = [ "display-manager.service" ];
-        path = [ pkgs.coreutils pkgs.gawk pkgs.systemd ];
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = "${pkgs.aurora-sep}/libexec/aurora-sep-greeter-fingerprint refresh";
         };
       };
     })
