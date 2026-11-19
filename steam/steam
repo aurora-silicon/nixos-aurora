@@ -28,6 +28,36 @@ if [ -z "${AURORA_STEAM_ROOT:-}" ]; then
 			--prefix "${XDG_STATE_HOME:-$HOME/.local/state}/aurora-steam-native/prefix"
 	fi
 fi
+# Games run under GameMode (aurora-gamemode's /etc/gamemode.ini: on the P cores
+# of Macs with at least four, governor left at schedutil). Steam has no global
+# launch option, and the whole client under gamemoderun would hold GameMode,
+# its screen saver inhibition and the P core pinning for as long as Steam is
+# open. Instead, while Steam runs, every process below a game's reaper (Steam's
+# per-game launcher, `reaper SteamLaunch AppId=N -- ...`) is registered with
+# gamemoded, as gamemoderun %command% would register it, and GameMode ends with
+# the game. AURORA_STEAM_GAMEMODE=0 in the environment turns this off.
+gamemode_games() {
+	local steam=$1 known=" " now pids p
+	while kill -0 "$steam" 2>/dev/null; do
+		now=" "
+		pids=$(pgrep -d, -u "$UID" -f '(^|/)reaper SteamLaunch( |$)') || pids=
+		while [ -n "$pids" ]; do
+			for p in ${pids//,/ }; do
+				now+="$p "
+				[[ $known == *" $p "* ]] || busctl --user call com.feralinteractive.GameMode \
+					/com/feralinteractive/GameMode com.feralinteractive.GameMode \
+					RegisterGameByPID ii "$BASHPID" "$p" || :
+			done
+			pids=$(pgrep -d, -P "$pids") || pids=
+		done
+		known=$now
+		sleep 3
+	done
+}
+if [ "${AURORA_STEAM_GAMEMODE:-1}" != 0 ] && [[ $(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus \
+	org.freedesktop.DBus ListActivatableNames 2>/dev/null) == *'"com.feralinteractive.GameMode"'* ]]; then
+	gamemode_games "$$" </dev/null >/dev/null 2>&1 &
+fi
 # Steam starts its runtime launcher by name, including after client updates.
 export PATH="${AURORA_STEAM_ROOT:-$HOME/.steam/root}/steamapps/common/SteamLinuxRuntime_4-arm64/pressure-vessel/bin:$PATH"
 exec "$lib/bin/steam-native4k" "$@"

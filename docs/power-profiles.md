@@ -28,7 +28,8 @@ not apply to PPD here.
 
 ## Games (GameMode)
 
-With `programs.gamemode.enable = true`, `modules/gamemode.nix` gives GameMode
+GameMode is on by default in the KDE and GNOME profiles (`minimal` leaves it
+off), and `modules/gamemode.nix` gives it
 the same defaults Fedora and ALARM install as `/etc/gamemode.ini`
 ([aurora-platform `power/GAMEMODE.md`](https://github.com/aurora-silicon/aurora-platform/blob/main/power/GAMEMODE.md)):
 games started with GameMode run on the P cores (`pin_cores = "yes"`), and the
@@ -37,6 +38,12 @@ MacBook Pro M4 Pro that takes two-frames-in-flight rendering from 197 to
 179 us per frame (geometry) and 162 to 145 us (fill) at the same energy per
 frame. Macs with fewer than four P cores (A18 Pro) are left unpinned by
 GameMode itself. Any `programs.gamemode.settings` value you set wins.
+Aurora's `steam` registers every game it starts with GameMode while the game
+runs (see [Gaming](gaming.md)). To turn GameMode off:
+
+```nix
+programs.gamemode.enable = false;
+```
 
 ## Power Saver
 

@@ -97,6 +97,46 @@ class SteamWrapperTests(unittest.TestCase):
             result = subprocess.run([bash, str(wrapper)], env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_games_are_registered_with_gamemode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lib, home, stubs = root / 'lib', root / 'home', root / 'stubs'
+            for path in (lib / 'bin', home / 'client/steamrtarm64', stubs):
+                path.mkdir(parents=True)
+            (home / '.steam').mkdir()
+            (home / '.steam/root').symlink_to(home / 'client')
+            log = root / 'log'
+            bash = shutil.which('bash')
+
+            def script(path, body):
+                path.write_text(f'#!{bash}\n' + body)
+                path.chmod(0o755)
+            script(home / 'client/steamrtarm64/steam', '')
+            # The client stays up long enough for one scan of a game's process tree.
+            script(lib / 'bin/steam-native4k', 'sleep 2\n')
+            script(root / 'userpages', '')
+            # A game: reaper 100 with children 101 and 102, and 103 below 102.
+            script(stubs / 'pgrep', f'echo "pgrep $*" >> {log}\n'
+                   'case "$*" in\n'
+                   '  *"reaper SteamLaunch"*) echo 100;;\n'
+                   '  "-d, -P 100") echo 101,102;;\n'
+                   '  "-d, -P 101,102") echo 103;;\n'
+                   '  *) exit 1;;\n'
+                   'esac\n')
+            script(stubs / 'busctl', f'echo "busctl $*" >> {log}\n'
+                   'case "$*" in *ListActivatableNames*) echo \'as 2 "org.freedesktop.DBus" "com.feralinteractive.GameMode"\';; esac\n')
+            wrapper = root / 'steam'
+            wrapper.write_text((ROOT / 'steam/steam').read_text().replace('@LIBDIR@', str(lib))
+                               .replace('@USERPAGES@', str(root / 'userpages')).replace('@USER4K_HINT@', 'fixture'))
+            env = {'HOME': str(home), 'PATH': f'{stubs}:{os.environ["PATH"]}', 'USER': 'fixture'}
+            for setting, games in (({}, ['100', '101', '102', '103']), ({'AURORA_STEAM_GAMEMODE': '0'}, [])):
+                log.write_text('')
+                subprocess.run([bash, str(wrapper)], env={**env, **setting}, check=True, capture_output=True, timeout=30)
+                registered = [line.split()[-1] for line in log.read_text().splitlines() if 'RegisterGameByPID ii' in line]
+                self.assertEqual(sorted(registered), games, setting)
+                if games:
+                    self.assertIn(f'pgrep -d, -u {os.getuid()} -f (^|/)reaper SteamLaunch( |$)', log.read_text())
+
 
 if __name__ == "__main__":
     unittest.main()
