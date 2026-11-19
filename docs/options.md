@@ -921,7 +921,7 @@ follow a change of an expired password at login.
 
 ## `aurora.speakerguardd.upgrade.enable`
 
-Install aurora-speaker-upgrade (the legacy-to-speakerguardd-v2 upgrade tool); it never runs by itself.
+Install aurora-speaker-upgrade and run it at boot: it moves the speakers to speakerguardd v2 when this Mac's own tuning passes the silent self-check (needs aurora.speakerguardd.v2.enable). The legacy protection keeps a refused Mac; sudo aurora-speaker-upgrade --revert goes back. The Aurora platform turns it on.
 
 **Type:** boolean
 
@@ -936,7 +936,7 @@ speakersafetyd, with its gate on both stacks. Nothing changes for the
 speakers by itself: the gate keeps speakersafetyd in charge until
 aurora-speaker-upgrade (aurora.speakerguardd.upgrade.enable) has
 verified this Mac's own tuning and switched the dual-interface
-kernel to v2's lease. Off by default.
+kernel to v2's lease. The Aurora platform turns it on.
 
 **Type:** boolean
 
