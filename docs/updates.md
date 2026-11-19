@@ -251,7 +251,7 @@ snapshot containing both rather than replacing the live cache with it.
 | `publish-cache.yml` | Manual, after a successful main build, or every six hours with `AUTO_PUBLISH_TESTING`. Collects and publishes a signed snapshot, or reuses existing signed outputs. `deploy=yes` or `AUTO_DEPLOY_TESTING` activates it. |
 | `deploy-cache.yml` | Verifies a cache release and builds documentation in parallel, then deploys one Pages site. `advance-testing=false` leaves the channel ref unchanged; an intentional downgrade uses `allow-downgrade=true` and the `stable-promotion` environment. |
 | `promote.yml` | Promotes a tested commit through `stable-promotion`; `STABLE_MIN_SOAK_HOURS` sets the minimum soak interval. |
-| `images.yml` | Builds a selected profile and checked Stage 2. `AUTO_IMAGES` requests all profiles after testing advances to main; `channel` selects the generated configuration's update channel. |
+| `images.yml` | Builds a selected profile and checked Stage 2. `channel` selects the generated configuration's update channel. |
 | `publish-payload.yml` | Manually publishes a signed installer payload from a successful image run. Signing uses `catalog-signing`. |
 | `payload-after-images.yml` | With `AUTO_PAYLOADS`, publishes after successful main image builds. Installer-catalog adoption remains a separate step. |
 
