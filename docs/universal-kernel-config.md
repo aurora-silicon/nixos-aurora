@@ -1,55 +1,35 @@
-# Universal hardware configuration
+# One kernel configuration
 
-Every supported Mac uses the same source-pinned Apple hardware fragment. A
-retained distribution base supplies desktop/security/filesystem/peripheral
-policy; a device name never selects a different kernel configuration.
+Every Aurora kernel, on every supported Mac and in every distribution, is
+configured by the kernel source itself:
 
-| Configuration input | Before | After |
-| --- | --- | --- |
-| Shared hardware | ALARM resolved snapshot plus local common copy | Canonical ALARM resolved snapshot; strict source-fragment validation |
-| Per-device fragments | None | None |
-| Local common hardware copy | 80 requests in `common.config` | Removed; generic peripheral policy retained in the distro base |
-| Distribution policy | Full distro base + `nixos.config` | Retained |
-| Resolution | `olddefconfig` | `olddefconfig`, then strict ordered fragment validation |
+    make ARCH=arm64 LLVM=1 aurora_defconfig
 
-The retired Fedora Neo fragment requested `PCIE_APPLE_PIODMA_DIAG=y`,
-`MT7932_FULLMAC=m`, `BT_MTK7932_PCIE=m`, `SPI_APPLE_QSPI=m`,
-`RTC_DRV_APPLE_PMU=m`, and `DRM_ACCEL_ANE=m`. All six are already requested by
-the pinned shared fragment. The distro recipes must not repeat them in an
-overlay: when a source update renames a prerequisite, its hardware fragment
-must change with it.
+`aurora_defconfig` merges `arch/arm64/configs/asahi.config` (every Apple SoC
+and board driver the tree supports, M1 through M5 and A18) over
+`arch/arm64/configs/aurora-base.config` (the generic distribution base:
+filesystems, networking, security, peripherals) and resolves the result with
+`olddefconfig`. No device, chip or distribution selects a different set of
+options, and no package carries a base config or an overlay of its own.
 
-The current pin, `5d7c3e74019d0a04a22e0c6e5cec5a297e245fd6`, is on
-`integration/aurora`. Its fragment still requests the old PCIe symbol and
-has no `VIDEO_APPLE_AVE`. The `aurora-wip` fragment at
-`8348f8244b208b5185b0764ebb21183a678e9e86` requests
-`PCIE_APPLE_T8140_BOOTSTRAP=y` and `VIDEO_APPLE_AVE=m`.
-Kernel PRs #649, #650, #656 and #657 merged into `aurora-wip`; changing a
-distro config cannot add their implementations to an integration pin.
+| Input | Fedora (kernel-aurora) | Arch Linux ARM (linux-aurora) | NixOS (pkgs/kernel.nix) | Fleet build |
+| --- | --- | --- | --- | --- |
+| Configuration | `aurora_defconfig` | `aurora_defconfig` | `aurora_defconfig` | `aurora_defconfig` |
+| Release name | `make LOCALVERSION=-<release>.aarch64` | `CONFIG_LOCALVERSION="-ARCH"` + `localversion.10-pkgrel` | empty (modDirVersion must equal the version) | `make LOCALVERSION=-aurora-<cut>` |
+| Validation | both fragments survive resolution | both fragments + desktop requirements | both fragments + `kernel/nixos.config` + `check-required.py`; the vendored `kernel/config` snapshot must equal the resolved config | both fragments |
 
-| Feature | Required source/config contract |
-| --- | --- |
-| Radio bootstrap (#649) | Shared fragment selects `PCIE_APPLE_T8140_BOOTSTRAP=y`, retaining `MT7932_FULLMAC=m` and `BT_MTK7932_PCIE=m` |
-| AVE | Shared fragment selects `VIDEO_APPLE_AVE=m` |
-| ANE | Shared fragment selects `DRM_ACCEL_ANE=m` |
-| ADMAC/I2C runtime PM (#657) | `PM=y`, `APPLE_ADMAC=m`, `I2C_APPLE=m`; runtime behavior is a source change |
-| USB4 PCIe tunnels (#650) | `USB4=m`, `USB4_APPLE_SOC=m`, `RESET_APPLE_CIO=y`, `PCIE_APPLE=y`; DT-driven behavior is a source change |
-| DRAM reporting (#656) | `APPLE_PMP_REPORT=y`; reporting is a source change |
+The release name is the only per-distribution difference, and it is not a
+kernel option: Arch's boot tools find device trees under
+`/lib/modules/*-ARCH`, Fedora's kernel-install names the RPM release, and
+NixOS requires an empty suffix. `kernel/nixos.config` is a list of what NixOS
+needs, checked against the resolved configuration and never merged.
 
-KUnit options added by these source changes are test options, not hardware
-admission switches. Configuration resolution and source checks do not prove
-device boot, runtime PM, encoding, radio or tunnel operation.
+NixOS evaluates kernel options before building, so it vendors the resolved
+`aurora_defconfig` in `kernel/config` together with the kernel commit and
+SHA256 in `kernel/provenance.json`. The build regenerates the configuration
+from the pinned source and fails if it differs from the snapshot; refresh the
+snapshot whenever the kernel pin changes. Options an owner sets through
+`boot.kernelPatches` are the only thing merged on top.
 
-NixOS continues DJ's [#51](https://github.com/aurora-silicon/nixos-aurora/pull/51)
-resolved-config inheritance. ALARM is the configuration authority: NixOS
-vendors its committed resolved snapshot with the exact ALARM commit, kernel
-pin and SHA256, then applies only `nixos.config`. It validates the matching
-kernel fragment, but does not merge a separate hardware overlay. A source
-pin change requires a refreshed ALARM snapshot; evaluation rejects stale
-kernel provenance or a changed snapshot hash.
-
-This builds on DJ's [ALARM #44](https://github.com/aurora-silicon/alarm-aurora/pull/44)
-distribution-base restoration and [NixOS #48](https://github.com/aurora-silicon/nixos-aurora/pull/48)
-restoration of dm-integrity, Bluetooth LE, nftables, PSI and exFAT. Those
-requirements remain intact. Compiler metadata in the committed snapshot is
-regenerated by Kconfig for the package builder's toolchain.
+To change an option, change the kernel source: Apple hardware in
+`asahi.config`, everything else in `aurora-base.config`.
