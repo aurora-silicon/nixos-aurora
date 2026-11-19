@@ -16,6 +16,9 @@ only what differs on NixOS:
 - The newest bootloader install decides the trial: an armed candidate that
   never booted is withdrawn when a later install selects other bytes.
 - Receipts name the candidate's SHA-256 where Fedora names the kernel.
+- The built image goes through bootchain.py's sign() (aurora-secboot's
+  stage2 hook) before anything is compared or written, so receipts and
+  trials name the signed bytes.
 
 Attempts per candidate image and staging on a trial boot after its commit
 come from bootchain.py itself (fedora-aurora#207).
@@ -227,8 +230,14 @@ class NixosUpdate(bootchain.Update):
         if not source.is_file():
             return  # The installer only warns; nothing is written.
         target = self.path(self.env.get('ESP_ROOT', '/boot/efi')) / 'm1n1' / name
+        payload = source.read_bytes()
         try:
-            if target.read_bytes() == source.read_bytes():
+            # The bytes install would write; a signing failure is install's to report.
+            payload = self.sign(payload)
+        except Refused:
+            pass
+        try:
+            if target.read_bytes() == payload:
                 return
         except OSError:
             pass
@@ -236,9 +245,13 @@ class NixosUpdate(bootchain.Update):
 
     def install(self):
         payload = self.path(self.env['AURORA_STAGE2_SOURCE']).read_bytes()
-        digest = hashlib.sha256(payload).hexdigest()
-        if digest != self.env.get('AURORA_STAGE2_SHA256'):
+        if hashlib.sha256(payload).hexdigest() != self.env.get('AURORA_STAGE2_SHA256'):
             raise Refused('the Stage 2 input does not match its digest')
+        # The built image as aurora-secboot's stage2 hook returns it: signed with the owner's
+        # Stage 2 key when signing is on (AURORA_STAGE2_SIGNER), else unchanged. The signature is
+        # deterministic, so reinstalling the same image with the same key writes nothing.
+        payload = self.sign(payload)
+        digest = hashlib.sha256(payload).hexdigest()
         target = self.target()
         if target.is_symlink():
             raise Refused('Stage 2 target is a symlink')

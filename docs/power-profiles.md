@@ -1,7 +1,7 @@
 # Apple Silicon power-profile parity
 
 This distribution uses power-profiles-daemon (PPD), rather than Fedora's
-tuned-ppd. The current PPD Apple path has no Apple CPU/platform-profile driver.
+tuned-ppd. On most Apple Silicon machines PPD has no Apple CPU/platform-profile driver.
 Its placeholder path provides no equivalent CPU performance tuning and does
 not pin the CPUs at their maximum frequency. Available profile names alone
 do not establish hardware support; generic PPD actions may still apply.
@@ -26,6 +26,18 @@ with `schedutil` and removing inherited boost writes. Stock tuned per-policy
 boost writes also fail with EINVAL on M2. That tuned-specific migration does
 not apply to PPD here.
 
+## Games (GameMode)
+
+With `programs.gamemode.enable = true`, `modules/gamemode.nix` gives GameMode
+the same defaults Fedora and ALARM install as `/etc/gamemode.ini`
+([aurora-platform `power/GAMEMODE.md`](https://github.com/aurora-silicon/aurora-platform/blob/main/power/GAMEMODE.md)):
+games started with GameMode run on the P cores (`pin_cores = "yes"`), and the
+governor stays `schedutil` instead of GameMode's default `performance`. On a
+MacBook Pro M4 Pro that takes two-frames-in-flight rendering from 197 to
+179 us per frame (geometry) and 162 to 145 us (fill) at the same energy per
+frame. Macs with fewer than four P cores (A18 Pro) are left unpinned by
+GameMode itself. Any `programs.gamemode.settings` value you set wins.
+
 ## Power Saver
 
 Power Saver gets a CPU power budget from `aurora-power-budget`, built from
@@ -43,6 +55,25 @@ untouched, and outside Power Saver the daemon only waits on D-Bus. The GPU,
 ANE, display and fan legs of Low Power Mode are not covered yet. Measurements
 are in the aurora-platform README. Performance is still never mapped to the
 `performance` governor.
+
+## M5 Pro and Max: the kernel's platform profile
+
+On T6050 the kernel's CLPC driver registers a platform profile,
+`apple-clpc`, after macOS's power modes
+([linux#1655](https://github.com/aurora-silicon/linux/pull/1655),
+[linux#1656](https://github.com/aurora-silicon/linux/pull/1656)). Balanced and
+performance set no limit, like Automatic and High Power. Low-power caps one
+thread at the 2880 MHz state and holds the package at 15 W (the SMC's PHPC). On
+a J714sAP under an 18-thread FMA loop, it held 14.3-14.9 W with the P cluster at
+1980 MHz and gave 76.3 Gfma/s; macOS's Low Power gave 14.3-14.7 W and 67.0 Gfma/s.
+
+A device tree boot has the profile only as a class device
+(`/sys/class/platform-profile`); stock PPD reads only ACPI's
+`/sys/firmware/acpi/platform_profile`. The overlay patches
+`power-profiles-daemon` (`patches/power-profiles-daemon-platform-profile-class.patch`)
+so that, without the ACPI file, it drives the first class device instead. With
+the kernel handler present, `aurora-power-budget` stands aside instead of capping
+a second time ([aurora-platform#16](https://github.com/aurora-silicon/aurora-platform/pull/16)).
 
 ## PWR acceptance plan
 

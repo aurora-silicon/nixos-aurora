@@ -69,6 +69,11 @@ in {
     src = source "libva-v4l2-request-avd";
     version = pins.libva-v4l2-request-avd.version;
     portabilityPatch = stableFile ./patches/libva-v4l2-request-offline-test-portability.patch;
+    # Chrome AV1 decode on AVD; drop when omacom/libva-v4l2_request merges them.
+    extraPatches = map stableFile [
+      ./patches/libva-v4l2-request-av1-chrome.patch
+      ./patches/libva-v4l2-request-av1-multitile.patch
+    ];
   };
   plymouth = prev.plymouth.overrideAttrs (old: {
     version = "${old.version}-aurora3";
@@ -284,6 +289,11 @@ in {
   aurora-firstboot = final.callPackage ./firstboot.nix { };
   aurora-power-budget = final.callPackage ./power-budget.nix { };
   aurora-secboot = final.callPackage ./secboot.nix { };
+  # The installed macOS's Wi-Fi firmware onto the ESP (modules/wifi-firmware.nix).
+  aurora-wifi-firmware = final.callPackage ./aurora-wifi-firmware.nix {
+    src = source "aurora-wifi-firmware";
+    version = pins.aurora-wifi-firmware.version;
+  };
   # The legacy-to-speakerguardd-v2 upgrade tool (modules/speaker-upgrade.nix).
   aurora-speaker-upgrade = final.callPackage ./aurora-speaker-upgrade.nix {
     src = source "aurora-speaker-upgrade";
@@ -308,6 +318,16 @@ in {
     src = source "omarchy-ane-tools";
     version = pins.omarchy-ane-tools.version;
   };
+  # power-profiles-daemon reads the platform profile only from ACPI's
+  # /sys/firmware/acpi/platform_profile. A device tree boot (Apple silicon)
+  # has a platform profile only as a class device, such as the M5 Pro/Max
+  # CLPC's apple-clpc: fall back to the first /sys/class/platform-profile
+  # device when the ACPI file is missing. ACPI machines are unchanged.
+  power-profiles-daemon = prev.power-profiles-daemon.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./patches/power-profiles-daemon-platform-profile-class.patch)
+    ];
+  });
   # Drive.Size for NVMe controllers that leave TNVMCAP at zero, such as the
   # Apple silicon SSDs, from their namespaces (udisks f032f09cc760 for 2.11.x),
   # so GNOME's About page and desktop tools show the internal disk's capacity.
@@ -390,7 +410,7 @@ in {
   linux-asahi = final.lib.makeOverridable ({ _kernelPatches ? [ ] }:
     final.lib.recurseIntoAttrs (final.linuxPackagesFor (import ./pkgs/kernel.nix {
       # Preserve buildLinux's .override API (features, extraMakeFlags, ...).
-      inherit (final) lib callPackage path writeText openssl binutils aurora-bindgen;
+      inherit (final) lib callPackage path writeText openssl kmod binutils aurora-bindgen;
       src = source "kernel-aurora" // { rev = pins.kernel-aurora.commit; };
       pin = pins.kernel-aurora;
       llvmPackages = kernelLLVM;
@@ -499,11 +519,15 @@ in {
   # A built-in panel in a variable refresh rate mode uses it on its whole
   # desktop, not only for fullscreen surfaces, so an idle desktop lets the
   # panel drop to its minimum rate.
+  # The renderer drops the onscreens it queued for power save page flips when
+  # it is disposed, before the Cogl display goes away, so gnome-shell does not
+  # crash at shutdown while outputs are in power save.
   mutter = prev.mutter.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ map stableFile [
       ./patches/mutter-prefer-variable-refresh-rate.patch
       ./patches/mutter-pq-reference-luminance.patch
       ./patches/mutter-builtin-desktop-vrr.patch
+      ./patches/mutter-power-save-onscreens-dispose.patch
     ];
   });
   # Firefox's RDD sandbox admits the media controller node of an allowed M2M
@@ -614,6 +638,7 @@ in {
         substituteInPlace $lx/$f --replace-quiet /usr/share/speakerguardd/ $out/share/speakerguardd/
       done
       install -Dm644 packaging/session/wiring.py packaging/session/gen.py -t $lx
+      substituteInPlace $lx/gen.py --replace-fail /usr/share/speakerguardd/ $out/share/speakerguardd/
       substituteInPlace $lx/speakerguardd-gate $lx/speakerguardd-provision \
         --replace-fail 'default="aurora-speaker-tuning"' "default=\"$out/bin/aurora-speaker-tuning\""
       substituteInPlace $lx/speakerguardd-gate --replace-fail '["amixer",' '["${final.alsa-utils}/bin/amixer",'
@@ -668,7 +693,7 @@ in {
       install -Dm644 -t $out/share/licenses/speakerguardd-v2 LICENSE crates/aurora-speaker-tuning/LICENSE-aurora-audio-dsp
     '';
     meta = {
-      description = "In-graph speaker protection for Apple Silicon Macs (speakerguardd 1.0, preview)";
+      description = "In-graph speaker protection for Apple Silicon Macs (speakerguardd 1.0)";
       homepage = "https://github.com/aurora-silicon/speakerguardd/tree/v2";
       # aurora-speaker-tuning is based on aurora-audio-dsp by saku, also MIT.
       license = final.lib.licenses.mit;
@@ -811,6 +836,7 @@ in {
   aurora-fido = let
     # jeepney: the per-user agent's D-Bus front-end (vault = user).
     py = final.python3.withPackages (ps: [ ps.cryptography ps.jeepney ]);
+    notificationPath = final.lib.makeBinPath [ final.util-linux final.libnotify final.glib.bin ];
   in final.stdenv.mkDerivation {
     pname = "aurora-fido";
     version = pins.aurora-fido.version;
@@ -827,11 +853,39 @@ in {
     # Unit tests: software stand-ins, no root, no hardware.
     doCheck = true;
     checkTarget = "check";
+    postPatch = ''
+      # The notifier sanitizes PATH before dropping into the user's session.
+      substituteInPlace aurora_fido/touchid.py \
+        --replace-fail '"PATH": "/usr/bin:/bin"' '"PATH": "${notificationPath}"'
+    '';
     postInstall = ''
       for f in $out/bin/aurora-fido $out/libexec/aurora-fido/aurora-fidod \
                $out/libexec/aurora-fido/aurora-passkeyd; do
         substituteInPlace $f --replace-fail "#!/usr/bin/python3 -I" "#!${py.interpreter} -I"
       done
+    '';
+    doInstallCheck = true;
+    installCheckPhase = ''
+      runHook preInstallCheck
+      ${py.interpreter} - "$out" <<'PY'
+      import os
+      import subprocess
+      import sys
+
+      sys.path.insert(0, os.path.join(sys.argv[1], "lib/aurora-fido"))
+      from aurora_fido.touchid import Notifier
+
+      # Exercise the sanitized subprocess environment, not the build's PATH.
+      env = Notifier()._env(os.getuid())
+      for helper in ("setpriv", "notify-send", "gdbus"):
+          subprocess.run(
+              [helper, "--help"],
+              env=env,
+              check=True,
+              stdout=subprocess.DEVNULL,
+          )
+      PY
+      runHook postInstallCheck
     '';
     passthru.commit = pins.aurora-fido.commit;
     meta = {

@@ -80,6 +80,15 @@ assert lib.assertMsg (hasHook on && on.environment.etc ? "aurora/secboot.conf" &
 assert lib.assertMsg (lib.hasSuffix "aurora-secboot-install \"\${1:-}\"\n" (installCommands on)
   && lib.hasInfix "aurora-install-stage2" (installCommands on))
   "the UKI hook is the last bootloader install step";
+# Stage 2 signing: the updater runs aurora-secboot's stage2 hook only while the
+# module is on, and only then says so to `aurora-secboot stage1 build --enforce`.
+assert lib.assertMsg (lib.hasInfix "AURORA_STAGE2_SIGNER=${builtins.unsafeDiscardStringContext on.system.build.auroraStage2Signer} "
+    (installCommands on)
+  && lib.hasInfix "AURORA_STAGE2_SIGNER=" on.system.preSwitchChecks.aurora-stage2-dt-abi
+  && on.environment.etc ? "aurora/stage2-sign-hook"
+  && !(lib.hasInfix "AURORA_STAGE2_SIGNER" (installCommands off))
+  && !(off.environment.etc ? "aurora/stage2-sign-hook"))
+  "the Stage 2 updater signs, and says so, exactly when secure boot is on";
 assert lib.assertMsg (lib.any (lib.hasInfix "securePath needs keyOwner") (failed auroraSecure))
   "securePath under Aurora-managed keys fails evaluation, as aurora-secboot enable refuses it";
 assert lib.assertMsg (failed owner == [ ]) "securePath with owner keys evaluates";

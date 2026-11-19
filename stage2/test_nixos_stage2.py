@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -416,6 +417,68 @@ class NixosTrialTests(unittest.TestCase):
         (self.root / 'nix/var/nix/profiles/system-profiles/scratch-9-link').unlink()
         self.env['AURORA_TOPLEVEL'] = str(toplevel.relative_to(self.root))
         with self.assertRaisesRegex(Refused, r'the configuration being installed \(generation 0\)'):
+            self.update().check()
+
+    # Stage 2 signing: aurora-secboot's stage2 hook, when it is there.
+
+    def signer(self, body, path='/usr/bin/aurora-secboot'):
+        signer = self.put(path, f'#!{sys.executable}\n{body}'.encode())
+        signer.chmod(0o755)
+        return signer
+
+    SIGN = ('import sys\n'
+            'assert sys.argv[1:3] == ["stage2", "hook"]\n'
+            'data = open(sys.argv[3], "rb").read()\n'
+            'open(sys.argv[4], "wb").write(data + b"SIG" + b"AURSIGT1")\n')
+
+    def test_without_a_signer_the_built_image_is_installed_unchanged(self):
+        self.install()
+        self.assertEqual(self.candidate.read_bytes(), self.payload)
+
+    def test_the_signed_image_is_the_trial_candidate(self):
+        self.signer(self.SIGN, '/run/current-system/sw/bin/aurora-secboot')
+        self.env['AURORA_STAGE2_SIGNER'] = '/run/current-system/sw/bin/aurora-secboot'
+        self.install()
+        signed = self.payload + b'SIGAURSIGT1'
+        self.assertEqual(self.candidate.read_bytes(), signed)
+        self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
+        receipt = json.loads(self.target.with_name('boot.bin.next.json').read_text())
+        self.assertEqual(receipt['sha256'], hashlib.sha256(signed).hexdigest())
+
+    def test_the_signed_image_replaces_directly_on_an_old_stage1(self):
+        self.put('/proc/device-tree/chosen/asahi,m1n1-stage1-version', b'1.0.0b3\0')
+        self.signer(self.SIGN)
+        self.install()
+        self.assertEqual(self.target.read_bytes(), self.payload + b'SIGAURSIGT1')
+        self.assertEqual(self.backup.read_bytes(), b'GOOD-STAGE2')
+
+    def test_reinstalling_the_live_signed_image_writes_nothing(self):
+        self.signer(self.SIGN)
+        self.target.write_bytes(self.payload + b'SIGAURSIGT1')
+        self.install()
+        self.assertEqual(self.backup.read_bytes(), b'OLDER-STAGE2')
+        self.assertFalse(self.marker.exists())
+
+    def test_a_failing_signer_keeps_the_live_stage2(self):
+        self.signer('import sys\nprint("aurora-secboot: there is no stage2.key", file=sys.stderr)\nsys.exit(1)\n')
+        with self.assertRaisesRegex(Refused, 'Stage 2 signing failed: aurora-secboot: there is no stage2.key'):
+            self.install()
+        self.unchanged()
+
+    def test_the_input_digest_is_checked_before_signing(self):
+        self.signer(self.SIGN)
+        self.env['AURORA_STAGE2_SHA256'] = hashlib.sha256(self.payload + b'SIGAURSIGT1').hexdigest()
+        with self.assertRaisesRegex(Refused, 'does not match its digest'):
+            self.install()
+        self.unchanged()
+
+    def test_check_compares_the_signed_image(self):
+        self.signer(self.SIGN)
+        self.generation(2, 'kernel-7.1', abi=0)
+        self.target.write_bytes(self.payload + b'SIGAURSIGT1')
+        self.update().check()
+        self.target.write_bytes(self.payload)
+        with self.assertRaisesRegex(Refused, r'system-2 \(generation 0\)'):
             self.update().check()
 
     def test_main_reports_a_refusal_and_keeps_the_esp(self):
