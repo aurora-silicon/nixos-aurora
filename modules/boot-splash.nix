@@ -46,6 +46,24 @@ let
     ${udevadm} trigger --action=add "''${devices[@]}"
     ${udevadm} trigger --action=add --subsystem-match=drm
   '';
+  # Before the pivot: wait, briefly, for appledrm's DRM card and for udev to
+  # initialize it, so Plymouth opens it (DRM master) while the initrd udevd
+  # runs. Pivoting first lets an external display's hotplug make the fbdev
+  # emulation, with no master to defer to, blank the panel before Plymouth
+  # returns. 2 s at most; 1 s if no driver is bound to the display subsystem.
+  kmsHandover = pkgs.writeShellScript "aurora-kms-handover" ''
+    dev=/sys/bus/platform/devices/display-subsystem
+    [ -e "$dev" ] || exit 0
+    for ((tries = 0; tries < 40; tries++)); do
+      for card in "$dev"/drm/card*; do
+        [ -e "$card" ] || continue
+        ${udevadm} wait --timeout=1 "/dev/dri/''${card##*/}" 2>/dev/null
+        exit 0
+      done
+      [ -e "$dev/driver" ] || [ "$tries" -lt 20 ] || exit 0
+      ${pkgs.coreutils}/bin/sleep 0.05
+    done
+  '';
 in {
   # Desktop images boot to a splash. The Aurora theme draws the logo aura
   # shows, at the same size and place, with the spinner below it and
@@ -112,8 +130,17 @@ in {
     serviceConfig.Type = "oneshot";
     serviceConfig.ExecStart = earlyKms;
   };
+  boot.initrd.systemd.services.aurora-kms-handover = lib.mkIf config.boot.plymouth.enable {
+    description = "Hand the splash to the Apple display driver before the pivot";
+    unitConfig.DefaultDependencies = false;
+    wantedBy = [ "initrd.target" ];
+    after = [ "initrd-root-fs.target" "systemd-udevd.service" "plymouth-start.service" "aurora-early-kms.service" ];
+    before = [ "initrd-cleanup.service" "initrd-switch-root.target" ];
+    serviceConfig.Type = "oneshot";
+    serviceConfig.ExecStart = kmsHandover;
+  };
   boot.initrd.systemd.storePaths = lib.mkIf config.boot.plymouth.enable (
-    [ earlyKms ] ++ lib.optionals (config.boot.plymouth.theme == "aurora") [
+    [ earlyKms kmsHandover "${pkgs.coreutils}/bin/sleep" ] ++ lib.optionals (config.boot.plymouth.theme == "aurora") [
       # The initrd copier does not follow store references inside shell scripts.
       "${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth"
       "${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora"

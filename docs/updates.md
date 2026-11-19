@@ -68,6 +68,14 @@ including the MacBook Neo.
   (`/proc/device-tree/chosen/asahi,efi-system-partition` when present) with an `m1n1` directory, then
   hands the write to `aurora-stage2 install` (below). An unchanged file is left alone. Any refusal
   leaves the ESP unchanged and fails the bootloader install loudly.
+- With `aurora.secureBoot.enable` and an `aurora-secboot` that has `stage2 hook`, `aurora-stage2` first
+  passes the built file through it (`AURORA_STAGE2_SIGNER`), as `update-m1n1` does on Fedora. The hook signs it
+  with the owner's Stage 2 key when `STAGE2_SIGN` allows (by default: `stage2.key` in `keyDir` and
+  `keyOwner` `owner` or `both`) and returns it unchanged otherwise; receipts and trials name the signed
+  bytes. A signing failure keeps the live Stage 2. The module then also writes `/etc/aurora/stage2-sign-hook`,
+  which `aurora-secboot stage1 build --enforce` looks for before it builds a Stage 1 that refuses unsigned
+  Stage 2s. The installed `aurora-secboot` finds the Stage 1 images and aura's tools in the system's aura
+  build (`AURORA_SECBOOT_AURA_DIR`).
 - The aura build carries `share/aura/monitor-free` once its pinned source has no monitor. `overlay.nix`
   declares that in `auraMonitorFree`, and the aura build refuses a source that disagrees (`src/ctxr_exec.c`,
   or no `src/monitor.c`). aura 1.0.0b7 is the first pin without the monitor (aura#77), so `auraMonitorFree`

@@ -12,8 +12,8 @@ let
   lx = "${cfg.package}/libexec/speakerguardd-v2";
   # What provisioning, the gate, the self-check and the session helper run:
   # the ALSA tools, pw-link and pw-dump, loginctl and systemctl, and the
-  # tuning reader.
-  tools = [ pkgs.alsa-utils pkgs.pipewire pkgs.systemd cfg.package ];
+  # tuning reader, setpriv and runuser for reaching the seat user's session.
+  tools = [ pkgs.alsa-utils pkgs.pipewire pkgs.systemd pkgs.util-linux cfg.package ];
   # "+": the gate runs privileged even in a DynamicUser unit (speakersafetyd), speakerguardd#131.
   legacyGate = { serviceConfig.ExecCondition = [ "+${lx}/speakerguardd-gate legacy" ]; };
 in {
@@ -22,7 +22,7 @@ in {
       type = lib.types.bool;
       default = false;
       description = ''
-        Install speakerguardd 1.0 (preview) beside the 0.1 speakerguardd and
+        Install speakerguardd 1.0 beside the 0.1 speakerguardd and
         speakersafetyd, with its gate on both stacks. Nothing changes for the
         speakers by itself: the gate keeps speakersafetyd in charge until
         aurora-speaker-upgrade (aurora.speakerguardd.upgrade.enable) has
@@ -54,6 +54,7 @@ in {
     }];
     environment.systemPackages = [ cfg.package ];
     environment.pathsToLink = [ "/lib/lv2" ];
+    services.pipewire.extraLv2Packages = [ cfg.package ];
     systemd.packages = [ cfg.package ];
     # Every v2 system unit carries the gate itself (ExecCondition= in the
     # upstream unit). Provisioning and the self-check (with its switch test

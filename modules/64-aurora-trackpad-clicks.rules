@@ -1,0 +1,10 @@
+# Host-driven trackpad clicks, as macOS does them: at boot macOS takes click
+# control from the trackpad's haptic actuator and plays every click from the
+# host. hid-magicmouse does the same with haptic_press. Only MTP trackpads
+# whose transport has an actuator (an "actuator" node beside the trackpad in
+# the device tree) are switched; any other trackpad keeps the firmware's click.
+# The magicmouse bind loads the module first, so its parameter exists here;
+# "add" covers a bind that happened in the initramfs.
+# To keep the firmware's click, mask this file with an empty
+# /etc/udev/rules.d/64-aurora-trackpad-clicks.rules.
+ACTION=="add|bind", SUBSYSTEM=="hid", DRIVER=="magicmouse", ENV{HID_NAME}=="Apple MTP multi-touch", TEST=="../of_node/actuator", ATTR{[module/hid_magicmouse]parameters/haptic_press}="Y"

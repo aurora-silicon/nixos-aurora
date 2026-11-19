@@ -54,6 +54,7 @@ in {
   config = lib.mkIf cfg.enable {
     environment.systemPackages = [ cfg.package ];
     systemd.packages = [ cfg.package ];
+    services.udev.packages = [ cfg.package ];
     systemd.services.aurora-kbd-light = {
       wantedBy = [ "multi-user.target" ];
       inherit environment;

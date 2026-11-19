@@ -37,9 +37,34 @@ if [ "${AURORA_SEP_SESSION:-0}" != 1 ]; then
     exec keyctl session aurora-sep-load env AURORA_SEP_SESSION=1 "$0" "$@"
 fi
 
-# Options come from modprobe.d, where /etc/modprobe.d/aurora-sep.conf replaces
-# the packaged defaults. Options given here would override both.
-modprobe apple_sep
+# Root unlocked by the Secure Enclave: the initrd loaded the driver in its
+# key-store-only phase (1, or 2 for a root sealed to a user's password).
+# Finish that attach on the real root; modprobe would do nothing for the
+# loaded module and Touch ID would stay off. The SEP takes one attach per
+# boot, so the driver cannot be loaded a second time.
+case "$(cat /sys/module/apple_sep/parameters/keystore_only 2>/dev/null)" in
+1 | 2 | Y)
+    attached=false
+    for attr in /sys/bus/platform/drivers/apple_sep/*/complete_attach; do
+        [ -e "$attr" ] || continue
+        if ! echo 1 >"$attr"; then
+            log "could not finish the attach the initrd started"
+            exit 1
+        fi
+        attached=true
+    done
+    if [ "$attached" != true ]; then
+        log "the initrd loaded apple_sep for the key store, but it has no complete_attach"
+        exit 1
+    fi
+    log "finished the attach the initrd started for the key store"
+    ;;
+*)
+    # Options come from modprobe.d, where /etc/modprobe.d/aurora-sep.conf replaces
+    # the packaged defaults. Options given here would override both.
+    modprobe apple_sep
+    ;;
+esac
 
 # On a SoC or board without a SEP profile the module loads but enables and
 # probes nothing ("no platform profile for this SoC; the SEP stays disabled"),

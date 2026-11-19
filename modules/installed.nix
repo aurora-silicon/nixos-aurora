@@ -28,6 +28,10 @@ let
   # that does not declare one is generation 0, as on Fedora.
   dtbAbi = config.boot.kernelPackages.kernel.auroraDtbAbi or 0;
   configurationLimit = toString config.boot.loader.grub.configurationLimit;
+  # aurora-secboot from secure-boot.nix while aurora.secureBoot is on: each
+  # Stage 2 goes through its stage2 hook before it is compared or written.
+  signer = config.system.build.auroraStage2Signer or null;
+  signerEnv = lib.optionalString (signer != null) "AURORA_STAGE2_SIGNER=${signer} ";
   stage2Parser = pkgs.writeTextDir "stage2.py" (builtins.readFile ../scripts/stage2.py);
   # The Apple Silicon module's combined Stage 2: the same bytes the image ships
   # in m1n1/boot.bin, so an unchanged system never rewrites the ESP.
@@ -155,7 +159,7 @@ in {
     }];
     # install-grub.sh passes the configuration it makes the default as $1.
     boot.loader.grub.extraInstallCommands = lib.mkIf cfg.enable ''
-      AURORA_CONFIGURATION_LIMIT=${configurationLimit} \
+      ${signerEnv}AURORA_CONFIGURATION_LIMIT=${configurationLimit} \
         ${installStage2}/bin/aurora-install-stage2 ${stage2} ${lib.escapeShellArg esp} "''${1:-}"
     '';
     # Refuse device trees a listed configuration cannot boot before GRUB's menu
@@ -163,7 +167,7 @@ in {
     system.preSwitchChecks.aurora-stage2-dt-abi = lib.mkIf cfg.enable ''
       case "$2" in
         switch|boot)
-          AURORA_STAGE2_DIR=${stage2} ESP_ROOT=${lib.escapeShellArg esp} AURORA_TOPLEVEL="$1" \
+          ${signerEnv}AURORA_STAGE2_DIR=${stage2} ESP_ROOT=${lib.escapeShellArg esp} AURORA_TOPLEVEL="$1" \
             AURORA_CONFIGURATION_LIMIT=${configurationLimit} ${pkgs.aurora-stage2}/bin/aurora-stage2 check
           ;;
       esac
@@ -217,6 +221,9 @@ in {
       paths = [ installStage2 commit update pkgs.aurora-stage2 ];
     };
     environment.systemPackages = [ update installStage2 ];
+    # `aurora-secboot stage1 build --enforce` builds a Stage 1 that refuses
+    # unsigned Stage 2s only when the Stage 2 updater signs; this says it does.
+    environment.etc."aurora/stage2-sign-hook" = lib.mkIf (cfg.enable && signer != null) { text = ""; };
     # Updates are taken deliberately (aurora-update), as on ALARM and Fedora.
     system.autoUpgrade.enable = lib.mkDefault false;
   };

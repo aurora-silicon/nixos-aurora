@@ -97,3 +97,9 @@ logo PNGs. Its dependent-theme marker keeps NixOS's initrd asset discovery.
 Plymouth always prefixes image filenames with `ImageDir`; pointing at the
 core store output would miss Aurora's sibling directory on the real root.
 The geometry and script are still generated only into `/run` at startup.
+
+`0003-drm-Flush-only-the-damaged-areas.patch` (Fedora carry) passes the
+rectangles Plymouth copied to `drmModeDirtyFB()` instead of the whole
+buffer, so simpledrm stops copying the whole boot framebuffer for every
+spinner frame (J616s: 18 ms -> 0.55 ms of plymouthd CPU per frame).
+`test-drm-damage.c` runs in `postCheck` against a mocked DRM device.

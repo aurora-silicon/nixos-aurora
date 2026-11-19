@@ -3,9 +3,6 @@ stdenv.mkDerivation {
   pname = "aurora-camera-denoise";
   inherit (pin) version;
   inherit src;
-  # camera-denoise#8 on the pinned source: no unit for root or system users
-  # (the greeter), bounded restarts. Its user-unit test runs in checkPhase.
-  patches = [ ../patches/camera-denoise-user-unit-guard.patch ];
   nativeBuildInputs = [ meson ninja pkg-config ];
   buildInputs = [ pipewire ];
   mesonFlags = [
@@ -15,6 +12,8 @@ stdenv.mkDerivation {
     "-Dsysconfdir=/etc"
     "-Dsystemduserunitdir=${placeholder "out"}/lib/systemd/user"
   ];
+  # checkPhase runs upstream's unit test: no unit for root or system users
+  # (the greeter), bounded restarts (camera-denoise#8).
   doCheck = true;
   postInstall = ''
     substituteInPlace $out/lib/systemd/user/aurora-camera-denoise.service \

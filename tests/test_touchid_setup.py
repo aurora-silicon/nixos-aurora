@@ -53,12 +53,15 @@ def private(name, value):
     return bytes([0xff] + identifier) + der(0, body)[1:]
 
 
-def im4m(objects):
-    """An IM4M whose MANB holds `objects`: {name: {property: value element}}."""
+def im4m(objects, container=0x31):
+    """An IM4M whose MANB holds `objects`: {name: {property: value element}},
+    or a list of (name, properties) pairs, which may repeat a name. The M5
+    factory seal holds them in a SEQUENCE (container 0x30), older ones in a SET."""
+    pairs = objects.items() if isinstance(objects, dict) else objects
     body = b''.join(private(name, der(0x31, b''.join(private(key, value)
                                                       for key, value in props.items())))
-                    for name, props in objects.items())
-    manb = private(b'MANB', der(0x31, body))
+                    for name, props in pairs)
+    manb = private(b'MANB', der(container, body))
     return der(0x30, text(b'IM4M') + der(0x02, b'\x00') + der(0x31, manb)
                + der(0x04, b'signature') + der(0x30, der(0x30, b'')))
 
@@ -347,6 +350,30 @@ class ManifestTests(unittest.TestCase):
                                               + der(0x31, private(b'MANB', der(0x31, b''))))}.items():
             with self.subTest(name), self.assertRaises(helper.Refused):
                 helper.manifest(bad)
+
+    def test_the_m5_seal_holds_its_objects_in_a_sequence_with_a_repeated_name(self):
+        # T8142 factory seal (macOS 27): MANB { SEQUENCE { ..., [scrt], [scrt], ... } },
+        # one SEP certificate per chip id. The repeated name is dropped, the rest is read.
+        cert = {b'DGST': octets(b'\x01' * 48), b'clid': integer(0x8142)}
+        objects = [(name, props) for name, props in helper.manifest(seal()).items()]
+        objects = [(name, {key: der(tag, value) for key, (tag, value) in props.items()})
+                   for name, props in objects]
+        m5 = im4m(objects[:2] + [(b'scrt', cert), (b'scrt', cert)] + objects[2:], 0x30)
+        parsed = helper.manifest(m5)
+        self.assertNotIn(b'scrt', parsed)
+        self.assertEqual(parsed[b'MANP'][b'SrNm'], (0x04, SERIAL))
+        expected, _ = helper.admit(records(**{f'seal-{CHIP:08X}-{ECID:016X}': m5}), IDENTITY)
+        self.assertEqual(helper.combined(expected)[0][-len(m5):], m5)
+
+    def test_a_repeated_object_is_refused_in_a_set_and_unusable_in_a_sequence(self):
+        manp = {b'SrNm': octets(SERIAL)}
+        with self.assertRaises(helper.Refused):
+            helper.manifest(im4m([(b'MANP', manp), (b'MANP', manp)]))
+        self.assertNotIn(b'MANP', helper.manifest(im4m([(b'MANP', manp), (b'MANP', manp)], 0x30)))
+        twice = im4m([(b'MANP', manp), (b'FSC2', {b'DGST': octets(hashlib.sha384(CALIBRATION).digest())}),
+                      (b'MANP', manp)], 0x30)
+        with self.assertRaises(helper.Refused):
+            helper.admit(records(**{f'seal-{CHIP:08X}-{ECID:016X}': twice}), IDENTITY)
 
     def test_records_must_be_exactly_one_element(self):
         for name, check, data in [('combined', helper.combined, EXPECTED),

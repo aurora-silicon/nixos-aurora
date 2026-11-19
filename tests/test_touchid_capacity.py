@@ -35,7 +35,7 @@ class TouchIdCapacityTests(unittest.TestCase):
             # driver's patch stack in the overlay's order.
             _, patches = overlay_patches('libfprint')
             self.assertEqual(patches[0], 'libfprint-1.94.100-apple-sep.patch')
-            self.assertEqual(patches[-1], '0011-aurora-report-fingerprint-storage-full.patch')
+            self.assertEqual(patches[-1], '0012-aurora-report-fingerprint-storage-full.patch')
             for patch in patches:
                 subprocess.run(['git', 'apply', '--include=libfprint/drivers/aurora/aurora.c',
                                 str(SEP / patch)], cwd=source, check=True)

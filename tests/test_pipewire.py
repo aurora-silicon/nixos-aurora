@@ -15,6 +15,7 @@ PATCHES = [
     '1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch',
     '1008-alsa-a-start-on-a-suspended-PCM-is-expected-not-an-error.patch',
     '1009-alsa-put-the-ELD-product-name-on-HDMI-DP-nodes.patch',
+    '1010-alsa-prepare-a-stream-again-after-its-start-failed.patch',
 ]
 
 
