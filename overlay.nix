@@ -596,8 +596,8 @@ in {
     '';
   };
   # speakerguardd 1.0 (the v2 branch): a new program, packaged beside the 0.1
-  # daemon above. Opt-in: modules/speakerguardd-v2.nix installs it only with
-  # aurora.speakerguardd.v2.enable (default false), and even then its gate
+  # daemon above. modules/speakerguardd-v2.nix installs it with
+  # aurora.speakerguardd.v2.enable (on in the Aurora platform), and its gate
   # keeps speakersafetyd in charge until aurora-speaker-upgrade switches.
   speakerguardd-v2 = let
     # The crates this package ships; the rig and benchmark crates stay out.

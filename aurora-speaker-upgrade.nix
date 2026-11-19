@@ -32,7 +32,7 @@ stdenvNoCC.mkDerivation {
     runHook postInstall
   '';
   meta = {
-    description = "Move the speakers to speakerguardd v2 with this Mac's own tuning (ships disabled)";
+    description = "Move the speakers to speakerguardd v2 with this Mac's own tuning (runs at boot; the legacy protection keeps a refused Mac)";
     license = lib.licenses.mit;
     platforms = [ "aarch64-linux" ];
     mainProgram = "aurora-speaker-upgrade";

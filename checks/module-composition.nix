@@ -14,8 +14,8 @@ let
   customPortal = installed.extendModules {
     modules = [ { xdg.portal.config.common.default = [ "host-portal" ]; } ];
   };
-  speakerUpgrade = installed.extendModules {
-    modules = [ { aurora.speakerguardd.upgrade.enable = true; } ];
+  noSpeakerUpgrade = installed.extendModules {
+    modules = [ { aurora.speakerguardd.upgrade.enable = false; } ];
   };
   upgradePackage = installed.pkgs.aurora-speaker-upgrade;
   preservesHostFile = config:
@@ -35,15 +35,14 @@ assert lib.assertMsg
     && !(lib.hasInfix "aurora-install-stage2" disabled.config.boot.loader.grub.extraInstallCommands))
   "Disabling Aurora Stage 2 updates must leave the ESP Stage 2 unchanged";
 assert lib.assertMsg
-  (!installed.config.aurora.speakerguardd.upgrade.enable
-    && !(lib.elem upgradePackage installed.config.environment.systemPackages)
-    && !(lib.elem upgradePackage installed.config.systemd.packages))
-  "Speaker migration must remain absent by default";
+  (installed.config.aurora.speakerguardd.upgrade.enable
+    && lib.elem upgradePackage installed.config.environment.systemPackages
+    && lib.elem upgradePackage installed.config.systemd.packages
+    && (installed.config.systemd.services.aurora-speaker-upgrade.wantedBy or [ ]) == [ "multi-user.target" ])
+  "Speaker migration must be installed and run at boot by default";
 assert lib.assertMsg
-  (lib.elem upgradePackage speakerUpgrade.config.environment.systemPackages
-    && lib.elem upgradePackage speakerUpgrade.config.systemd.packages
-    && (speakerUpgrade.config.systemd.services.aurora-speaker-upgrade.wantedBy or [ ]) == [ ]
-    && !(lib.elem "aurora-speaker-upgrade.service"
-      (speakerUpgrade.config.systemd.targets.multi-user.wants or [ ])))
-  "Opting into speaker migration must install its tool and units without starting it";
+  (!(lib.elem upgradePackage noSpeakerUpgrade.config.environment.systemPackages)
+    && !(lib.elem upgradePackage noSpeakerUpgrade.config.systemd.packages)
+    && (noSpeakerUpgrade.config.systemd.services.aurora-speaker-upgrade.wantedBy or [ ]) == [ ])
+  "Opting out of speaker migration must remove its tool and units";
 pkgs.runCommand "aurora-module-composition" { } "touch $out"
