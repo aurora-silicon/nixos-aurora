@@ -20,6 +20,16 @@ assert pkgs.lib.assertMsg
   (pkgs.nqptp.version == "1.2.9"
     && builtins.any (patch: pkgs.lib.hasSuffix "-nqptp-1.2.9-idle-wakeups.patch" (toString patch)) pkgs.nqptp.patches)
   "nqptp must carry Fedora's idle-wakeup patch, which is made for 1.2.9";
+assert pkgs.lib.assertMsg
+  (pkgs.aurora-ffmpeg.version == "9.0.2"
+    && builtins.any (patch: pkgs.lib.hasSuffix "-0003-avcodec-v4l2_m2m-add-ProRes-decoder-and-encoder.patch" (toString patch))
+      pkgs.aurora-ffmpeg.patches)
+  "aurora-ffmpeg must carry the V4L2 ProRes patches, which are made for FFmpeg 9.0.2";
+assert pkgs.lib.assertMsg
+  (pkgs.lib.versions.majorMinor pkgs.aurora-gst-plugins-good.version == "1.28"
+    && builtins.any (patch: pkgs.lib.hasSuffix "-0001-v4l2-add-ProRes-decoder-and-encoder.patch" (toString patch))
+      pkgs.aurora-gst-plugins-good.patches)
+  "aurora-gst-plugins-good must carry the V4L2 ProRes patch, which is made for GStreamer 1.28";
 assert pkgs.lib.assertMsg compilerSelected
   "Aurora Mesa must honor the caller's llvmPackages override";
 pkgs.runCommand "aurora-package-overrides" { } "touch $out"

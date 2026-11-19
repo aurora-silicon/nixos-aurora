@@ -1,0 +1,552 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Fri, 20 Nov 2026 05:03:01 +1100
+Subject: [PATCH] v4l2: add ProRes decoder and encoder
+
+Add support for stateful Apple ProRes V4L2 memory-to-memory codecs. The
+compressed format uses the 'PRES' fourcc, one ProRes frame per buffer,
+which maps to video/x-prores. The variant field carries the ProRes
+profile using the same strings as qtdemux and qtmux (proxy, lt,
+standard, hq, 4444 and 4444xq). ProRes frames are self-contained and
+framed by the container, so no parser is required upstream of the
+decoder.
+
+The decoder is registered as v4l2proresdec through the generic
+decoder registration. The new v4l2proresenc element follows the other
+V4L2 encoders and maps the variant to the
+V4L2_CID_MPEG_VIDEO_PRORES_PROFILE menu control. Since ProRes signals
+its profile in the variant field rather than in a profile field,
+GstV4l2Codec gains an optional profile_field member naming the caps
+field to use; existing codecs keep using "profile".
+
+The fourcc and the profile control are not part of the upstream Linux
+uAPI headers yet, so fallback definitions are provided.
+
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ sys/v4l2/ext/videodev2.h      |   1 +
+ sys/v4l2/gstv4l2.c            |   5 ++
+ sys/v4l2/gstv4l2codec.c       |   6 ++
+ sys/v4l2/gstv4l2codec.h       |   4 ++
+ sys/v4l2/gstv4l2object.c      |  13 +++++
+ sys/v4l2/gstv4l2prorescodec.c | 105 ++++++++++++++++++++++++++++++++++
+ sys/v4l2/gstv4l2prorescodec.h |  32 +++++++++++
+ sys/v4l2/gstv4l2proresenc.c   |  85 +++++++++++++++++++++++++++
+ sys/v4l2/gstv4l2proresenc.h   |  60 +++++++++++++++++++
+ sys/v4l2/gstv4l2videodec.c    |   5 +-
+ sys/v4l2/gstv4l2videoenc.c    |  10 +++-
+ sys/v4l2/meson.build          |   4 ++
+ 12 files changed, 326 insertions(+), 4 deletions(-)
+ create mode 100644 sys/v4l2/gstv4l2prorescodec.c
+ create mode 100644 sys/v4l2/gstv4l2prorescodec.h
+ create mode 100644 sys/v4l2/gstv4l2proresenc.c
+ create mode 100644 sys/v4l2/gstv4l2proresenc.h
+
+diff --git a/sys/v4l2/ext/videodev2.h b/sys/v4l2/ext/videodev2.h
+index 8d94059..a2295d3 100644
+--- a/sys/v4l2/ext/videodev2.h
++++ b/sys/v4l2/ext/videodev2.h
+@@ -737,6 +737,7 @@ struct v4l2_pix_format {
+ #define V4L2_PIX_FMT_SPK      v4l2_fourcc('S', 'P', 'K', '0') /* Sorenson Spark */
+ #define V4L2_PIX_FMT_RV30     v4l2_fourcc('R', 'V', '3', '0') /* RealVideo 8 */
+ #define V4L2_PIX_FMT_RV40     v4l2_fourcc('R', 'V', '4', '0') /* RealVideo 9 & 10 */
++#define V4L2_PIX_FMT_PRORES   v4l2_fourcc('P', 'R', 'E', 'S') /* Apple ProRes frame */
+ 
+ /*  Vendor-specific formats   */
+ #define V4L2_PIX_FMT_CPIA1    v4l2_fourcc('C', 'P', 'I', 'A') /* cpia1 YUV */
+diff --git a/sys/v4l2/gstv4l2.c b/sys/v4l2/gstv4l2.c
+index 3944a6a..36ccef1 100644
+--- a/sys/v4l2/gstv4l2.c
++++ b/sys/v4l2/gstv4l2.c
+@@ -54,6 +54,7 @@
+ #include "gstv4l2h265enc.h"
+ #include "gstv4l2jpegenc.h"
+ #include "gstv4l2mpeg4enc.h"
++#include "gstv4l2proresenc.h"
+ #include "gstv4l2vp8enc.h"
+ #include "gstv4l2vp9enc.h"
+ #include "gstv4l2transform.h"
+@@ -179,6 +180,10 @@ gst_v4l2_probe_and_register (GstPlugin * plugin)
+       if (gst_v4l2_is_vp9_enc (sink_caps, src_caps))
+         gst_v4l2_vp9_enc_register (plugin, basename, it->device_path,
+             video_fd, sink_caps, src_caps);
++
++      if (gst_v4l2_is_prores_enc (sink_caps, src_caps))
++        gst_v4l2_prores_enc_register (plugin, basename, it->device_path,
++            video_fd, sink_caps, src_caps);
+     } else if (gst_v4l2_is_transform (sink_caps, src_caps)) {
+       gst_v4l2_transform_register (plugin, basename, it->device_path,
+           sink_caps, src_caps);
+diff --git a/sys/v4l2/gstv4l2codec.c b/sys/v4l2/gstv4l2codec.c
+index 1122343..d967972 100644
+--- a/sys/v4l2/gstv4l2codec.c
++++ b/sys/v4l2/gstv4l2codec.c
+@@ -34,6 +34,12 @@
+ 
+ #include <gst/gst.h>
+ 
++const gchar *
++gst_v4l2_codec_get_profile_field (const GstV4l2Codec * codec)
++{
++  return codec->profile_field ? codec->profile_field : "profile";
++}
++
+ gboolean
+ gst_v4l2_codec_probe_profiles (const GstV4l2Codec * codec, gint video_fd,
+     GValue * profiles)
+diff --git a/sys/v4l2/gstv4l2codec.h b/sys/v4l2/gstv4l2codec.h
+index 23b85a2..b9dc054 100644
+--- a/sys/v4l2/gstv4l2codec.h
++++ b/sys/v4l2/gstv4l2codec.h
+@@ -33,6 +33,8 @@ struct _GstV4l2Codec {
+   guint32 profile_cid;
+   const gchar * (*profile_to_string) (gint v4l2_profile);
+   gint (*profile_from_string) (const gchar * profile);
++  /* Caps field carrying the profile, "profile" when NULL */
++  const gchar * profile_field;
+ 
+   guint32 level_cid;
+   const gchar * (*level_to_string) (gint v4l2_level);
+@@ -40,6 +42,8 @@ struct _GstV4l2Codec {
+ 
+ };
+ 
++const gchar * gst_v4l2_codec_get_profile_field (const GstV4l2Codec * codec);
++
+ gboolean gst_v4l2_codec_probe_profiles(const GstV4l2Codec * codec, gint video_fd,
+                                        GValue * value);
+ gboolean gst_v4l2_codec_probe_levels(const GstV4l2Codec * codec, gint video_fd,
+diff --git a/sys/v4l2/gstv4l2object.c b/sys/v4l2/gstv4l2object.c
+index 556db2f..837d783 100644
+--- a/sys/v4l2/gstv4l2object.c
++++ b/sys/v4l2/gstv4l2object.c
+@@ -40,6 +40,11 @@
+ #include "gstv4l2tuner.h"
+ #include "gstv4l2colorbalance.h"
+ 
++/* Apple ProRes is not part of the upstream V4L2 uAPI yet */
++#ifndef V4L2_PIX_FMT_PRORES
++#define V4L2_PIX_FMT_PRORES v4l2_fourcc ('P', 'R', 'E', 'S')
++#endif
++
+ #include <glib/gi18n-lib.h>
+ 
+ #include <gst/video/video.h>
+@@ -269,6 +274,7 @@ static GstV4L2FormatDesc gst_v4l2_formats[] = {
+   {MAP_ENC_FMT (VP8, ENCODED),          GST_V4L2_CODEC | GST_V4L2_NO_PARSE},
+   {MAP_ENC_FMT (VP9, ENCODED),          GST_V4L2_CODEC | GST_V4L2_NO_PARSE},
+   {MAP_ENC_FMT (AV1, ENCODED),          GST_V4L2_CODEC},
++  {MAP_ENC_FMT (PRORES, ENCODED),       GST_V4L2_CODEC | GST_V4L2_NO_PARSE},
+ 
+   /*  Vendor-specific formats   */
+   {MAP_ENC_FMT (WNVA, ENCODED),     GST_V4L2_CODEC | GST_V4L2_RESOLUTION_AND_RATE},
+@@ -1637,6 +1643,11 @@ gst_v4l2_object_v4l2fourcc_to_bare_struct (guint32 fourcc,
+           "stream-format", G_TYPE_STRING, "obu-stream", "alignment",
+           G_TYPE_STRING, "tu", NULL);
+       break;
++    case V4L2_PIX_FMT_PRORES:
++      structure = gst_structure_from_string ("video/x-prores, "
++          "variant = (string) { proxy, lt, standard, hq, 4444, 4444xq }",
++          NULL);
++      break;
+     case V4L2_PIX_FMT_DV:
+       structure =
+           gst_structure_new ("video/x-dv", "systemstream", G_TYPE_BOOLEAN, TRUE,
+@@ -2097,6 +2108,8 @@ gst_v4l2_object_get_caps_info (GstV4l2Object * v4l2object, GstCaps * caps,
+     fourcc = V4L2_PIX_FMT_VP9;
+   } else if (g_str_equal (mimetype, "video/x-av1")) {
+     fourcc = V4L2_PIX_FMT_AV1;
++  } else if (g_str_equal (mimetype, "video/x-prores")) {
++    fourcc = V4L2_PIX_FMT_PRORES;
+   } else if (g_str_equal (mimetype, "video/x-bayer")) {
+     const gchar *format = gst_structure_get_string (structure, "format");
+     if (format) {
+diff --git a/sys/v4l2/gstv4l2prorescodec.c b/sys/v4l2/gstv4l2prorescodec.c
+new file mode 100644
+index 0000000..52dd784
+--- /dev/null
++++ b/sys/v4l2/gstv4l2prorescodec.c
+@@ -0,0 +1,105 @@
++/*
++ * Copyright (C) 2026 Ryan Murray <ryan@aurorasilicon.org>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Library General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Library General Public License for more details.
++ *
++ * You should have received a copy of the GNU Library General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ *
++ */
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include "gstv4l2prorescodec.h"
++
++#include <gst/gst.h>
++#include "ext/v4l2-controls.h"
++
++/* The ProRes profile control is not part of the upstream V4L2 uAPI yet */
++#ifndef V4L2_CID_MPEG_VIDEO_PRORES_PROFILE
++#define V4L2_CID_MPEG_VIDEO_PRORES_PROFILE (V4L2_CID_CODEC_BASE + 658)
++enum v4l2_mpeg_video_prores_profile
++{
++  V4L2_MPEG_VIDEO_PRORES_PROFILE_PROXY = 0,
++  V4L2_MPEG_VIDEO_PRORES_PROFILE_LT = 1,
++  V4L2_MPEG_VIDEO_PRORES_PROFILE_STANDARD = 2,
++  V4L2_MPEG_VIDEO_PRORES_PROFILE_HQ = 3,
++  V4L2_MPEG_VIDEO_PRORES_PROFILE_4444 = 4,
++  V4L2_MPEG_VIDEO_PRORES_PROFILE_4444_XQ = 5,
++};
++#endif
++
++/* The profile strings are the "variant" values used by qtdemux and qtmux */
++static gint
++v4l2_profile_from_string (const gchar * profile)
++{
++  gint v4l2_profile = -1;
++
++  if (g_str_equal (profile, "proxy"))
++    v4l2_profile = V4L2_MPEG_VIDEO_PRORES_PROFILE_PROXY;
++  else if (g_str_equal (profile, "lt"))
++    v4l2_profile = V4L2_MPEG_VIDEO_PRORES_PROFILE_LT;
++  else if (g_str_equal (profile, "standard"))
++    v4l2_profile = V4L2_MPEG_VIDEO_PRORES_PROFILE_STANDARD;
++  else if (g_str_equal (profile, "hq"))
++    v4l2_profile = V4L2_MPEG_VIDEO_PRORES_PROFILE_HQ;
++  else if (g_str_equal (profile, "4444"))
++    v4l2_profile = V4L2_MPEG_VIDEO_PRORES_PROFILE_4444;
++  else if (g_str_equal (profile, "4444xq"))
++    v4l2_profile = V4L2_MPEG_VIDEO_PRORES_PROFILE_4444_XQ;
++  else
++    GST_WARNING ("Unsupported profile string '%s'", profile);
++
++  return v4l2_profile;
++}
++
++static const gchar *
++v4l2_profile_to_string (gint v4l2_profile)
++{
++  switch (v4l2_profile) {
++    case V4L2_MPEG_VIDEO_PRORES_PROFILE_PROXY:
++      return "proxy";
++    case V4L2_MPEG_VIDEO_PRORES_PROFILE_LT:
++      return "lt";
++    case V4L2_MPEG_VIDEO_PRORES_PROFILE_STANDARD:
++      return "standard";
++    case V4L2_MPEG_VIDEO_PRORES_PROFILE_HQ:
++      return "hq";
++    case V4L2_MPEG_VIDEO_PRORES_PROFILE_4444:
++      return "4444";
++    case V4L2_MPEG_VIDEO_PRORES_PROFILE_4444_XQ:
++      return "4444xq";
++    default:
++      GST_WARNING ("Unsupported V4L2 profile %i", v4l2_profile);
++      break;
++  }
++
++  return NULL;
++}
++
++const GstV4l2Codec *
++gst_v4l2_prores_get_codec (void)
++{
++  static GstV4l2Codec *codec = NULL;
++  if (g_once_init_enter (&codec)) {
++    static GstV4l2Codec c;
++    c.profile_cid = V4L2_CID_MPEG_VIDEO_PRORES_PROFILE;
++    c.profile_to_string = v4l2_profile_to_string;
++    c.profile_from_string = v4l2_profile_from_string;
++    c.profile_field = "variant";
++    g_once_init_leave (&codec, &c);
++  }
++  return codec;
++}
+diff --git a/sys/v4l2/gstv4l2prorescodec.h b/sys/v4l2/gstv4l2prorescodec.h
+new file mode 100644
+index 0000000..5e95ea0
+--- /dev/null
++++ b/sys/v4l2/gstv4l2prorescodec.h
+@@ -0,0 +1,32 @@
++/*
++ * Copyright (C) 2026 Ryan Murray <ryan@aurorasilicon.org>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Library General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Library General Public License for more details.
++ *
++ * You should have received a copy of the GNU Library General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ *
++ */
++
++#ifndef __GST_V4L2_PRORES_CODEC_H__
++#define __GST_V4L2_PRORES_CODEC_H__
++
++#include "gstv4l2codec.h"
++
++G_BEGIN_DECLS
++
++const GstV4l2Codec * gst_v4l2_prores_get_codec (void);
++
++G_END_DECLS
++
++#endif
+diff --git a/sys/v4l2/gstv4l2proresenc.c b/sys/v4l2/gstv4l2proresenc.c
+new file mode 100644
+index 0000000..28d82c9
+--- /dev/null
++++ b/sys/v4l2/gstv4l2proresenc.c
+@@ -0,0 +1,85 @@
++/*
++ * Copyright (C) 2026 Ryan Murray <ryan@aurorasilicon.org>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Library General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Library General Public License for more details.
++ *
++ * You should have received a copy of the GNU Library General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ *
++ */
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include "gstv4l2object.h"
++#include "gstv4l2proresenc.h"
++#include "gstv4l2prorescodec.h"
++
++GST_DEBUG_CATEGORY_STATIC (gst_v4l2_prores_enc_debug);
++#define GST_CAT_DEFAULT gst_v4l2_prores_enc_debug
++
++static GstStaticCaps src_template_caps =
++GST_STATIC_CAPS ("video/x-prores, "
++    "variant = (string) { proxy, lt, standard, hq, 4444, 4444xq }");
++
++#define gst_v4l2_prores_enc_parent_class parent_class
++G_DEFINE_TYPE (GstV4l2ProResEnc, gst_v4l2_prores_enc,
++    GST_TYPE_V4L2_VIDEO_ENC);
++
++static void
++gst_v4l2_prores_enc_init (GstV4l2ProResEnc * self)
++{
++}
++
++static void
++gst_v4l2_prores_enc_class_init (GstV4l2ProResEncClass * klass)
++{
++  GstElementClass *element_class;
++  GstV4l2VideoEncClass *baseclass;
++
++  parent_class = g_type_class_peek_parent (klass);
++
++  element_class = (GstElementClass *) klass;
++  baseclass = (GstV4l2VideoEncClass *) (klass);
++
++  GST_DEBUG_CATEGORY_INIT (gst_v4l2_prores_enc_debug, "v4l2proresenc", 0,
++      "V4L2 ProRes Encoder");
++
++  gst_element_class_set_static_metadata (element_class,
++      "V4L2 ProRes Encoder",
++      "Codec/Encoder/Video/Hardware",
++      "Encode Apple ProRes video streams via V4L2 API",
++      "Ryan Murray <ryan@aurorasilicon.org>");
++
++  baseclass->codec_name = "ProRes";
++}
++
++/* Probing functions */
++gboolean
++gst_v4l2_is_prores_enc (GstCaps * sink_caps, GstCaps * src_caps)
++{
++  return gst_v4l2_is_video_enc (sink_caps, src_caps,
++      gst_static_caps_get (&src_template_caps));
++}
++
++void
++gst_v4l2_prores_enc_register (GstPlugin * plugin, const gchar * basename,
++    const gchar * device_path, gint video_fd, GstCaps * sink_caps,
++    GstCaps * src_caps)
++{
++  const GstV4l2Codec *codec = gst_v4l2_prores_get_codec ();
++  gst_v4l2_video_enc_register (plugin, GST_TYPE_V4L2_PRORES_ENC,
++      "prores", basename, device_path, codec, video_fd, sink_caps,
++      gst_static_caps_get (&src_template_caps), src_caps);
++}
+diff --git a/sys/v4l2/gstv4l2proresenc.h b/sys/v4l2/gstv4l2proresenc.h
+new file mode 100644
+index 0000000..e9a2399
+--- /dev/null
++++ b/sys/v4l2/gstv4l2proresenc.h
+@@ -0,0 +1,60 @@
++/*
++ * Copyright (C) 2026 Ryan Murray <ryan@aurorasilicon.org>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Library General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Library General Public License for more details.
++ *
++ * You should have received a copy of the GNU Library General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ *
++ */
++
++#ifndef __GST_V4L2_PRORES_ENC_H__
++#define __GST_V4L2_PRORES_ENC_H__
++
++#include <gst/gst.h>
++#include "gstv4l2videoenc.h"
++
++G_BEGIN_DECLS
++#define GST_TYPE_V4L2_PRORES_ENC \
++  (gst_v4l2_prores_enc_get_type())
++#define GST_V4L2_PRORES_ENC(obj) \
++  (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_V4L2_PRORES_ENC,GstV4l2ProResEnc))
++#define GST_V4L2_PRORES_ENC_CLASS(klass) \
++  (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_V4L2_PRORES_ENC,GstV4l2ProResEncClass))
++#define GST_IS_V4L2_PRORES_ENC(obj) \
++  (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_V4L2_PRORES_ENC))
++#define GST_IS_V4L2_PRORES_ENC_CLASS(klass) \
++  (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_V4L2_PRORES_ENC))
++typedef struct _GstV4l2ProResEnc GstV4l2ProResEnc;
++typedef struct _GstV4l2ProResEncClass GstV4l2ProResEncClass;
++
++struct _GstV4l2ProResEnc
++{
++  GstV4l2VideoEnc parent;
++};
++
++struct _GstV4l2ProResEncClass
++{
++  GstV4l2VideoEncClass parent_class;
++};
++
++GType gst_v4l2_prores_enc_get_type (void);
++
++gboolean gst_v4l2_is_prores_enc (GstCaps * sink_caps, GstCaps * src_caps);
++
++void gst_v4l2_prores_enc_register (GstPlugin * plugin, const gchar * basename,
++    const gchar * device_path, gint video_fd, GstCaps * sink_caps,
++    GstCaps * src_caps);
++
++G_END_DECLS
++#endif /* __GST_V4L2_PRORES_ENC_H__ */
+diff --git a/sys/v4l2/gstv4l2videodec.c b/sys/v4l2/gstv4l2videodec.c
+index 1b3b0cd..78a502e 100644
+--- a/sys/v4l2/gstv4l2videodec.c
++++ b/sys/v4l2/gstv4l2videodec.c
+@@ -1478,6 +1478,8 @@ G_STMT_START { \
+   } else if (gst_structure_has_name (s, "video/x-av1")) {
+     SET_META ("AV1");
+     cdata->codec = gst_v4l2_av1_get_codec ();
++  } else if (gst_structure_has_name (s, "video/x-prores")) {
++    SET_META ("ProRes");
+   } else if (gst_structure_has_name (s, "video/x-bayer")) {
+     SET_META ("BAYER");
+   } else if (gst_structure_has_name (s, "video/x-sonix")) {
+@@ -1555,7 +1557,8 @@ gst_v4l2_video_dec_register (GstPlugin * plugin, const gchar * basename,
+       }
+ 
+       if (gst_v4l2_codec_probe_profiles (cdata->codec, video_fd, &value)) {
+-        gst_caps_set_value (cdata->sink_caps, "profile", &value);
++        gst_caps_set_value (cdata->sink_caps,
++            gst_v4l2_codec_get_profile_field (cdata->codec), &value);
+         g_value_unset (&value);
+       }
+     }
+diff --git a/sys/v4l2/gstv4l2videoenc.c b/sys/v4l2/gstv4l2videoenc.c
+index 8eedd46..3587caf 100644
+--- a/sys/v4l2/gstv4l2videoenc.c
++++ b/sys/v4l2/gstv4l2videoenc.c
+@@ -423,7 +423,9 @@ negotiate_profile_and_level (GstCapsFeatures * features, GstStructure * s,
+   gboolean failed = FALSE;
+   const GstV4l2Codec *codec = klass->codec;
+ 
+-  if (codec->profile_cid && get_string_list (s, "profile", &profiles)) {
++  if (codec->profile_cid
++      && get_string_list (s, gst_v4l2_codec_get_profile_field (codec),
++          &profiles)) {
+     GList *l;
+ 
+     for (l = profiles.head; l; l = l->next) {
+@@ -603,7 +605,8 @@ gst_v4l2_video_enc_negotiate (GstVideoEncoder * encoder)
+   s = gst_caps_get_structure (state->caps, 0);
+ 
+   if (codec->profile_cid)
+-    gst_structure_set (s, "profile", G_TYPE_STRING, ctx.profile, NULL);
++    gst_structure_set (s, gst_v4l2_codec_get_profile_field (codec),
++        G_TYPE_STRING, ctx.profile, NULL);
+ 
+   if (codec->level_cid)
+     gst_structure_set (s, "level", G_TYPE_STRING, ctx.level, NULL);
+@@ -1232,7 +1235,8 @@ gst_v4l2_video_enc_register (GstPlugin * plugin, GType type,
+     }
+ 
+     if (gst_v4l2_codec_probe_profiles (codec, video_fd, &value)) {
+-      gst_caps_set_value (filtered_caps, "profile", &value);
++      gst_caps_set_value (filtered_caps,
++          gst_v4l2_codec_get_profile_field (codec), &value);
+       g_value_unset (&value);
+     }
+   }
+diff --git a/sys/v4l2/meson.build b/sys/v4l2/meson.build
+index 2d6cbb3..e6052bd 100644
+--- a/sys/v4l2/meson.build
++++ b/sys/v4l2/meson.build
+@@ -24,6 +24,8 @@ v4l2_sources = [
+   'gstv4l2mpeg2codec.c',
+   'gstv4l2mpeg4codec.c',
+   'gstv4l2mpeg4enc.c',
++  'gstv4l2prorescodec.c',
++  'gstv4l2proresenc.c',
+   'gstv4l2vidorient.c',
+   'gstv4l2vp8codec.c',
+   'gstv4l2vp8enc.c',
+@@ -69,6 +71,8 @@ v4l2_headers = [
+   'gstv4l2src.h',
+   'tuner.h',
+   'gstv4l2mpeg4codec.h',
++  'gstv4l2prorescodec.h',
++  'gstv4l2proresenc.h',
+   'gstv4l2object.h',
+   'gstv4l2jpegenc.h',
+   'gstv4l2allocator.h',
+-- 
+2.54.0
+
