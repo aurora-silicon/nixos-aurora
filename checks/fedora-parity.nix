@@ -22,6 +22,7 @@ let
           && config.systemd.settings.Manager.KExecWatchdogSec == "2min";
         "trackpad clicks come from the host where the MTP trackpad has an actuator, as on Fedora and ALARM" =
           lib.any (package: (package.name or "") == "aurora-trackpad-clicks-rules") config.services.udev.packages;
+        "the initrd carries the CPU frequency driver" = lib.elem "apple-soc-cpufreq" config.boot.initrd.availableKernelModules;
         "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
         "the Type-C port controllers find their USB4 router in the initrd" =
           lib.all (m: lib.elem m config.boot.initrd.availableKernelModules) [ "tps6598x" "thunderbolt_apple" ];
