@@ -14,7 +14,7 @@ The Steam package includes both `steam` and `aurora-play`. Aurora Play lists ins
 
 ## GameMode
 
-Games that Steam starts run under GameMode: while Steam runs, Aurora's `steam` registers every process below a game's reaper (Steam's per-game launcher) with `gamemoded`, so GameMode is active only while a game runs. With Aurora's defaults GameMode keeps the `schedutil` governor and runs the game on the P cores of Macs with at least four ([power profiles](power-profiles.md#games-gamemode)). The KDE and GNOME profiles enable `programs.gamemode`; on `minimal`, set `programs.gamemode.enable = true` to get it. To start games without GameMode, set `AURORA_STEAM_GAMEMODE=0` in Steam's environment, for example `programs.steam.package = pkgs.steam.override { extraEnv.AURORA_STEAM_GAMEMODE = "0"; };`, or turn GameMode off with `programs.gamemode.enable = false;`.
+Games that Steam starts run under GameMode: Aurora's `steam` starts a watcher that follows the client's `logs/gameprocess_log.txt` through inotify and registers every process Steam tracks for a game with `gamemoded`. GameMode is active only while a game runs, and the watcher wakes only when that log changes. With Aurora's defaults GameMode keeps the `schedutil` governor and runs the game on the P cores of Macs with at least four ([power profiles](power-profiles.md#games-gamemode)). The KDE and GNOME profiles enable `programs.gamemode`; on `minimal`, set `programs.gamemode.enable = true` to get it. To start games without GameMode, set `AURORA_STEAM_GAMEMODE=0` in Steam's environment, for example `programs.steam.package = pkgs.steam.override { extraEnv.AURORA_STEAM_GAMEMODE = "0"; };`, or turn GameMode off with `programs.gamemode.enable = false;`.
 
 ## Native Proton
 
