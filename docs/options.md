@@ -273,8 +273,9 @@ The aurora-diag package to use.
 ## `aurora.fexMesa.enable`
 
 Mount x86_64 and i686 Aurora Mesa over the guest rootfs at
-`/var/lib/aurora/fex/mesa-rootfs`. Set `FEX_ROOTFS` only when the provider
-is mounted and the user has not set it. False removes this integration
+`/var/lib/aurora/fex/mesa-rootfs`. While it is mounted, FEX's global
+RootFS is a read-only bind of it at `/run/fex-emu/rootfs`; a user's own
+FEX config and `FEX_ROOTFS` override it. False removes this integration
 and unmounts the provider on a switch; guest distribution files remain.
 
 **Type:** boolean
