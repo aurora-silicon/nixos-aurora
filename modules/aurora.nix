@@ -39,10 +39,12 @@
     boot.loader.grub.efiSupport = true;
     boot.loader.grub.efiInstallAsRemovable = true;
     boot.loader.grub.device = "nodev";
-    # MTE stays off on chips whose tag storage no boot loader reserves yet.
+    # MTE stays off on the M5 (T8142) until it is qualified there. The M5 Pro
+    # and Max (T6050) run with MTE: aura reserves the tag storage, and without
+    # that reservation the kernel keeps MTE off by itself.
     boot.loader.grub.extraInstallCommands = ''
       if ${pkgs.coreutils}/bin/tr '\0' '\n' < /proc/device-tree/compatible 2>/dev/null \
-          | ${pkgs.gnugrep}/bin/grep -qxE 'apple,(t6050|t8142)'; then
+          | ${pkgs.gnugrep}/bin/grep -qx 'apple,t8142'; then
         for cfg in ${lib.concatMapStringsSep " " (b: lib.escapeShellArg "${b.path}/grub/grub.cfg") config.boot.loader.grub.mirroredBoots}; do
           ${pkgs.gnused}/bin/sed -i -E '/^[[:space:]]*linux[[:space:]]/{/[[:space:]]arm64\.nomte([[:space:]]|$)/!s/$/ arm64.nomte/}' "$cfg"
         done
