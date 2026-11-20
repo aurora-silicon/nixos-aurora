@@ -824,7 +824,7 @@ def load_channels(root, repository, remote='origin'):
 
 
 def record_channel(state, channel, entry, keep=200):
-    if channel not in ('testing', 'stable'):
+    if channel not in ('testing', 'stable', 'edge'):
         raise ValueError('unknown channel')
     state = json.loads(json.dumps(state))
     state['channels'][channel] = entry
