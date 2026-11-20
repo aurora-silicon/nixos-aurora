@@ -41,31 +41,87 @@ if [ "${AURORA_SEP_SESSION:-0}" != 1 ]; then
     exec keyctl session aurora-sep-load env AURORA_SEP_SESSION=1 "$0" "$@"
 fi
 
+# Prefix for the /proc, /etc, /run and /sys paths below, for tests.
+root=${AURORA_SEP_ROOT:-}
+
+# The M5 Pro and Max (T6050) keep SEP writes off unless the owner opts in.
+# xART is shared with macOS, and the paths that write it (keybag
+# provisioning, Touch ID enrolment) have had no trial on a T6050; every M5
+# Pro gate ran read-only. /etc/modprobe.d/aurora-sep.conf is the owner's
+# choice, here as on every Mac; see XART-SAFETY.md.
+read_only='xart_writes=0 provision_keybag=0'
+owner_options=$root/etc/modprobe.d/aurora-sep.conf
+run_options=$root/run/modprobe.d/aurora-sep.conf
+
+t6050() {
+    tr '\0' '\n' 2>/dev/null <"$root/proc/device-tree/compatible" | grep -qx 'apple,t6050'
+}
+
+# Stand in for the packaged defaults for this boot. kmod takes each
+# modprobe.d file name from the first of /etc, /run and /usr/lib that has
+# it, so this replaces /usr/lib/modprobe.d/aurora-sep.conf (on NixOS, its
+# copy in /run), and the owner's /etc file would replace this. The kernel
+# refuses a second value of an apple_sep parameter and then does not load
+# the driver, so each must reach it once.
+set_read_only() {
+    if ! { mkdir -p "${run_options%/*}" &&
+        printf 'options apple_sep %s\n' "$read_only" >"$run_options.new" &&
+        mv -f "$run_options.new" "$run_options"; }; then
+        log "could not write $run_options; not loading apple_sep, whose defaults turn SEP writes on"
+        return 1
+    fi
+    # What modprobe will pass, the kernel command line's apple_sep.* included.
+    # If kmod did not take the file, or something else sets these, stop here.
+    given=$(modprobe -c 2>/dev/null | grep '^options apple_sep ' | tr -s ' \t' '\n\n' |
+        grep -E '^(xart_writes|provision_keybag)=' | sort | tr '\n' ' ')
+    if [ "$given" != 'provision_keybag=0 xart_writes=0 ' ]; then
+        log "modprobe would give apple_sep '${given% }', not '$read_only'; not loading it"
+        return 1
+    fi
+    log "SEP writes are off by default on this Mac (T6050): apple_sep loads with $read_only, so no keybag is provisioned and Touch ID cannot enrol. To opt in, see XART-SAFETY.md"
+}
+
 # Root unlocked by the Secure Enclave: the initrd loaded the driver in its
 # key-store-only phase (1, or 2 for a root sealed to a user's password).
 # Finish that attach on the real root; modprobe would do nothing for the
 # loaded module and Touch ID would stay off. The SEP takes one attach per
 # boot, so the driver cannot be loaded a second time.
-case "$(cat /sys/module/apple_sep/parameters/keystore_only 2>/dev/null)" in
+case "$(cat "$root/sys/module/apple_sep/parameters/keystore_only" 2>/dev/null)" in
 1 | 2 | Y)
-    attached=false
-    for attr in /sys/bus/platform/drivers/apple_sep/*/complete_attach; do
-        [ -e "$attr" ] || continue
-        if ! echo 1 >"$attr"; then
-            log "could not finish the attach the initrd started"
+    if t6050 && [ ! -e "$owner_options" ]; then
+        # The initrd chose the driver's options, not the read-only default
+        # above. The key-store-only phase writes nothing to xART here (the
+        # T6050's xART guard), but finishing the attach would open it for
+        # writing if those options allow it.
+        log "the initrd loaded apple_sep with options this Mac's (T6050) read-only default did not set, so its attach stays unfinished: the key store works, Touch ID stays off. See XART-SAFETY.md"
+    else
+        attached=false
+        for attr in "$root"/sys/bus/platform/drivers/apple_sep/*/complete_attach; do
+            [ -e "$attr" ] || continue
+            if ! echo 1 >"$attr"; then
+                log "could not finish the attach the initrd started"
+                exit 1
+            fi
+            attached=true
+        done
+        if [ "$attached" != true ]; then
+            log "the initrd loaded apple_sep for the key store, but it has no complete_attach"
             exit 1
         fi
-        attached=true
-    done
-    if [ "$attached" != true ]; then
-        log "the initrd loaded apple_sep for the key store, but it has no complete_attach"
-        exit 1
+        log "finished the attach the initrd started for the key store"
     fi
-    log "finished the attach the initrd started for the key store"
     ;;
 *)
+    if t6050; then
+        if [ -e "$owner_options" ]; then
+            log "this Mac (T6050) keeps SEP writes off by default; $owner_options sets apple_sep's options instead"
+        else
+            set_read_only || exit 1
+        fi
+    fi
     # Options come from modprobe.d, where /etc/modprobe.d/aurora-sep.conf replaces
-    # the packaged defaults. Options given here would override both.
+    # the packaged defaults. Options given here would come after both, and the
+    # kernel does not load apple_sep when a parameter is given twice.
     modprobe apple_sep
     ;;
 esac

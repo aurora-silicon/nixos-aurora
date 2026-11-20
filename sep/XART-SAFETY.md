@@ -9,6 +9,48 @@ read-only operation. `provision_keybag=1` is the default: create the Linux
 identity if missing and recover an existing identity without replacing it.
 The historical evidence below records the earlier opt-in deployments and
 does not establish qualification on every supported Mac or APFS layout.
+The M5 Pro and Max (T6050) are the exception: read-only by default, below.
+
+## M5 Pro and Max (T6050): read-only by default
+
+On a Mac whose device tree names `apple,t6050`, `aurora-sep-load` loads the
+driver with `xart_writes=0 provision_keybag=0` unless the owner has set its
+options. No other Mac changes. The gigalocker is shared with macOS, and the
+paths that write it (keybag provisioning, Touch ID enrolment, every match)
+have had no trial on a T6050; every M5 Pro gate ran read-only. So on a
+T6050, by default:
+
+- no Linux identity keybag is provisioned, so the SEP seals no trusted keys
+  and no disk can be enrolled for SEP unlock;
+- Touch ID cannot enrol or verify (`diag/xart` reads `disabled`);
+- nothing in the gigalocker changes, and macOS keeps its Touch ID and keybag
+  state as it was.
+
+At every boot `aurora-sep-load` writes these options to
+`/run/modprobe.d/aurora-sep.conf`, which stands in for the packaged
+defaults of the same name, checks that `modprobe -c` gives the driver
+exactly these values, and does not load it otherwise. To see what the
+driver took, read `/sys/bus/platform/devices/*.sep/diag/policy`
+(`xart_writes=0 provision_keybag=0`); these parameters are not listed in
+`/sys/module/apple_sep/parameters`.
+
+To opt in to writes, as the owner of the Mac and its macOS install, create
+`/etc/modprobe.d/aurora-sep.conf` containing
+
+    options apple_sep xart_writes=1 provision_keybag=1
+
+and reboot. On NixOS, set
+`environment.etc."modprobe.d/aurora-sep.conf".text` to that line (not
+`boot.extraModprobeConfig`) and switch. The name matters: the file replaces
+the defaults and the read-only file by name, while the kernel refuses a
+second value of an `apple_sep` parameter and then does not load the driver,
+so the same line in a file of another name leaves the SEP off. Remove the
+file and reboot to go back to read-only; what the enclave wrote meanwhile
+stays in the gigalocker (`aurora-xart status`). When the initrd unlocks a
+disk with the SEP it loads the driver with the options it carries, so
+rebuild it after changing the file. On a T6050 without the file,
+`aurora-sep-load` does not finish an attach the initrd started: the key
+store works and Touch ID stays off.
 
 ## Other OSes' records: `xart_guard`
 

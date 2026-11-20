@@ -65,7 +65,9 @@ is the user name) or the desktop's fingerprint settings.
 
 The factory-record reader and the sealed-record rebuild are Erik Bourget's
 work. Read XART-SAFETY.md for persistent identity ownership constraints and
-OS-IDENTITY.md for running Linux beside macOS.
+OS-IDENTITY.md for running Linux beside macOS. On the M5 Pro and Max (T6050)
+SEP writes are off by default, so Touch ID cannot enrol there until the owner
+opts in; XART-SAFETY.md says how.
 
 ## Readiness
 
