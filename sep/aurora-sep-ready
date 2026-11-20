@@ -235,6 +235,8 @@ while :; do
     esac
     # unknown or retrying: the driver is still at it. A retry after a
     # refused file only helps once the file is rebuilt, so start that now.
+    # The driver sends no event when these attributes change, so this
+    # polls (https://github.com/aurora-silicon/linux/issues/2313).
     [ "$attach" = retrying ] && repair_once
     [ "$(elapsed)" -lt "$wait_s" ] ||
         sensor_down "still $attach after ${wait_s} s"
