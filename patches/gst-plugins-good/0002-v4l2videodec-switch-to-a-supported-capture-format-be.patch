@@ -1,0 +1,136 @@
+From 132bbed4c891352f84aacbffb90368945c266dcb Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Fri, 20 Nov 2026 06:51:15 +1100
+Subject: [PATCH 2/2] v4l2videodec: switch to a supported capture format before
+ acquiring it
+
+After a source change, a stateful decoder's CAPTURE queue reports the
+format the driver prefers. That format may have no GStreamer
+representation, for example the 16-bit semi-planar 4:2:2 (P216) the
+Apple ProRes decoder defaults to, and acquiring it fails the pipeline
+with 'Video device uses an unsupported pixel format' even though the
+driver also offers NV16.
+
+The V4L2 stateful decoder interface lets the client pick any enumerated
+CAPTURE format at that point. Before acquiring the format, switch to the
+first enumerated format GStreamer can represent, letting the driver
+recompute the stride and size. Drivers whose preferred format is already
+supported see no change.
+
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ sys/v4l2/gstv4l2object.c   | 69 ++++++++++++++++++++++++++++++++++++++
+ sys/v4l2/gstv4l2object.h   |  2 ++
+ sys/v4l2/gstv4l2videodec.c |  3 +-
+ 3 files changed, 73 insertions(+), 1 deletion(-)
+
+diff --git a/sys/v4l2/gstv4l2object.c b/sys/v4l2/gstv4l2object.c
+index 837d783..eae566b 100644
+--- a/sys/v4l2/gstv4l2object.c
++++ b/sys/v4l2/gstv4l2object.c
+@@ -4817,6 +4817,75 @@ gst_v4l2_object_try_format (GstV4l2Object * v4l2object, GstCaps * caps,
+   return gst_v4l2_object_set_format_full (v4l2object, caps, TRUE, error);
+ }
+ 
++static gboolean
++gst_v4l2_object_fourcc_has_gst_format (guint32 fourcc)
++{
++  const GstV4L2FormatDesc *desc =
++      gst_v4l2_object_get_desc_from_v4l2fourcc (fourcc);
++
++  return desc && (desc->gst_format != GST_VIDEO_FORMAT_UNKNOWN ||
++      desc->drm_fourcc);
++}
++
++/**
++ * gst_v4l2_object_select_supported_format:
++ * @v4l2object: the object
++ *
++ * The format a decoder reports after a source change is the one the driver
++ * prefers, which may have no GStreamer representation (16-bit semi-planar
++ * 4:2:2, for example). The client may pick any other format the driver
++ * enumerates, so switch to the first one GStreamer can handle, keeping the
++ * size, before the format is acquired.
++ *
++ * Returns: %TRUE if the current format is (now) one GStreamer handles.
++ */
++gboolean
++gst_v4l2_object_select_supported_format (GstV4l2Object * v4l2object)
++{
++  struct v4l2_format fmt;
++  struct v4l2_fmtdesc fdesc;
++
++  memset (&fmt, 0x00, sizeof (struct v4l2_format));
++  fmt.type = v4l2object->type;
++  if (v4l2object->ioctl (v4l2object->video_fd, VIDIOC_G_FMT, &fmt) < 0)
++    return FALSE;
++
++  /* No need to care about mplane, the four first params are the same */
++  if (gst_v4l2_object_fourcc_has_gst_format (fmt.fmt.pix.pixelformat))
++    return TRUE;
++
++  memset (&fdesc, 0x00, sizeof (struct v4l2_fmtdesc));
++  fdesc.type = v4l2object->type;
++  for (; v4l2object->ioctl (v4l2object->video_fd, VIDIOC_ENUM_FMT,
++          &fdesc) == 0; fdesc.index++) {
++    struct v4l2_format try_fmt = fmt;
++
++    if (!gst_v4l2_object_fourcc_has_gst_format (fdesc.pixelformat))
++      continue;
++
++    /* Let the driver compute the stride and size of the new format */
++    try_fmt.fmt.pix.pixelformat = fdesc.pixelformat;
++    if (V4L2_TYPE_IS_MULTIPLANAR (v4l2object->type)) {
++      memset (try_fmt.fmt.pix_mp.plane_fmt, 0,
++          sizeof (try_fmt.fmt.pix_mp.plane_fmt));
++    } else {
++      try_fmt.fmt.pix.bytesperline = 0;
++      try_fmt.fmt.pix.sizeimage = 0;
++    }
++
++    if (v4l2object->ioctl (v4l2object->video_fd, VIDIOC_S_FMT, &try_fmt) == 0
++        && try_fmt.fmt.pix.pixelformat == fdesc.pixelformat) {
++      GST_DEBUG_OBJECT (v4l2object->dbg_obj, "Driver format %"
++          GST_FOURCC_FORMAT " has no GStreamer format, using %"
++          GST_FOURCC_FORMAT, GST_FOURCC_ARGS (fmt.fmt.pix.pixelformat),
++          GST_FOURCC_ARGS (fdesc.pixelformat));
++      return TRUE;
++    }
++  }
++
++  return FALSE;
++}
++
+ /**
+  * gst_v4l2_object_acquire_format:
+  * @v4l2object: the object
+diff --git a/sys/v4l2/gstv4l2object.h b/sys/v4l2/gstv4l2object.h
+index 9e9adb6..84cd42a 100644
+--- a/sys/v4l2/gstv4l2object.h
++++ b/sys/v4l2/gstv4l2object.h
+@@ -309,6 +309,8 @@ gboolean     gst_v4l2_object_stop        (GstV4l2Object * v4l2object);
+ GstCaps *    gst_v4l2_object_probe_caps  (GstV4l2Object * v4l2object, GstCaps * filter);
+ GstCaps *    gst_v4l2_object_get_caps    (GstV4l2Object * v4l2object, GstCaps * filter);
+ 
++gboolean     gst_v4l2_object_select_supported_format (GstV4l2Object * v4l2object);
++
+ gboolean     gst_v4l2_object_acquire_format (GstV4l2Object * v4l2object, GstVideoInfoDmaDrm * info);
+ 
+ gboolean     gst_v4l2_object_setup_padding (GstV4l2Object * obj);
+diff --git a/sys/v4l2/gstv4l2videodec.c b/sys/v4l2/gstv4l2videodec.c
+index 78a502e..04b67f1 100644
+--- a/sys/v4l2/gstv4l2videodec.c
++++ b/sys/v4l2/gstv4l2videodec.c
+@@ -440,7 +440,8 @@ gst_v4l2_video_dec_negotiate (GstVideoDecoder * decoder)
+    * in the compose rectangle. gst_v4l2_object_acquire_format() checks both
+    * and returns the visible size as with/height and the coded size as
+    * padding. */
+-  if (!gst_v4l2_object_acquire_format (self->v4l2capture, &info))
++  if (!gst_v4l2_object_select_supported_format (self->v4l2capture) ||
++      !gst_v4l2_object_acquire_format (self->v4l2capture, &info))
+     goto not_negotiated;
+ 
+   /* gst_v4l2_object_acquire_format() does not set fps, copy from sink */
+-- 
+2.54.0
+

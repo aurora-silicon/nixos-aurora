@@ -74,6 +74,8 @@
         };
         alsa-utils = pkgs.aurora-alsa-utils;
         pipewire = pkgs.aurora-pipewire;
+        ffmpeg = pkgs.aurora-ffmpeg;
+        gst-plugins-good = pkgs.aurora-gst-plugins-good;
         audio = pkgs.asahi-audio;
         ucm = pkgs.alsa-ucm-conf-asahi;
         fex-mesa = pkgs.aurora-fex-mesa;

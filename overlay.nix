@@ -368,6 +368,36 @@ in {
     ];
     doCheck = true;
   });
+  # ProRes video on the ProRes engine of Apple silicon Macs, through V4L2
+  # mem2mem, with the patches fedora-aurora's and alarm-aurora's ffmpeg and
+  # gst-plugins-good carry: FFmpeg's prores_v4l2m2m decoder and encoder (and
+  # the V4L2 buffer stride and raw format fixes they need; nixpkgs builds
+  # FFmpeg with V4L2 mem2mem on Linux), and GStreamer's v4l2proresdec and
+  # v4l2proresenc with a v4l2videodec fix that switches to a supported
+  # capture format before acquiring it. Like aurora-pipewire these are
+  # separate attributes, not replacements: Qt Multimedia links both ffmpeg
+  # and gst-plugins-good, so replacing either would rebuild most of the
+  # desktop instead of using nixpkgs' cached builds. The FFmpeg patches are
+  # made for 9.0.2; the GStreamer patches are made for 1.28.9 and apply to
+  # nixpkgs' 1.28.7.
+  aurora-ffmpeg = prev.ffmpeg.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ map stableFile [
+      ./patches/ffmpeg/0001-avcodec-v4l2_buffers-use-the-driver-s-strides-for-si.patch
+      ./patches/ffmpeg/0002-avcodec-v4l2_context-pick-the-raw-V4L2-format-the-dr.patch
+      ./patches/ffmpeg/0003-avcodec-v4l2_m2m-add-ProRes-decoder-and-encoder.patch
+    ];
+    # nixpkgs' postConfigure has no trailing newline.
+    postConfigure = (old.postConfigure or "") + "\n" + ''
+      grep -q '#define CONFIG_PRORES_V4L2M2M_DECODER 1' config_components.h
+      grep -q '#define CONFIG_PRORES_V4L2M2M_ENCODER 1' config_components.h
+    '';
+  });
+  aurora-gst-plugins-good = prev.gst_all_1.gst-plugins-good.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ map stableFile [
+      ./patches/gst-plugins-good/0001-v4l2-add-ProRes-decoder-and-encoder.patch
+      ./patches/gst-plugins-good/0002-v4l2videodec-switch-to-a-supported-capture-format-be.patch
+    ];
+  });
   # AirPlay 2 receivers (services.shairport-sync with nqptp): nqptp's main loop
   # polled with a 10 ms select() timeout, so its SCHED_FIFO thread woke 100
   # times a second with no AirPlay session and held a CPU cluster at its top

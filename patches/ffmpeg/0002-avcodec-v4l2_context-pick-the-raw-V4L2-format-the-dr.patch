@@ -1,0 +1,97 @@
+From fe7788cb1c57b2f993d6da3746bb676b3638de26 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Fri, 20 Nov 2026 05:05:15 +1100
+Subject: [PATCH 2/3] avcodec/v4l2_context: pick the raw V4L2 format the driver
+ really offers
+
+Selecting the raw format had two problems.
+
+VIDIOC_TRY_FMT does not fail for an unsupported pixel format: the driver
+returns the format it would use instead. v4l2_try_raw_format() only checked
+the return code, so a context could be set up for one pixel format while
+the driver produced another, for example 4:2:2 capture requested for a
+4:4:4 stream.
+
+Several V4L2 formats map to one AVPixelFormat (NV16 and NV16M, NV12 and
+NV12M). The requested pixel format was only tried with the first V4L2
+format in the table, and the fallback loop converted each enumerated
+format back to an AVPixelFormat and then again to the first table entry,
+so a driver offering only single-buffer NV16 was never asked for it.
+
+Treat a replaced pixel format as not supported, and try the formats the
+driver enumerates by their own fourcc: first those that carry the requested
+pixel format, then any other one, as before.
+
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ libavcodec/v4l2_context.c | 27 +++++++++++++++++++++------
+ 1 file changed, 21 insertions(+), 6 deletions(-)
+
+diff --git a/libavcodec/v4l2_context.c b/libavcodec/v4l2_context.c
+index be1df37..3b3f4d5 100644
+--- a/libavcodec/v4l2_context.c
++++ b/libavcodec/v4l2_context.c
+@@ -464,13 +464,11 @@ static int v4l2_release_buffers(V4L2Context* ctx)
+     return ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_REQBUFS, &req);
+ }
+ 
+-static inline int v4l2_try_raw_format(V4L2Context* ctx, enum AVPixelFormat pixfmt)
++static inline int v4l2_try_raw_format(V4L2Context* ctx, uint32_t v4l2_fmt)
+ {
+     struct v4l2_format *fmt = &ctx->format;
+-    uint32_t v4l2_fmt;
+     int ret;
+ 
+-    v4l2_fmt = ff_v4l2_format_avfmt_to_v4l2(pixfmt);
+     if (!v4l2_fmt)
+         return AVERROR(EINVAL);
+ 
+@@ -485,6 +483,11 @@ static inline int v4l2_try_raw_format(V4L2Context* ctx, enum AVPixelFormat pixfm
+     if (ret)
+         return AVERROR(EINVAL);
+ 
++    /* TRY_FMT replaces a pixel format the driver cannot produce right now. */
++    if ((V4L2_TYPE_IS_MULTIPLANAR(ctx->type) ? fmt->fmt.pix_mp.pixelformat :
++                                              fmt->fmt.pix.pixelformat) != v4l2_fmt)
++        return AVERROR(EINVAL);
++
+     return 0;
+ }
+ 
+@@ -498,9 +501,21 @@ static int v4l2_get_raw_format(V4L2Context* ctx, enum AVPixelFormat *p)
+     fdesc.type = ctx->type;
+ 
+     if (pixfmt != AV_PIX_FMT_NONE) {
+-        ret = v4l2_try_raw_format(ctx, pixfmt);
++        ret = v4l2_try_raw_format(ctx, ff_v4l2_format_avfmt_to_v4l2(pixfmt));
+         if (!ret)
+             return 0;
++
++        /*
++         * Several V4L2 formats carry the same AVPixelFormat (NV16 and NV16M,
++         * for example): try every one the driver lists before giving up on
++         * the requested pixel format.
++         */
++        for (; !ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_ENUM_FMT, &fdesc); fdesc.index++) {
++            if (ff_v4l2_format_v4l2_to_avfmt(fdesc.pixelformat, AV_CODEC_ID_RAWVIDEO) == pixfmt &&
++                !v4l2_try_raw_format(ctx, fdesc.pixelformat))
++                return 0;
++        }
++        fdesc.index = 0;
+     }
+ 
+     for (;;) {
+@@ -509,8 +524,8 @@ static int v4l2_get_raw_format(V4L2Context* ctx, enum AVPixelFormat *p)
+             return AVERROR(EINVAL);
+ 
+         pixfmt = ff_v4l2_format_v4l2_to_avfmt(fdesc.pixelformat, AV_CODEC_ID_RAWVIDEO);
+-        ret = v4l2_try_raw_format(ctx, pixfmt);
+-        if (ret){
++        if (pixfmt == AV_PIX_FMT_NONE ||
++            v4l2_try_raw_format(ctx, fdesc.pixelformat)) {
+             fdesc.index++;
+             continue;
+         }
+-- 
+2.54.0
+

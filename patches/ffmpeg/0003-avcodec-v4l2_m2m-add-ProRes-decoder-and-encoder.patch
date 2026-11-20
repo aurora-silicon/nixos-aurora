@@ -1,0 +1,267 @@
+From cc373041532ef8f5552d3d94be38e5b96b2a3784 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Fri, 20 Nov 2026 05:05:15 +1100
+Subject: [PATCH 3/3] avcodec/v4l2_m2m: add ProRes decoder and encoder
+
+Add prores_v4l2m2m decoder and encoder wrappers for V4L2 stateful ProRes
+codecs, such as the ProRes engine of Apple silicon SoCs. The coded format
+is V4L2_PIX_FMT_PRORES ('PRES', one picture per buffer), defined here for
+kernel headers that predate it; the raw formats are the single-buffer
+NV16, NV24, P216 and P416, now mapped to their AVPixelFormats.
+
+The decoder asks for a 16-bit capture format (P216 for 4:2:2, P416 for
+4:4:4, from the stream's pixel format) since ProRes carries 10- and 12-bit
+samples. The encoder sets V4L2_CID_MPEG_VIDEO_PRORES_PROFILE from the
+codec profile (proxy, lt, standard, hq, 4444, 4444xq; the V4L2 menu uses
+the AV_PROFILE_PRORES_* order), skips the rate control settings ProRes
+does not have, and reports the profile the driver chose together with the
+matching sample entry tag, so muxers write the right one.
+
+Both depend only on V4L2 mem2mem support.
+
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ configure                 |  2 ++
+ libavcodec/Makefile       |  2 ++
+ libavcodec/allcodecs.c    |  2 ++
+ libavcodec/v4l2_fmt.c     | 13 +++++++++
+ libavcodec/v4l2_fmt.h     |  9 ++++++
+ libavcodec/v4l2_m2m_dec.c | 17 +++++++++++
+ libavcodec/v4l2_m2m_enc.c | 60 +++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 105 insertions(+)
+
+diff --git a/configure b/configure
+index 374bd5c..238123b 100755
+--- a/configure
++++ b/configure
+@@ -3727,6 +3727,8 @@ vp9_vaapi_encoder_select="vaapi_encode"
+ vp9_qsv_encoder_deps="libmfx MFX_CODEC_VP9"
+ vp9_qsv_encoder_select="qsvenc"
+ vp9_v4l2m2m_decoder_deps="v4l2_m2m vp9_v4l2_m2m"
++prores_v4l2m2m_decoder_deps="v4l2_m2m"
++prores_v4l2m2m_encoder_deps="v4l2_m2m"
+ amf_capture_filter_deps="amf"
+ vvc_qsv_decoder_select="vvc_mp4toannexb_bsf qsvdec"
+ 
+diff --git a/libavcodec/Makefile b/libavcodec/Makefile
+index 95ba308..10ea0a5 100644
+--- a/libavcodec/Makefile
++++ b/libavcodec/Makefile
+@@ -649,6 +649,8 @@ OBJS-$(CONFIG_PRORES_AW_ENCODER)       += proresenc_anatoliy.o proresdata.o
+ OBJS-$(CONFIG_PRORES_KS_ENCODER)       += proresenc_kostya.o proresdata.o proresenc_kostya_common.o
+ OBJS-$(CONFIG_PRORES_KS_VULKAN_ENCODER) += proresenc_kostya_vulkan.o proresdata.o proresenc_kostya_common.o
+ OBJS-$(CONFIG_PRORES_RAW_DECODER)      += prores_raw.o proresdsp.o proresdata.o
++OBJS-$(CONFIG_PRORES_V4L2M2M_DECODER)  += v4l2_m2m_dec.o
++OBJS-$(CONFIG_PRORES_V4L2M2M_ENCODER)  += v4l2_m2m_enc.o
+ OBJS-$(CONFIG_PRORES_VIDEOTOOLBOX_ENCODER) += videotoolboxenc.o
+ OBJS-$(CONFIG_PROSUMER_DECODER)        += prosumer.o
+ OBJS-$(CONFIG_PSD_DECODER)             += psd.o
+diff --git a/libavcodec/allcodecs.c b/libavcodec/allcodecs.c
+index 47eded2..5d72ee8 100644
+--- a/libavcodec/allcodecs.c
++++ b/libavcodec/allcodecs.c
+@@ -379,6 +379,7 @@ extern const FFCodec ff_vp8_v4l2m2m_decoder;
+ extern const FFCodec ff_vp9_decoder;
+ extern const FFCodec ff_vp9_rkmpp_decoder;
+ extern const FFCodec ff_vp9_v4l2m2m_decoder;
++extern const FFCodec ff_prores_v4l2m2m_decoder;
+ extern const FFCodec ff_vqa_decoder;
+ extern const FFCodec ff_vqc_decoder;
+ extern const FFCodec ff_vvc_decoder;
+@@ -911,6 +912,7 @@ extern const FFCodec ff_vp8_mediacodec_decoder;
+ extern const FFCodec ff_vp8_mediacodec_encoder;
+ extern const FFCodec ff_vp8_qsv_decoder;
+ extern const FFCodec ff_vp8_v4l2m2m_encoder;
++extern const FFCodec ff_prores_v4l2m2m_encoder;
+ extern const FFCodec ff_vp8_vaapi_encoder;
+ extern const FFCodec ff_vp9_amf_decoder;
+ extern const FFCodec ff_vp9_cuvid_decoder;
+diff --git a/libavcodec/v4l2_fmt.c b/libavcodec/v4l2_fmt.c
+index 6df47e3..ae60b1a 100644
+--- a/libavcodec/v4l2_fmt.c
++++ b/libavcodec/v4l2_fmt.c
+@@ -25,6 +25,14 @@
+ #include <search.h>
+ #include "v4l2_fmt.h"
+ 
++/* Fallbacks for kernel headers that predate these formats. */
++#ifndef V4L2_PIX_FMT_P216
++#define V4L2_PIX_FMT_P216 v4l2_fourcc('P', '2', '1', '6')
++#endif
++#ifndef V4L2_PIX_FMT_P416
++#define V4L2_PIX_FMT_P416 v4l2_fourcc('P', '4', '1', '6')
++#endif
++
+ #define V4L2_FMT(x) V4L2_PIX_FMT_##x
+ #define AV_CODEC(x) AV_CODEC_ID_##x
+ #define AV_FMT(x)   AV_PIX_FMT_##x
+@@ -74,6 +82,10 @@ static const struct fmt_conversion {
+ #ifdef V4L2_PIX_FMT_NV16M
+     { AV_FMT(NV16),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV16M) },
+ #endif
++    { AV_FMT(NV16),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV16) },
++    { AV_FMT(NV24),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV24) },
++    { AV_FMT(P216LE),      AV_CODEC(RAWVIDEO),    V4L2_FMT(P216) },
++    { AV_FMT(P416LE),      AV_CODEC(RAWVIDEO),    V4L2_FMT(P416) },
+ #ifdef V4L2_PIX_FMT_H263
+     { AV_FMT(NONE),        AV_CODEC(H263),        V4L2_FMT(H263) },
+ #endif
+@@ -104,6 +116,7 @@ static const struct fmt_conversion {
+ #ifdef V4L2_PIX_FMT_HEVC
+     { AV_FMT(NONE),        AV_CODEC(HEVC),        V4L2_FMT(HEVC) },
+ #endif
++    { AV_FMT(NONE),        AV_CODEC(PRORES),      V4L2_FMT(PRORES) },
+ #ifdef V4L2_PIX_FMT_VC1_ANNEX_G
+     { AV_FMT(NONE),        AV_CODEC(VC1),         V4L2_FMT(VC1_ANNEX_G) },
+ #endif
+diff --git a/libavcodec/v4l2_fmt.h b/libavcodec/v4l2_fmt.h
+index 577e03a..175f332 100644
+--- a/libavcodec/v4l2_fmt.h
++++ b/libavcodec/v4l2_fmt.h
+@@ -28,6 +28,15 @@
+ #include "libavutil/pixfmt.h"
+ #include "codec_id.h"
+ 
++/*
++ * Apple ProRes frames (one picture per buffer), as exposed by the Apple
++ * silicon ProRes encoder and decoder.  Defined here for kernel headers that
++ * do not carry it yet.
++ */
++#ifndef V4L2_PIX_FMT_PRORES
++#define V4L2_PIX_FMT_PRORES v4l2_fourcc('P', 'R', 'E', 'S')
++#endif
++
+ enum AVPixelFormat ff_v4l2_format_v4l2_to_avfmt(uint32_t v4l2_fmt, enum AVCodecID avcodec);
+ uint32_t ff_v4l2_format_avcodec_to_v4l2(enum AVCodecID avcodec);
+ uint32_t ff_v4l2_format_avfmt_to_v4l2(enum AVPixelFormat avfmt);
+diff --git a/libavcodec/v4l2_m2m_dec.c b/libavcodec/v4l2_m2m_dec.c
+index ba1fe76..829ebea 100644
+--- a/libavcodec/v4l2_m2m_dec.c
++++ b/libavcodec/v4l2_m2m_dec.c
+@@ -178,6 +178,20 @@ fail:
+     return ret;
+ }
+ 
++/*
++ * ProRes carries 10-bit 4:2:2 or 12-bit 4:4:4 samples. Ask for a 16-bit
++ * capture format with the stream's chroma layout so no precision is lost; the
++ * demuxer's pixel format (or the first frame) tells the layout.
++ */
++static enum AVPixelFormat v4l2_prores_capture_format(enum AVPixelFormat stream_fmt)
++{
++    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(stream_fmt);
++
++    if (desc && !desc->log2_chroma_w && !desc->log2_chroma_h)
++        return AV_PIX_FMT_P416LE;
++    return AV_PIX_FMT_P216LE;
++}
++
+ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
+ {
+     V4L2Context *capture, *output;
+@@ -204,6 +218,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
+ 
+     capture->av_codec_id = AV_CODEC_ID_RAWVIDEO;
+     capture->av_pix_fmt = avctx->pix_fmt;
++    if (avctx->codec_id == AV_CODEC_ID_PRORES)
++        capture->av_pix_fmt = v4l2_prores_capture_format(avctx->pix_fmt);
+ 
+     s->avctx = avctx;
+     ret = ff_v4l2_m2m_codec_init(priv);
+@@ -266,3 +282,4 @@ M2MDEC(h263,  "H.263", AV_CODEC_ID_H263,       NULL);
+ M2MDEC(vc1 ,  "VC1",   AV_CODEC_ID_VC1,        NULL);
+ M2MDEC(vp8,   "VP8",   AV_CODEC_ID_VP8,        NULL);
+ M2MDEC(vp9,   "VP9",   AV_CODEC_ID_VP9,        NULL);
++M2MDEC(prores, "ProRes", AV_CODEC_ID_PRORES,    NULL);
+diff --git a/libavcodec/v4l2_m2m_enc.c b/libavcodec/v4l2_m2m_enc.c
+index 93703cc..79e84aa 100644
+--- a/libavcodec/v4l2_m2m_enc.c
++++ b/libavcodec/v4l2_m2m_enc.c
+@@ -160,6 +160,51 @@ static int v4l2_check_b_frame_support(V4L2m2mContext *s)
+     return AVERROR_PATCHWELCOME;
+ }
+ 
++#ifndef V4L2_CID_MPEG_VIDEO_PRORES_PROFILE
++#define V4L2_CID_MPEG_VIDEO_PRORES_PROFILE (V4L2_CID_CODEC_BASE + 658)
++#endif
++
++/* The V4L2 ProRes profile menu uses the same order as AV_PROFILE_PRORES_*. */
++static const struct {
++    int profile;
++    uint32_t tag;
++} v4l2_prores_profiles[] = {
++    { AV_PROFILE_PRORES_PROXY,    MKTAG('a', 'p', 'c', 'o') },
++    { AV_PROFILE_PRORES_LT,       MKTAG('a', 'p', 'c', 's') },
++    { AV_PROFILE_PRORES_STANDARD, MKTAG('a', 'p', 'c', 'n') },
++    { AV_PROFILE_PRORES_HQ,       MKTAG('a', 'p', 'c', 'h') },
++    { AV_PROFILE_PRORES_4444,     MKTAG('a', 'p', '4', 'h') },
++    { AV_PROFILE_PRORES_XQ,       MKTAG('a', 'p', '4', 'x') },
++};
++
++/*
++ * ProRes is intra-only and its rate follows the profile, so there is no
++ * bit rate, GOP or quantiser range to program: set the profile, then report
++ * the one the driver settled on (it keeps the profile consistent with the
++ * raw format's chroma) so muxers write the matching sample entry.
++ */
++static int v4l2_prepare_prores_encoder(V4L2m2mContext *s)
++{
++    AVCodecContext *avctx = s->avctx;
++    int profile, i;
++
++    if (avctx->profile != AV_PROFILE_UNKNOWN)
++        v4l2_set_ext_ctrl(s, MPEG_CID(PRORES_PROFILE), avctx->profile, "prores profile", 1);
++    if (v4l2_get_ext_ctrl(s, MPEG_CID(PRORES_PROFILE), &profile, "prores profile", 1))
++        return AVERROR(EINVAL);
++
++    for (i = 0; i < FF_ARRAY_ELEMS(v4l2_prores_profiles); i++) {
++        if (v4l2_prores_profiles[i].profile == profile) {
++            avctx->profile   = profile;
++            avctx->codec_tag = v4l2_prores_profiles[i].tag;
++            return 0;
++        }
++    }
++
++    av_log(avctx, AV_LOG_ERROR, "driver reports unknown prores profile %d\n", profile);
++    return AVERROR(EINVAL);
++}
++
+ static inline void v4l2_subscribe_eos_event(V4L2m2mContext *s)
+ {
+     struct v4l2_event_subscription sub;
+@@ -192,6 +237,9 @@ static int v4l2_prepare_encoder(V4L2m2mContext *s)
+     if (avctx->framerate.num || avctx->framerate.den)
+         v4l2_set_timeperframe(s, avctx->framerate.den, avctx->framerate.num);
+ 
++    if (avctx->codec_id == AV_CODEC_ID_PRORES)
++        return v4l2_prepare_prores_encoder(s);
++
+     /* set ext ctrls */
+     v4l2_set_ext_ctrl(s, MPEG_CID(HEADER_MODE), MPEG_VIDEO(HEADER_MODE_SEPARATE), "header mode", 0);
+     v4l2_set_ext_ctrl(s, MPEG_CID(BITRATE) , avctx->bit_rate, "bit rate", 1);
+@@ -405,6 +453,17 @@ static const AVOption options[] = {
+     { NULL },
+ };
+ 
++static const AVOption prores_options[] = {
++    V4L_M2M_CAPTURE_OPTS,
++    FF_AVCTX_PROFILE_OPTION("proxy",    NULL, VIDEO, AV_PROFILE_PRORES_PROXY)
++    FF_AVCTX_PROFILE_OPTION("lt",       NULL, VIDEO, AV_PROFILE_PRORES_LT)
++    FF_AVCTX_PROFILE_OPTION("standard", NULL, VIDEO, AV_PROFILE_PRORES_STANDARD)
++    FF_AVCTX_PROFILE_OPTION("hq",       NULL, VIDEO, AV_PROFILE_PRORES_HQ)
++    FF_AVCTX_PROFILE_OPTION("4444",     NULL, VIDEO, AV_PROFILE_PRORES_4444)
++    FF_AVCTX_PROFILE_OPTION("4444xq",   NULL, VIDEO, AV_PROFILE_PRORES_XQ)
++    { NULL },
++};
++
+ static const FFCodecDefault v4l2_m2m_defaults[] = {
+     { "qmin", "-1" },
+     { "qmax", "-1" },
+@@ -444,3 +503,4 @@ M2MENC(h263, "H.263", options,       AV_CODEC_ID_H263);
+ M2MENC(h264, "H.264", options,       AV_CODEC_ID_H264);
+ M2MENC(hevc, "HEVC",  options,       AV_CODEC_ID_HEVC);
+ M2MENC(vp8,  "VP8",   options,       AV_CODEC_ID_VP8);
++M2MENC(prores, "ProRes", prores_options, AV_CODEC_ID_PRORES);
+-- 
+2.54.0
+
