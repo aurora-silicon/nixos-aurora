@@ -1,120 +1,95 @@
-"""load-driver leaves apple_sep's options to modprobe.d, so a read-only
-/etc/modprobe.d/aurora-sep.conf beats the packaged defaults."""
-import os
+"""SEP writes are always on. apple_sep has no xart_writes or provision_keybag
+parameter (aurora-silicon/linux#2591), and nothing this repository configures
+sets one: no modprobe.d file, no modprobe command line, no kernel command
+line. With no packaged value, a parameter can no longer reach the driver
+twice, which stopped older kernels loading it (nixos-aurora#354)."""
 from pathlib import Path
+import re
 import shlex
-import shutil
 import subprocess
-import sys
-import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SEP = ROOT / 'sep'
-# modules/sep.nix copies the defaults there at boot.
-DEFAULTS = 'run/modprobe.d/aurora-sep.conf'
-READ_ONLY = 'options apple_sep xart_writes=0 provision_keybag=0\n'
-# kmod's search order: a file hides one of the same name further down.
-DIRS = ('etc/modprobe.d', 'run/modprobe.d', 'usr/lib/modprobe.d')
-MODPROBE = shutil.which('modprobe', path=os.environ.get('PATH', '') + ':/usr/sbin:/sbin')
+REMOVED = ('xart_writes', 'provision_keybag')
+_names = '|'.join(REMOVED)
+# A modprobe.d options line, a modprobe command line or a kernel command line
+# that gives apple_sep one of the removed parameters.
+SETS = re.compile(rf'^\s*options\s+apple_sep\b.*\b(?:{_names})\b'
+                  rf'|\bmodprobe(?:\s+-\S+)*\s+apple_sep\b[^;|&"\n]*\b(?:{_names})='
+                  rf'|\bapple_sep\.(?:{_names})=', re.M)
 
 
-def options(root, argv=()):
-    """apple_sep's parameters as modprobe passes them: modprobe.d by file
-    name, then its own command line. The kernel refuses a second value of a
-    parameter (EEXIST) and then does not load the driver."""
-    files = {}
-    for d in DIRS:
-        for path in sorted((root / d).glob('*.conf')):
-            files.setdefault(path.name, path)
-    words = []
-    for name in sorted(files):
-        for line in files[name].read_text().splitlines():
-            w = shlex.split(line, comments=True)
-            if w[:2] == ['options', 'apple_sep']:
-                words += w[2:]
-    given = [w.split('=', 1) for w in [*words, *argv]]
-    names = [name for name, _ in given]
-    twice = sorted({name for name in names if names.count(name) > 1})
-    if twice:
-        raise ValueError(f"apple_sep would not load: {', '.join(twice)} given twice")
-    return dict(given)
+def tracked_files():
+    try:
+        out = subprocess.run(['git', '-C', str(ROOT), 'ls-files', '-z'],
+                             capture_output=True, check=True).stdout.decode()
+        names = [n for n in out.split('\0') if n]
+    except (OSError, subprocess.CalledProcessError):
+        names = [str(p.relative_to(ROOT)) for p in ROOT.rglob('*')
+                 if p.is_file() and '.git' not in p.parts]
+    for name in names:
+        path = ROOT / name
+        if path.parts[len(ROOT.parts)] == 'tests' or not path.is_file():
+            continue
+        yield path
 
 
-def load_driver_argv():
-    for line in (SEP / 'load-driver').read_text().splitlines():
-        w = shlex.split(line, comments=True)
-        if w[:2] == ['modprobe', 'apple_sep']:
-            return w[2:]
-    raise AssertionError('load-driver does not load apple_sep')
+def text_of(path):
+    try:
+        return path.read_text()
+    except UnicodeDecodeError:
+        return ''
 
 
-class SepModprobeTests(unittest.TestCase):
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
-        self.install(DEFAULTS, (SEP / 'aurora-sep-modprobe.conf').read_text())
-        self.install('etc/modprobe.d/nixos.conf', 'blacklist apple_sep\n')
+class SepWritesAlwaysOnTests(unittest.TestCase):
+    def test_nothing_shipped_sets_a_removed_parameter(self):
+        found = [f'{path.relative_to(ROOT)}: {m.group(0).strip()}'
+                 for path in tracked_files() for m in SETS.finditer(text_of(path))]
+        self.assertEqual(found, [])
 
-    def install(self, name, text):
-        path = self.root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+    def test_no_module_configures_an_apple_sep_write_option(self):
+        modules = sorted((ROOT / 'modules').rglob('*.nix'))
+        self.assertTrue(modules)
+        for nix in [*modules, *ROOT.glob('*.nix')]:
+            with self.subTest(module=str(nix.relative_to(ROOT))):
+                for name in REMOVED:
+                    self.assertNotIn(name, nix.read_text())
+
+    def test_the_sep_module_ships_no_modprobe_options(self):
+        module = (ROOT / 'modules/sep.nix').read_text()
+        # The load-ordering blacklist stays: aurora-sep.service loads the driver.
+        self.assertIn('boot.blacklistedKernelModules = [ "apple_sep" ];', module)
+        self.assertNotIn('modprobe.d', module)
+        self.assertNotIn('extraModprobeConfig', module)
+        self.assertNotIn('aurora-sep-modprobe.conf', module)
+        self.assertFalse((SEP / 'aurora-sep-modprobe.conf').exists())
+
+    def test_ci_checks_the_evaluated_profiles(self):
+        workflow = (ROOT / '.github/workflows/checks.yml').read_text()
+        self.assertIn('Check that no profile sets an apple_sep write option', workflow)
+        self.assertIn('"xart_writes|provision_keybag"', workflow)
 
     def test_load_driver_passes_no_options(self):
-        # Command-line options come after modprobe.d's and would win.
-        self.assertEqual(load_driver_argv(), [])
+        text = (SEP / 'load-driver').read_text()
+        calls = [w for w in map(lambda l: shlex.split(l, comments=True), text.splitlines())
+                 if w[:1] == ['modprobe'] and 'apple_sep' in w]
+        self.assertEqual(calls, [['modprobe', 'apple_sep']])
+        for name in REMOVED:
+            self.assertNotIn(name, text)
 
-    def test_the_defaults_keep_writes_and_provisioning_on(self):
-        self.assertEqual(options(self.root, load_driver_argv()),
-                         {'xart_writes': '1', 'provision_keybag': '1'})
-
-    def test_a_read_only_etc_file_wins(self):
-        self.install('etc/modprobe.d/aurora-sep.conf', READ_ONLY)
-        self.assertEqual(options(self.root, load_driver_argv()),
-                         {'xart_writes': '0', 'provision_keybag': '0'})
-        # Options given to modprobe would come on top of it, and the kernel
-        # would refuse the second values: so load-driver passes none.
-        with self.assertRaisesRegex(ValueError, 'given twice'):
-            options(self.root, ['xart_writes=1', 'provision_keybag=1'])
-
-    def test_the_module_installs_the_defaults(self):
-        module = (ROOT / 'modules/sep.nix').read_text()
-        # Under the name /etc/modprobe.d/aurora-sep.conf replaces.
-        self.assertIn('"C /run/modprobe.d/aurora-sep.conf - - - - '
-                      '${../sep/aurora-sep-modprobe.conf}"', module)
-        self.assertIn('"d /run/modprobe.d 0755 root root -"', module)
-        self.assertNotIn('environment.etc."modprobe.d/aurora-sep', module)
-
-    def test_defaults_under_another_name_stop_the_load(self):
-        # What the module shipped before: /etc/modprobe.d/aurora-sep-defaults.conf
-        # beside the read-only file gave each parameter twice.
-        (self.root / DEFAULTS).unlink()
-        self.install('etc/modprobe.d/aurora-sep-defaults.conf',
-                     (SEP / 'aurora-sep-modprobe.conf').read_text())
-        self.install('etc/modprobe.d/aurora-sep.conf', READ_ONLY)
-        with self.assertRaisesRegex(ValueError, 'provision_keybag, xart_writes given twice'):
-            options(self.root, load_driver_argv())
-
-    def test_a_read_only_boot_extra_modprobe_config_stops_the_load(self):
-        # nixos.conf adds a second value of each parameter: the kernel does
-        # not load apple_sep. The defaults file names the /etc file instead.
-        self.install('etc/modprobe.d/nixos.conf', 'blacklist apple_sep\n' + READ_ONLY)
-        with self.assertRaisesRegex(ValueError, 'provision_keybag, xart_writes given twice'):
-            options(self.root, load_driver_argv())
-
-    @unittest.skipUnless(sys.platform == 'linux' and MODPROBE, 'needs kmod')
-    def test_kmod_agrees(self):
-        self.install('etc/modprobe.d/aurora-sep.conf', READ_ONLY)
-        config = [f'--config={self.root / d}' for d in DIRS if (self.root / d).is_dir()]
-        out = subprocess.run([MODPROBE, *config, '-c'], capture_output=True, text=True,
-                             check=True).stdout
-        lines = [line.split() for line in out.splitlines()
-                 if line.startswith('options apple_sep ')]
-        self.assertEqual(lines[-1], READ_ONLY.split())
-        self.assertEqual(options(self.root), dict(w.split('=', 1) for line in lines
-                                                   for w in line[2:]))
+    def test_messages_name_no_off_switch(self):
+        status = (SEP / 'aurora-sep').read_text()
+        ready = (SEP / 'aurora-sep-ready').read_text()
+        for text in (status, ready):
+            for name in REMOVED:
+                self.assertNotIn(f'{name}=0', text)
+        self.assertIn('"xART writes are disabled: the store is read-only this boot', status)
+        self.assertIn('echo "xART writes are disabled (the gigalocker did not validate for writing)',
+                      ready)
+        # checks/sep-lifecycle.py looks for that reason in the journal.
+        lifecycle = (ROOT / 'checks/sep-lifecycle.py').read_text()
+        self.assertIn("grep -F 'xART writes are disabled'", lifecycle)
 
 
 if __name__ == '__main__':
