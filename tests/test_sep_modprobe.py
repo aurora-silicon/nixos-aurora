@@ -85,8 +85,7 @@ class SepWritesAlwaysOnTests(unittest.TestCase):
             for name in REMOVED:
                 self.assertNotIn(f'{name}=0', text)
         self.assertIn('"xART writes are disabled: the store is read-only this boot', status)
-        self.assertIn('echo "xART writes are disabled (the gigalocker did not validate for writing)',
-                      ready)
+        self.assertIn('echo "xART writes are disabled (the store is read-only this boot', ready)
         # checks/sep-lifecycle.py looks for that reason in the journal.
         lifecycle = (ROOT / 'checks/sep-lifecycle.py').read_text()
         self.assertIn("grep -F 'xART writes are disabled'", lifecycle)
