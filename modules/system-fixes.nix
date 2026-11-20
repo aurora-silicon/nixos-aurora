@@ -19,6 +19,14 @@ let
       [ "export PATH=${lib.makeBinPath [ pkgs.ethtool pkgs.iw pkgs.coreutils pkgs.gnugrep ]}" ]
       (builtins.readFile ./aurora-wake-for-network.sh));
 in {
+  imports = [
+    (lib.mkRemovedOptionModule [ "aurora" "systemFixes" "nmDispatcherPersist" ]
+      "NetworkManager's dispatcher now always runs with --persist and stops after NetworkManager.")
+    (lib.mkRemovedOptionModule [ "aurora" "systemFixes" "drkonqiOrdering" ]
+      "The drkonqi ordering-cycle fix (KDE bug 528003) is now always applied with Plasma.")
+    (lib.mkRemovedOptionModule [ "aurora" "systemFixes" "nmKeepWakeOnLan" ]
+      "NetworkManager now always keeps a Wake-on-LAN/WLAN device that is still activated after wake.")
+  ];
   options.aurora.systemFixes.wakeForNetwork = lib.mkOption {
     type = lib.types.enum [ "power-adapter" "always" "never" ];
     default = "power-adapter";

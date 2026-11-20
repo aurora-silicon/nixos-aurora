@@ -1,5 +1,9 @@
 { config, lib, pkgs, ... }:
 {
+  imports = [
+    (lib.mkRemovedOptionModule [ "aurora" "audio" "pipewireFixes" ]
+      "The PipeWire daemon now always defaults to aurora-pipewire; set services.pipewire.package to override it.")
+  ];
   options.aurora.audio = {
     skipLockedControls = lib.mkOption {
       type = lib.types.bool;

@@ -36,7 +36,8 @@ class PipeWireTests(unittest.TestCase):
     def test_daemon_uses_it_and_ci_builds_it(self):
         audio = (ROOT / 'modules/audio.nix').read_text()
         self.assertIn('services.pipewire.package = lib.mkDefault pkgs.aurora-pipewire;', audio)
-        self.assertNotIn('pipewireFixes', audio)
+        self.assertNotIn('pipewireFixes = lib.mkOption', audio)
+        self.assertIn('lib.mkRemovedOptionModule [ "aurora" "audio" "pipewireFixes" ]', audio)
         flake = (ROOT / 'flake.nix').read_text()
         self.assertIn('pipewire = pkgs.aurora-pipewire;', flake)
         registry = (ROOT / 'checks/default.nix').read_text()
