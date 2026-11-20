@@ -1,7 +1,8 @@
 {
   "repository": "https://github.com/aurora-silicon/fedora-aurora",
+  "commit": "3856e33f965e1945c6161a83a4816784f17587cb",
+  "pull_request": "https://github.com/aurora-silicon/fedora-aurora/pull/450",
   "source_directory": "packages/aurora-m5-platform-config",
-  "branch": "djdev/m5-edge-sleep-platform",
   "upstream_files_sha256": {
     "50-aurora-m5-rtc-safety": "f9015811cbc452cbbf5fec77177a6fdab5eec2e860a95ce9b587fad96b509cd2",
     "90-aurora-m5-deep.conf": "32d81a40e1f8c28418b86a13b5c8e83eae6ae838d5ac1c83e247ee9383d7c18e",
