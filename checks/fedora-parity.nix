@@ -20,6 +20,11 @@ let
         "a stalled reboot or kexec is reset by the hardware watchdog within its 178 s range" =
           config.systemd.settings.Manager.RebootWatchdogSec == "2min"
           && config.systemd.settings.Manager.KExecWatchdogSec == "2min";
+        "power defaults (ASPM powersupersave, no RT utilization floor) on every Apple silicon Mac, as on Fedora and ALARM" =
+          config.systemd.services.aurora-power-defaults.enable
+          && lib.elem "sysinit.target" config.systemd.services.aurora-power-defaults.wantedBy
+          && config.systemd.services.aurora-power-defaults.unitConfig.ConditionFirmware
+            == "device-tree-compatible(apple,arm-platform)";
         "trackpad clicks come from the host where the MTP trackpad has an actuator, as on Fedora and ALARM" =
           lib.any (package: (package.name or "") == "aurora-trackpad-clicks-rules") config.services.udev.packages;
         "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;

@@ -68,6 +68,42 @@
     ExecStartPre = "+${pkgs.runtimeShell} -c 'if [ -e /run/speakersafetyd.started ]; then : > /run/speakersafetyd/speakersafetyd.flag; fi'";
     ExecStopPost = "+${pkgs.coreutils}/bin/touch /run/speakersafetyd.started";
   };
+  # Power defaults for every Apple silicon Mac, the same unit as Fedora's
+  # aurora-platform-core and ALARM's aurora-system-fixes. Neither setting
+  # depends on the SoC. To keep the kernel's defaults:
+  #   systemd.services.aurora-power-defaults.enable = false;
+  systemd.services.aurora-power-defaults = {
+    description = "Apple silicon power defaults";
+    unitConfig = {
+      ConditionFirmware = "device-tree-compatible(apple,arm-platform)";
+      DefaultDependencies = false;
+    };
+    wantedBy = [ "sysinit.target" ];
+    after = [ "systemd-sysctl.service" ];
+    # aurora-power-modes records the values it finds at start as the boot
+    # baseline and puts them back outside Power Saver, so they must be these.
+    before = [ "sysinit.target" "aurora-power-modes.service" "shutdown.target" ];
+    conflicts = [ "shutdown.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = [
+        # PCIe ASPM with the L1.1 and L1.2 substates. The kernel enables them
+        # per link, only where both ends advertise the substates, and keeps
+        # the states a driver or the host bridge took away for hardware
+        # errata off (the BCM4377 Bluetooth link; pcie-apple's tunnel root
+        # ports and T6050 adopted ports). The default policy leaves the
+        # substates off everywhere. A kernel booted with pcie_aspm=off
+        # refuses the write; "-" lets the sysctl below run anyway.
+        "-${pkgs.runtimeShell} -c 'echo powersupersave > /sys/module/pcie_aspm/parameters/policy'"
+        # Realtime threads (threaded IRQs, PipeWire's data loop) get no
+        # utilization floor, so they no longer run their CPU at its top clock
+        # whenever they run; schedutil still raises the clock for the work
+        # they do. The kernel's default is 1024.
+        "${pkgs.procps}/bin/sysctl -q -w kernel.sched_util_clamp_min_rt_default=0"
+      ];
+    };
+  };
   environment.etc."NetworkManager/conf.d/80-aurora-neo-mt7932.conf".source =
     "${pkgs.aurora-neo-platform-config}/lib/NetworkManager/conf.d/80-aurora-neo-mt7932.conf";
   # The MacBook Neo trackpad quirk (it matches only the J700 device tree).
