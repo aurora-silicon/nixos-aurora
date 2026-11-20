@@ -138,7 +138,7 @@ sensor_down() {
 
 # Why a match's xART write is refused, from the diag attributes.
 blocked_reason() {
-    optout="To match anyway, set 'options apple_sep xart_guard=0' in /etc/modprobe.d/ and reboot; the enclave may then rewrite session records another OS on this Mac (macOS) created, see XART-SAFETY.md"
+    optout="To match anyway, set 'options apple_sep xart_guard=0' in a file of its own, such as /etc/modprobe.d/aurora-sep-guard.conf, and reboot; the enclave may then rewrite session records another OS on this Mac (macOS) created, see XART-SAFETY.md"
     refusals=$(attr xart_guard_refusals)
     if [ "$(attr xart)" = disabled ]; then
         echo "xART writes are disabled (xart_writes=0, or the gigalocker did not validate for writing), and a match must save state there"

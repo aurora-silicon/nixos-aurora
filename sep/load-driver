@@ -1,8 +1,11 @@
 #!/bin/sh
 set -eu
 
-keybag=/var/lib/aurora-sep-keybag.bin
-refkey=/var/lib/aurora-sep-refkey.bin
+# Prefix for the /proc, /etc, /run, /sys and /var/lib paths below, for tests.
+root=${AURORA_SEP_ROOT:-}
+
+keybag=$root/var/lib/aurora-sep-keybag.bin
+refkey=$root/var/lib/aurora-sep-refkey.bin
 devices=${AURORA_SEP_SYSFS:-/sys/bus/platform/devices}
 
 # Seconds to wait for the enclave's bring-up to end. On the J700 the key store
@@ -41,20 +44,59 @@ if [ "${AURORA_SEP_SESSION:-0}" != 1 ]; then
     exec keyctl session aurora-sep-load env AURORA_SEP_SESSION=1 "$0" "$@"
 fi
 
-# Prefix for the /proc, /etc, /run and /sys paths below, for tests.
-root=${AURORA_SEP_ROOT:-}
-
 # The M5 Pro and Max (T6050) keep SEP writes off unless the owner opts in.
 # xART is shared with macOS, and the paths that write it (keybag
 # provisioning, Touch ID enrolment) have had no trial on a T6050; every M5
 # Pro gate ran read-only. /etc/modprobe.d/aurora-sep.conf is the owner's
-# choice, here as on every Mac; see XART-SAFETY.md.
+# choice, here as on every Mac; on a T6050 it must set both parameters.
+# See XART-SAFETY.md.
 read_only='xart_writes=0 provision_keybag=0'
 owner_options=$root/etc/modprobe.d/aurora-sep.conf
 run_options=$root/run/modprobe.d/aurora-sep.conf
+# Set when the options in force on a T6050 provision no keybag.
+no_provisioning=false
 
 t6050() {
     tr '\0' '\n' 2>/dev/null <"$root/proc/device-tree/compatible" | grep -qx 'apple,t6050'
+}
+
+# The xart_writes and provision_keybag words modprobe will give apple_sep,
+# from modprobe.d and the kernel command line, sorted and space-separated.
+# Names are read as the kernel reads them ('-' as '_'); a bare name stays.
+given_options() {
+    modprobe -c 2>/dev/null | grep -E '^options apple[-_]sep ' | tr -s ' \t' '\n\n' |
+        while IFS= read -r word; do
+            name=$(printf '%s\n' "${word%%=*}" | tr - _)
+            case "$name=$word" in
+            xart_writes=*=* | provision_keybag=*=*) echo "$name=${word#*=}" ;;
+            xart_writes=* | provision_keybag=*) echo "$name" ;;
+            esac
+        done | sort | tr '\n' ' '
+}
+
+# On a T6050, what apple_sep will get must be each parameter once, 0 or 1,
+# with provision_keybag=1 only beside xart_writes=1; with $1, exactly that.
+# A second value makes the kernel refuse the driver; a missing one leaves
+# the kernel's default, which turns writes on. Sets $given.
+check_options() {
+    given=$(given_options)
+    given=${given% }
+    case "$given" in
+    'provision_keybag=0 xart_writes=0' | 'provision_keybag=0 xart_writes=1' | 'provision_keybag=1 xart_writes=1')
+        if [ -z "${1:-}" ] || [ "$given" = "$1" ]; then
+            case "$given" in
+            provision_keybag=0*) no_provisioning=true ;;
+            esac
+            return 0
+        fi
+        ;;
+    esac
+    if [ -n "${1:-}" ]; then
+        log "modprobe would give apple_sep '$given', not '$read_only'; not loading it"
+    else
+        log "on this Mac (T6050), $owner_options must set apple_sep's xart_writes and provision_keybag once each, to 0 or 1 (provision_keybag=1 needs xart_writes=1), but modprobe would give '$given'. Other apple_sep options go in a file of another name; see XART-SAFETY.md"
+    fi
+    return 1
 }
 
 # Stand in for the packaged defaults for this boot. kmod takes each
@@ -70,15 +112,32 @@ set_read_only() {
         log "could not write $run_options; not loading apple_sep, whose defaults turn SEP writes on"
         return 1
     fi
-    # What modprobe will pass, the kernel command line's apple_sep.* included.
-    # If kmod did not take the file, or something else sets these, stop here.
-    given=$(modprobe -c 2>/dev/null | grep '^options apple_sep ' | tr -s ' \t' '\n\n' |
-        grep -E '^(xart_writes|provision_keybag)=' | sort | tr '\n' ' ')
-    if [ "$given" != 'provision_keybag=0 xart_writes=0 ' ]; then
-        log "modprobe would give apple_sep '${given% }', not '$read_only'; not loading it"
-        return 1
-    fi
+    # If kmod did not take the file, or something else (the kernel command
+    # line included) sets these too, stop here.
+    check_options 'provision_keybag=0 xart_writes=0' || return 1
     log "SEP writes are off by default on this Mac (T6050): apple_sep loads with $read_only, so no keybag is provisioned and Touch ID cannot enrol. To opt in, see XART-SAFETY.md"
+}
+
+# apple_sep loaded before this ran (by hand, or this is a restart): only the
+# driver can say how. Its diag/policy names the options it took.
+loaded_read_only() {
+    policy=
+    for f in "$devices"/*.sep/diag/policy; do
+        [ -r "$f" ] && read -r policy <"$f" && break
+    done
+    case " $policy " in
+    *" xart_writes=0 "*)
+        case " $policy " in
+        *" provision_keybag=0 "*)
+            no_provisioning=true
+            log "apple_sep was already loaded, read-only ($read_only)"
+            return 0
+            ;;
+        esac
+        ;;
+    esac
+    log "apple_sep was loaded before aurora-sep-load on this Mac (T6050), whose SEP writes are off by default, and its diag/policy reads '${policy:-nothing}'; reboot to load it read-only"
+    return 1
 }
 
 # Root unlocked by the Secure Enclave: the initrd loaded the driver in its
@@ -88,11 +147,20 @@ set_read_only() {
 # boot, so the driver cannot be loaded a second time.
 case "$(cat "$root/sys/module/apple_sep/parameters/keystore_only" 2>/dev/null)" in
 1 | 2 | Y)
+    if t6050 && [ -e "$owner_options" ]; then
+        # The owner's file must hold, as for a load; the initrd carries the
+        # copy it was built with.
+        if ! check_options; then
+            log "not finishing the attach the initrd started"
+            exit 1
+        fi
+    fi
     if t6050 && [ ! -e "$owner_options" ]; then
         # The initrd chose the driver's options, not the read-only default
         # above. The key-store-only phase writes nothing to xART here (the
         # T6050's xART guard), but finishing the attach would open it for
-        # writing if those options allow it.
+        # writing, and provision a keybag, if those options allow it.
+        no_provisioning=true
         log "the initrd loaded apple_sep with options this Mac's (T6050) read-only default did not set, so its attach stays unfinished: the key store works, Touch ID stays off. See XART-SAFETY.md"
     else
         attached=false
@@ -114,7 +182,13 @@ case "$(cat "$root/sys/module/apple_sep/parameters/keystore_only" 2>/dev/null)" 
 *)
     if t6050; then
         if [ -e "$owner_options" ]; then
-            log "this Mac (T6050) keeps SEP writes off by default; $owner_options sets apple_sep's options instead"
+            if ! check_options; then
+                log "not loading apple_sep"
+                exit 1
+            fi
+            log "this Mac (T6050) keeps SEP writes off by default; $owner_options sets apple_sep's options instead ($given)"
+        elif [ -e "$root/sys/module/apple_sep" ]; then
+            loaded_read_only || exit 1
         else
             set_read_only || exit 1
         fi
@@ -136,6 +210,15 @@ for d in "$devices"/*.sep; do
 done
 if [ "$sep_device" != true ]; then
     log "the kernel enabled no SEP on this Mac; nothing to wait for"
+    exit 0
+fi
+
+# Trusted keys are sealed under the identity keybag, and while provisioning
+# is off (the T6050 default) none appears. So there is nothing to wait for,
+# and nothing has failed: aurora-sep-ready then finds no keybag and reports
+# Touch ID as not set up.
+if [ "$no_provisioning" = true ] && [ ! -s "$keybag" ]; then
+    log "this Mac (T6050) provisions no identity keybag while SEP writes are off, and it has none, so SEP trusted keys and Touch ID stay off; see XART-SAFETY.md"
     exit 0
 fi
 

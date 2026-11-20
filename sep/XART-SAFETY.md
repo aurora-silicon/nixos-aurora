@@ -21,7 +21,9 @@ have had no trial on a T6050; every M5 Pro gate ran read-only. So on a
 T6050, by default:
 
 - no Linux identity keybag is provisioned, so the SEP seals no trusted keys
-  and no disk can be enrolled for SEP unlock;
+  and no disk can be enrolled for SEP unlock; `aurora-sep-load` says so and
+  ends without a failure, and `aurora-sep-ready` reports Touch ID as not set
+  up;
 - Touch ID cannot enrol or verify (`diag/xart` reads `disabled`);
 - nothing in the gigalocker changes, and macOS keeps its Touch ID and keybag
   state as it was.
@@ -29,8 +31,10 @@ T6050, by default:
 At every boot `aurora-sep-load` writes these options to
 `/run/modprobe.d/aurora-sep.conf`, which stands in for the packaged
 defaults of the same name, checks that `modprobe -c` gives the driver
-exactly these values, and does not load it otherwise. To see what the
-driver took, read `/sys/bus/platform/devices/*.sep/diag/policy`
+exactly these values, and does not load it otherwise (the kernel command
+line counts: `apple_sep.*` there gives a parameter a second value). If the
+driver was loaded before `aurora-sep-load` ran, it goes on only when the
+driver says it took these values. To see what the driver took, read `/sys/bus/platform/devices/*.sep/diag/policy`
 (`xart_writes=0 provision_keybag=0`); these parameters are not listed in
 `/sys/module/apple_sep/parameters`.
 
@@ -44,13 +48,22 @@ and reboot. On NixOS, set
 `boot.extraModprobeConfig`) and switch. The name matters: the file replaces
 the defaults and the read-only file by name, while the kernel refuses a
 second value of an `apple_sep` parameter and then does not load the driver,
-so the same line in a file of another name leaves the SEP off. Remove the
+so the same line in a file of another name leaves the SEP off.
+
+On a T6050 that file must set both `xart_writes` and `provision_keybag`,
+once each, to 0 or 1 (`provision_keybag=1` needs `xart_writes=1`). Anything
+else, an empty file or one with only other options included, would leave a
+parameter at the kernel's default, which turns writes on, so
+`aurora-sep-load` then does not load the driver and logs why. Other
+`apple_sep` options, such as `xart_guard=0`, go on the same line beside both,
+or in a file of their own such as `/etc/modprobe.d/aurora-sep-guard.conf`,
+which leaves the read-only default in place. Remove the
 file and reboot to go back to read-only; what the enclave wrote meanwhile
 stays in the gigalocker (`aurora-xart status`). When the initrd unlocks a
 disk with the SEP it loads the driver with the options it carries, so
-rebuild it after changing the file. On a T6050 without the file,
-`aurora-sep-load` does not finish an attach the initrd started: the key
-store works and Touch ID stays off.
+rebuild it after changing the file. On a T6050, `aurora-sep-load` finishes
+an attach the initrd started only when the file sets both options as above;
+otherwise the key store works and Touch ID stays off.
 
 ## Other OSes' records: `xart_guard`
 
@@ -137,7 +150,8 @@ A refusal fails closed: the enclave's request fails, no record changes, and
 the kernel log names the refused kind. What to do depends on the case:
 
 - A Mac set up with the guard off: set
-  `options apple_sep xart_guard=0` in `/etc/modprobe.d/` and reboot. Do it
+  `options apple_sep xart_guard=0` in a file of its own, such as
+  `/etc/modprobe.d/aurora-sep-guard.conf`, and reboot. Do it
   only once the rewrite of the shared, pre-Linux record has been accepted for
   that Mac (see the next section), and treat macOS Touch ID as unverified
   until it has been checked there.
