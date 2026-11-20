@@ -4,8 +4,12 @@
 
 Kernel packages declare the DT ABI generation their trees use and require.
 An older retained generation cannot boot with a newer shared tree generation.
+
+Stage 2 is written only to the file this boot shows Stage 1 loads, and never
+with an aura older than the running Stage 2 (fedora-aurora#452).
 """
 import argparse
+import functools
 import glob
 import fnmatch
 import gzip
@@ -25,6 +29,52 @@ class Refused(RuntimeError):
     pass
 
 
+# aura's version tags (aura's version.sh): its VERSION, then -g<commit> off a
+# release tag and -dirty. A point release such as 1.0.0b13.1 follows its beta.
+AURA_TAG = re.compile(r'(?:aura[- v]?)?v?(\d+)\.(\d+)\.(\d+)(?:b(\d+))?(?:\.(\d+))?'
+                      r'(?:-(?:[0-9]+-)?g[0-9a-f]+)?(?:-dirty)?')
+TRIAL_STAGE1 = (1, 0, 0, 0, 4, 0)       # aura-try
+RECORDING_STAGE1 = (1, 0, 0, 0, 12, 0)  # records the image it loads (aura secboot.c)
+
+
+def aura_release(version, aura=False):
+    """An aura release as a tuple that sorts as releases do, or None.
+
+    1.0.0b13 < 1.0.0b13.1 < 1.0.0 < 1.0.1b1. The build (-g<commit>, -dirty) is
+    left out: two builds of one release have no order anyone can read. Unless
+    `aura` says the version is aura's, one without a beta number counts only
+    when it starts with aura or 1.0.0: Asahi's m1n1 (1.4.x, 1.6.1) uses other
+    numbers for other code.
+    """
+    match = AURA_TAG.fullmatch(version or '')
+    if not match or (match[4] is None and not aura and
+                     not version.startswith(('aura', '1.0.0', 'v1.0.0'))):
+        return None
+    major, minor, patch = map(int, match.group(1, 2, 3))
+    beta = match[4]
+    return (major, minor, patch, 0 if beta is not None else 1, int(beta or 0), int(match[5] or 0))
+
+
+def aura_tag(image):
+    """The version an aura image was built as: the text after its ##aura_ver## marker (aura's main.c)."""
+    start = image.find(b'##aura_ver##')
+    if start < 0:
+        return None
+    start += len(b'##aura_ver##')
+    end = image.find(b'\0', start, start + 129)
+    tag = image[start:end] if end >= 0 else b''
+    return tag.decode('ascii') if re.fullmatch(rb'[A-Za-z0-9._+-]+', tag) else None
+
+
+def loaded_digest(image):
+    """SHA-256 of what a loading aura stage measures: the image before its aura_sig trailer, if any."""
+    if len(image) >= 16 and image[-8:] == b'AURSIGT1':
+        offset = int.from_bytes(image[-16:-8], 'little')
+        if offset < len(image) - 16 and image[offset:offset + 8] == b'aura_sig':
+            image = image[:offset]
+    return hashlib.sha256(image).hexdigest()
+
+
 class Tree(dict):
     def __init__(self):
         super().__init__()
@@ -34,6 +84,37 @@ class Tree(dict):
         if board is None:
             return dict(self)
         return {name: data for name, data in self.items() if board in self.boards[name]}
+
+
+# FDT structure block tokens
+FDT_BEGIN_NODE, FDT_END_NODE, FDT_PROP, FDT_NOP, FDT_END = 1, 2, 3, 4, 9
+
+
+def dtb_nodes(blob):
+    """Every node path in a validated FDT, spelled exactly.
+
+    fdtget resolves a component without a unit address, such as /soc, to the
+    first soc@... sibling. T6050 trees have soc@200000000, soc@2308000000 and
+    soc, so a node under the plain soc looked missing.
+    """
+    offset = int.from_bytes(blob[8:12], 'big')
+    nodes, stack = set(), []
+    while True:
+        token = int.from_bytes(blob[offset:offset + 4], 'big')
+        offset += 4
+        if token == FDT_BEGIN_NODE:
+            end = blob.index(b'\0', offset)
+            stack.append(blob[offset:end].decode())
+            nodes.add('/' + '/'.join(stack[1:]))
+            offset = (end + 4) & ~3
+        elif token == FDT_END_NODE:
+            stack.pop()
+        elif token == FDT_PROP:
+            offset = (offset + 8 + int.from_bytes(blob[offset:offset + 4], 'big') + 3) & ~3
+        elif token == FDT_END:
+            return nodes
+        elif token != FDT_NOP:
+            raise Refused('invalid Stage 2 DTB structure')
 
 
 def sync_dir(path):
@@ -62,12 +143,88 @@ def replace_file(path, data):
         staged.unlink(missing_ok=True)
 
 
+def grub_vercmp(a, b):
+    """GRUB blscfg's copy of rpm's version comparison: 1 when a is newer, -1 when b is."""
+    def kind(c, test):
+        return c.isascii() and test(c)
+    if a == b:
+        return 0
+    i = j = 0
+    while i < len(a) or j < len(b):
+        while i < len(a) and not kind(a[i], str.isalnum) and a[i] not in '~+':
+            i += 1
+        while j < len(b) and not kind(b[j], str.isalnum) and b[j] not in '~+':
+            j += 1
+        one, two = a[i:i + 1], b[j:j + 1]
+        if '~' in (one, two):
+            if one != '~':
+                return 1
+            if two != '~':
+                return -1
+            i, j = i + 1, j + 1
+            continue
+        if '+' in (one, two):
+            if not one:
+                return -1
+            if not two:
+                return 1
+            if one != '+':
+                return 1
+            if two != '+':
+                return -1
+            i, j = i + 1, j + 1
+            continue
+        if not (one and two):
+            break
+        numeric = kind(one, str.isdigit)
+        test = str.isdigit if numeric else str.isalpha
+        end1, end2 = i, j
+        while end1 < len(a) and kind(a[end1], test):
+            end1 += 1
+        while end2 < len(b) and kind(b[end2], test):
+            end2 += 1
+        first, second = a[i:end1], b[j:end2]
+        if not second:
+            # Numeric segments are newer than alphabetic ones.
+            return 1 if numeric else -1
+        if numeric:
+            first, second = first.lstrip('0'), second.lstrip('0')
+            if len(first) != len(second):
+                return 1 if len(first) > len(second) else -1
+        if first != second:
+            return 1 if first > second else -1
+        i, j = end1, end2
+    if i >= len(a) and j >= len(b):
+        return 0
+    return -1 if i >= len(a) else 1
+
+
+def grub_entry_cmp(a, b):
+    """GRUB's order of two BLS entry ids: name, version and release, split at the last two dashes."""
+    def split(value):
+        rest, dash, release = value.rpartition('-')
+        if not dash:
+            rest, release = value, None
+        name, dash, version = rest.rpartition('-')
+        if not dash:
+            name, version = rest, None
+        if version is None:
+            version, release = release, None
+        return name, version or '', release or ''
+    for first, second in zip(split(a), split(b)):
+        result = grub_vercmp(first, second)
+        if result:
+            return result
+    return 0
+
+
 class Update:
     def __init__(self, root=Path('/'), env=None):
         self.root = Path(root)
         self.env = os.environ if env is None else env
         self.action = self.env.get('AURORA_KERNEL_ACTION', 'refresh')
         self.version = self.env.get('AURORA_KERNEL_VERSION', '')
+        self.held = None  # Why this run left Stage 2 as it is, once it has.
         if self.action not in ('refresh', 'add', 'remove'):
             raise Refused('unknown kernel action')
         if self.action != 'refresh':
@@ -119,8 +276,7 @@ class Update:
         # BLS entries can retain kernels which no longer have modules. Those
         # must not silently disappear from the compatibility check.
         for p in self.path('/boot/loader/entries').glob('*.conf'):
-            fields = dict(line.split(None, 1) for line in p.read_text().splitlines()
-                          if len(line.split(None, 1)) == 2 and not line.startswith('#'))
+            fields = self.bls_fields(p)
             version = fields.get('version')
             if version:
                 self.validate_version(version)
@@ -137,6 +293,41 @@ class Update:
         if self.action == 'remove':
             images.pop(self.version, None)
         return images
+
+    @staticmethod
+    def bls_fields(path):
+        return dict(line.split(None, 1) for line in path.read_text().splitlines()
+                    if len(line.split(None, 1)) == 2 and not line.startswith('#'))
+
+    def machine_id(self):
+        machine = self.env.get('KERNEL_INSTALL_MACHINE_ID', '')
+        path = self.path('/etc/machine-id')
+        if not machine and path.is_file():
+            machine = path.read_text().strip()
+        return machine
+
+    def boot_menu(self, images):
+        """GRUB's BLS menu as (id, version, title), in the order GRUB lists it.
+
+        blscfg sorts entries by id, newest first, comparing as rpm does.
+        kernel-install writes an added kernel's entry after this hook. With
+        no entries at all, every kernel counts as one.
+        """
+        menu = {}
+        for p in self.path('/boot/loader/entries').glob('*.conf'):
+            fields = self.bls_fields(p)
+            version = fields.get('version', '').strip()
+            if version in images and fields.get('linux', '').strip():
+                menu[p.name.removesuffix('.conf')] = (version, fields.get('title', '').strip())
+        machine = self.machine_id()
+        def entry(version):
+            return f'{machine}-{version}' if machine else version
+        if not menu:
+            menu = {entry(version): (version, '') for version in images}
+        elif self.action == 'add' and self.version not in (v for v, _ in menu.values()):
+            menu[entry(self.version)] = (self.version, '')
+        order = sorted(menu, key=functools.cmp_to_key(grub_entry_cmp), reverse=True)
+        return [(name, *menu[name]) for name in order]
 
     def entry_image_gone(self, fields):
         """True when a BLS entry names a kernel that exists nowhere GRUB looks.
@@ -239,34 +430,30 @@ class Update:
                 return entry, 'saved_entry'
         return None
 
-    def default_kernel(self, images, versions):
-        """The installed kernel GRUB boots by default, or None if unknown."""
+    def default_kernel(self, images, menu):
+        """The installed kernel GRUB boots by default, or None if it boots its first entry."""
         default = self.grub_default()
         if not default:
             return None
         entry, origin = default
         if re.fullmatch(r'\d+', entry):
-            # BLS entries are listed newest first.
             index = int(entry)
-            return versions[-1 - index] if index < len(versions) else None
-        bls = self.path(f'/boot/loader/entries/{entry}.conf')
-        if '/' not in entry and bls.is_file():
-            for line in bls.read_text().splitlines():
-                key, _, value = line.partition(' ')
-                if key == 'version' and value.strip() in images:
-                    return value.strip()
+            return menu[index][1] if index < len(menu) else None
+        for name, version, title in menu:
+            if entry == name or (title and entry == title):
+                return version
         # BLS ids are <machine-id>-<version>; hand-written menu entries in
         # custom.cfg commonly end in the version too.
         matches = [v for v in images if entry == v or entry.endswith('-' + v)]
         if matches:
             return max(matches, key=len)
         print(f'update-m1n1: GRUB default {entry!r} ({origin}) is not an installed kernel; '
-              'using the newest kernel, as GRUB does', file=sys.stderr)
+              f'GRUB boots its first entry, kernel {menu[0][1]}', file=sys.stderr)
         return None
 
-    def select_kernel(self, images, versions):
-        newest = versions[-1]
-        default = self.default_kernel(images, versions)
+    def select_kernel(self, images, menu):
+        newest = menu[0][1]
+        default = self.default_kernel(images, menu)
         if self.action == 'add':
             pinned = self.grub_default()
             kernel = self.shell_assignments(self.path('/etc/sysconfig/kernel'))
@@ -288,9 +475,7 @@ class Update:
         images = self.kernel_images()
         if not images:
             raise Refused('no remaining installed kernels; preserving Stage 2 and /boot/dtb')
-        # Match Fedora's version ordering, including its release suffixes.
-        versions = subprocess.check_output(['sort', '-V'], input='\n'.join(images), text=True).splitlines()
-        selected = self.select_kernel(images, versions)
+        selected = self.select_kernel(images, self.boot_menu(images))
         source = self.dtb_dir(selected)
         configured = self.env.get('DTBS', '/boot/dtb')
         if not configured.strip():
@@ -366,20 +551,140 @@ class Update:
         path = self.path('/proc/device-tree/chosen') / name
         return path.read_bytes().rstrip(b'\0').decode('ascii') if path.exists() else ''
 
+    def stage1_version(self):
+        """This boot's Stage 1 version, and whether the property names aura's.
+
+        The aura properties are authoritative when present; aurora,aura-* is
+        aura#313's name for asahi,m1n1-*, which Stage 2 writes too for a while.
+        """
+        for name in ('aura,stage1-version', 'aurora,aura-stage1-version'):
+            if self.chosen(name):
+                return self.chosen(name), True
+        return self.chosen('asahi,m1n1-stage1-version'), False
+
+    def stage2_version(self):
+        """The running Stage 2's version (its ##aura_ver## tag), and whether the property names aura's."""
+        if self.chosen('aurora,aura-stage2-version'):
+            return self.chosen('aurora,aura-stage2-version'), True
+        return self.chosen('asahi,m1n1-stage2-version'), False
+
     def supports_trial(self):
-        # The aura property is authoritative when present. A stock m1n1
-        # version (such as 1.6.1) does not imply aura-try support.
+        # A stock m1n1 version (such as 1.6.1) does not imply aura-try support.
         if self.board() is None:
             return False
-        aura_version = self.chosen('aura,stage1-version')
-        version = aura_version or self.chosen('asahi,m1n1-stage1-version')
-        match = re.fullmatch(r'(?:aura[- v]?)?v?(\d+)\.(\d+)\.(\d+)(?:b(\d+))?(?:-(?:[0-9]+-)?g[0-9a-f]+)?(?:-dirty)?', version)
-        if not match or (match[4] is None and not aura_version and
-                         not version.startswith(('aura', '1.0.0', 'v1.0.0'))):
-            return False
-        release = tuple(map(int, match.group(1, 2, 3)))
-        return release > (1, 0, 0) or (release == (1, 0, 0) and
-                                                   (match[4] is None or int(match[4]) >= 4))
+        release = aura_release(*self.stage1_version())
+        return release is not None and release >= TRIAL_STAGE1
+
+    def stage1_loaded(self):
+        """The SHA-256 digests this boot's Stage 1 recorded for the image it loaded.
+
+        A Stage 1 from aura 1.0.0b12 on measures its next stage and passes the
+        entry on as chosen.aurora,measure-N. A 1.0.0b12 or later Stage 2 moves
+        it into /chosen/aurora,boot-security; an older one leaves the line as a
+        property (aura's secboot.c). An entry without a usable digest is ''.
+        """
+        chosen = self.path('/proc/device-tree/chosen')
+        digests = set()
+        for entry in sorted((chosen / 'aurora,boot-security').glob('measurement@*')):
+            fields = {name: (entry / name).read_bytes().rstrip(b'\0') if (entry / name).is_file() else b''
+                      for name in ('stage', 'component')}
+            if fields == {'stage': b'stage1', 'component': b'next-stage'}:
+                digest = (entry / 'sha256').read_bytes() if (entry / 'sha256').is_file() else b''
+                digests.add(digest.hex() if len(digest) == 32 and any(digest) else '')
+        for line in sorted(chosen.glob('aurora,measure-*')):
+            fields = line.read_bytes().rstrip(b'\0').split(b';')
+            if len(fields) == 7 and fields[0] == b'stage1' and fields[2] == b'next-stage':
+                digest = fields[6]
+                digests.add(digest.decode() if re.fullmatch(rb'[0-9a-f]{64}', digest) and digest.strip(b'0')
+                            else '')
+        return digests
+
+    def esp_relative(self, path):
+        esp = self.env.get('ESP_ROOT')
+        if esp and path.is_relative_to(self.path(esp)):
+            return path.relative_to(self.path(esp)).as_posix()
+        return str(path)
+
+    def esp_images(self, digest):
+        """The ESP files a loading stage measures as `digest`: what Stage 1 loads instead."""
+        esp = self.env.get('ESP_ROOT')
+        if not esp:
+            return []
+        root, found = self.path(esp), []
+        for directory, names, files in os.walk(root):  # Symlinked directories are not followed.
+            names.sort()
+            for name in sorted(files):
+                path = Path(directory) / name
+                try:
+                    if (not path.is_symlink() and path.is_file() and path.stat().st_size <= 256 << 20
+                            and loaded_digest(path.read_bytes()) == digest):
+                        found.append(path.relative_to(root).as_posix())
+                except OSError:
+                    continue
+        return found
+
+    def stage1_hold(self, target):
+        """Why this boot does not show that Stage 1 loads `target`, or None.
+
+        Stage 1 loads the one ESP path in its own config, which Linux cannot
+        read. A Stage 1 from aura 1.0.0b12 on records what it loaded, so the
+        target must be those bytes. An older one that trials (1.0.0b4 on)
+        leaves the version of the Stage 2 it started, which the target must be
+        built as. Older Stage 1s, and versions nothing can read, keep the path
+        aura's installer enrols: m1n1/boot.bin, or m1n1/boot-ctxr.bin from a
+        padded Mach-O Stage 1.
+        """
+        relative = self.esp_relative(target)
+        present = target.is_file() and not target.is_symlink()
+        version, aura = self.stage1_version()
+        release = aura_release(version, aura)
+        digests = self.stage1_loaded()
+        if not digests:
+            if release is not None and release >= RECORDING_STAGE1:
+                return (f'Stage 1 {version} records the Stage 2 it loads, but this boot has no such record, '
+                        f'so it cannot be shown to load {relative}')
+            if release is None or release < TRIAL_STAGE1:
+                return None
+            if not present:
+                return f'{relative} does not exist, so Stage 1 {version} loads another file'
+            running, built = self.stage2_version()[0], aura_tag(target.read_bytes())
+            if running and built and running != built:
+                return (f'Stage 2 {running} booted, but {relative} holds aura {built}, '
+                        f'so Stage 1 {version} loads another file')
+            return None
+        if len(digests) != 1 or '' in digests:
+            return (f"this boot's record of the Stage 2 that Stage 1 loaded is unreadable or ambiguous, "
+                    f'so it cannot be shown to load {relative}')
+        digest, = digests
+        if present and loaded_digest(target.read_bytes()) == digest:
+            return None
+        trial = self.chosen('aurora,trial')
+        if trial:
+            return f'this boot is an aura-try trial of {trial}, so it cannot show that Stage 1 otherwise loads {relative}'
+        found = self.esp_images(digest)
+        where = (' or '.join(found) if found
+                 else f'an image (sha256 {digest[:16]}...) that matches no file on this ESP')
+        return f'Stage 1 loads {where}, not {relative}'
+
+    def downgrade_hold(self, payload):
+        """Why `payload` would take the running Stage 2 back to an older aura, or None."""
+        if self.env.get('AURORA_STAGE2_ALLOW_DOWNGRADE') == '1':
+            return None
+        running, aura = self.stage2_version()
+        built = aura_tag(payload)
+        old, new = aura_release(running, aura), aura_release(built or '', aura=True)
+        if old is None or new is None or new >= old:
+            return None
+        return (f"the candidate's aura {built} is older than the running Stage 2 {running} "
+                '(AURORA_STAGE2_ALLOW_DOWNGRADE=1 allows it for one run)')
+
+    def stage2_hold(self, target, payload):
+        """Why `payload` must not be written for `target` on this boot, or None."""
+        return self.stage1_hold(target) or self.downgrade_hold(payload)
+
+    def keep(self, reason):
+        self.held = reason
+        print(f'update-m1n1: {reason}: not touching the boot chain; the live Stage 2 is kept', file=sys.stderr)
 
     def check_esp(self):
         device = self.env.get('ESP_DEVICE', '')
@@ -484,14 +789,14 @@ class Update:
                 compatible = subprocess.check_output(
                     ['fdtget', '-t', 's', stream.name, '/', 'compatible'], text=True).split()
                 if board in compatible:
+                    nodes = dtb_nodes(blob)
                     for alias in required:
                         found = subprocess.run(['fdtget', '-t', 's', stream.name, '/aliases', alias],
                                                capture_output=True, text=True)
                         node = found.stdout.strip()
                         if found.returncode or not node.startswith('/'):
                             raise Refused(f'{board} DTB lacks display alias {alias}')
-                        exists = subprocess.run(['fdtget', '-p', stream.name, node], capture_output=True)
-                        if exists.returncode:
+                        if node not in nodes:
                             raise Refused(f'{board} DTB display alias {alias} has no node')
                     matched = True
             offset += size
@@ -499,14 +804,88 @@ class Update:
         if not matched or not count or payload[offset:offset + 2] != b'\x1f\x8b':
             raise Refused(f'Stage 2 lacks complete DTBs for {board} or compressed U-Boot')
 
+    def armed_trial(self, candidate, receipt, relative):
+        """The receipt of an armed trial when this updater armed it, else None."""
+        try:
+            details = json.loads(receipt.read_text())
+            digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        except (OSError, ValueError):
+            return None
+        if (not isinstance(details, dict) or details.get('path') != relative
+                or details.get('sha256') != digest):
+            return None
+        _, recorded = self.attempt(digest)
+        return details if recorded == details else None
+
+    def withdraw_trial(self, paths, details, reason):
+        """Disarm a trial that was never booted. Its candidate may be armed again."""
+        _, candidate, receipt, marker, _ = paths
+        # Removing the marker disarms it; an interruption after that only
+        # leaves an attempt record, which keeps the candidate from rearming.
+        marker.unlink()
+        sync_dir(marker.parent)
+        self.flush_esp()
+        attempt, recorded = self.attempt(details['sha256'])
+        if recorded == details:
+            attempt.unlink()
+            sync_dir(attempt.parent)
+        receipt.unlink(missing_ok=True)
+        candidate.unlink(missing_ok=True)
+        sync_dir(candidate.parent)
+        self.flush_esp()
+        print(f'Stage 2 trial for kernel {details.get("kernel")} withdrawn before it was booted: '
+              f'{reason}; live image kept')
+
+    def withdraw_stale_trial(self, selected):
+        """The selected Stage 2 is live already, so an armed trial would only replace it."""
+        esp = self.env.get('ESP_ROOT')
+        if not esp or not (self.path(esp) / 'aura-try').exists():
+            return
+        try:
+            paths = self.trial_paths()
+        except Refused as error:
+            print(f'update-m1n1: not checking the armed trial: {error}', file=sys.stderr)
+            return
+        _, candidate, receipt, marker, relative = paths
+        if self.marker(marker) != ('armed', relative):
+            return
+        armed = self.armed_trial(candidate, receipt, relative)
+        if armed is None:
+            print(f'update-m1n1: leaving the armed trial at {relative}: this updater did not arm it',
+                  file=sys.stderr)
+            return
+        self.withdraw_trial(paths, armed, f'the Stage 2 for kernel {selected} is already live')
+
     def stage_trial(self, selected, payload):
-        target, candidate, receipt, marker, relative = self.trial_paths()
+        paths = self.trial_paths()
+        target, candidate, receipt, marker, relative = paths
         current = self.marker(marker)
         if self.trial_running(current):
             raise Refused('a trial is running; preserve its candidate until the next boot')
         if current and current[1] != relative:
             raise Refused('another aura-try owns the ESP marker')
         digest = hashlib.sha256(payload).hexdigest()
+        # A trial at a file Stage 1 does not load boots once and commits where nothing reads it.
+        unloaded = self.stage1_hold(target)
+        hold = unloaded or self.downgrade_hold(payload)
+        if current and current[0] == 'armed':
+            armed = self.armed_trial(candidate, receipt, relative)
+            stale = None
+            if armed and armed.get('kernel') != selected:
+                # It pairs another kernel's trees with the kernel GRUB boots.
+                stale = f'GRUB boots kernel {selected}'
+            elif armed and hold:
+                # Armed before these checks, or before a newer Stage 2 ran: it never booted.
+                stale = unloaded or self.downgrade_hold(candidate.read_bytes())
+            if stale:
+                self.withdraw_trial(paths, armed, stale)
+                current = None
+            elif armed and armed['sha256'] == digest:
+                print(f'Stage 2 trial for kernel {selected} already armed at {relative}, sha256 {digest}')
+                return
+        if hold:
+            self.keep(hold)
+            return
         attempt, recorded = self.attempt(digest)
         # Only a committed candidate may be tried again, e.g. after a package
         # revert. One that fell back or was interrupted is never rearmed.
@@ -703,8 +1082,13 @@ class Update:
                 if staged.exists():
                     shutil.rmtree(staged)
         previous = target.read_bytes() if target.exists() else None
-        if previous is not None and previous != payload and self.supports_trial():
-            self.stage_trial(selected, payload)
+        if previous is not None and self.supports_trial():
+            if previous != payload:
+                self.stage_trial(selected, payload)
+            else:
+                self.withdraw_stale_trial(selected)
+        elif previous != payload and (hold := self.stage2_hold(target, payload)):
+            self.keep(hold)
         elif previous != payload:
             # Finish and sync the candidate before changing even the backup.
             fd, name = tempfile.mkstemp(prefix='.boot.bin.', dir=target.parent)
@@ -730,7 +1114,7 @@ class Update:
             if link.is_symlink():
                 link.unlink()
                 sync_dir(link.parent)
-            print(f'Stage 2 verified at {target}; firmware DT policy retained')
+            print(f'Stage 2 {"left unchanged" if self.held else "verified"} at {target}; firmware DT policy retained')
             return
         if not link.is_symlink() or os.readlink(link) != destination.name:
             fd, name = tempfile.mkstemp(prefix='.dtb-link-', dir=link.parent)
@@ -743,17 +1127,94 @@ class Update:
                 sync_dir(link.parent)
             finally:
                 temporary.unlink(missing_ok=True)
-        print(f'Stage 2 verified at {target}; /boot/dtb -> {destination.name}')
+        print(f'Stage 2 {"left unchanged" if self.held else "verified"} at {target}; /boot/dtb -> {destination.name}')
 
-    def cleanup_remove(self):
-        if self.action != 'remove':
-            raise Refused('erase cleanup requires a remove action')
+    def drop_removed_link(self):
         link = self.path('/boot/dtb')
         if link.is_symlink() and os.readlink(link) in (
                 f'dtb-{self.version}', f'/boot/dtb-{self.version}'):
             link.unlink()
             sync_dir(link.parent)
+
+    def cleanup_remove(self):
+        if self.action != 'remove':
+            raise Refused('erase cleanup requires a remove action')
+        self.drop_removed_link()
         print('Stage 2 refresh deferred; continuing removal of the erased kernel boot files')
+
+    # A removal inside a package transaction cannot tell what GRUB boots next:
+    # the transaction may add kernels after it, the removed one too when it is
+    # reinstalled. It leaves Stage 2 to their add phases and to a refresh once
+    # the transaction ends, both run from RPM file triggers.
+
+    def transaction_record(self):
+        return self.path('/run/update-m1n1/transaction')
+
+    def process_start(self, pid):
+        """A running process's start time, which tells it from a later one with its pid."""
+        try:
+            fields = self.path(f'/proc/{int(pid)}/stat').read_text().rpartition(')')[2].split()
+        except (OSError, ValueError):
+            return None
+        return fields[19] if len(fields) > 19 else None
+
+    def begin_transaction(self):
+        """Record the package transaction that is about to remove kernels."""
+        pid = self.env.get('AURORA_RPM_TRANSACTION_PID', '')
+        start = self.process_start(pid) if re.fullmatch(r'[1-9][0-9]*', pid) and pid != '1' else None
+        if start is None:
+            print('update-m1n1: no package transaction process; kernel removals update Stage 2 at once',
+                  file=sys.stderr)
+            return
+        record = self.transaction_record()
+        record.parent.mkdir(parents=True, exist_ok=True)
+        replace_file(record, (json.dumps({'pid': int(pid), 'start': start, 'deferred': []}) + '\n').encode())
+
+    def transaction(self):
+        """The running package transaction's record, or None. A stale one is dropped."""
+        path = self.transaction_record()
+        try:
+            record = json.loads(path.read_text())
+            live = (isinstance(record, dict) and isinstance(record.get('deferred'), list)
+                    and record.get('start') is not None
+                    and self.process_start(record.get('pid')) == record['start'])
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError, TypeError):
+            live = False
+        if not live:
+            path.unlink(missing_ok=True)
+            return None
+        return record
+
+    def defer_remove(self):
+        """Inside a package transaction, leave this removal's Stage 2 to the transaction."""
+        if self.action != 'remove':
+            raise Refused('deferring requires a remove action')
+        record = self.transaction()
+        if record is None:
+            return False
+        # kernel-install removes /boot/dtb-<version> next.
+        self.drop_removed_link()
+        if self.version not in record['deferred']:
+            record['deferred'].append(self.version)
+        replace_file(self.transaction_record(), (json.dumps(record) + '\n').encode())
+        print(f'update-m1n1: kernel {self.version} removed inside a package transaction; '
+              'Stage 2 follows the kernels it adds and what GRUB boots after it')
+        return True
+
+    def end_transaction(self):
+        """Drop the transaction record. True when its removals left Stage 2 to now."""
+        path = self.transaction_record()
+        try:
+            record = json.loads(path.read_text())
+            due = bool(record['deferred'])
+        except FileNotFoundError:
+            return False
+        except (OSError, ValueError, TypeError, KeyError):
+            due = True  # Unreadable: a refresh is always safe.
+        path.unlink(missing_ok=True)
+        return due
 
 
 def main():
@@ -762,6 +1223,11 @@ def main():
     parser.add_argument('--commit', action='store_true')
     parser.add_argument('--guard', action='store_true')
     parser.add_argument('--cleanup-remove', action='store_true')
+    # Exit 0 when the removal was left to the running package transaction.
+    parser.add_argument('--defer-remove', action='store_true')
+    parser.add_argument('--transaction-begin', action='store_true')
+    # Exit 0 when removals in the finished transaction left Stage 2 to a refresh.
+    parser.add_argument('--transaction-end', action='store_true')
     args = parser.parse_args()
     try:
         update = Update()
@@ -771,6 +1237,12 @@ def main():
             update.commit()
         elif args.cleanup_remove:
             update.cleanup_remove()
+        elif args.defer_remove:
+            return 0 if update.defer_remove() else 1
+        elif args.transaction_begin:
+            update.begin_transaction()
+        elif args.transaction_end:
+            return 0 if update.end_transaction() else 1
         elif args.check:
             update.plan()
         else:
