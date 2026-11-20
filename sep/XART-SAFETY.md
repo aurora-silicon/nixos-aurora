@@ -57,13 +57,27 @@ parameter at the kernel's default, which turns writes on, so
 `aurora-sep-load` then does not load the driver and logs why. Other
 `apple_sep` options, such as `xart_guard=0`, go on the same line beside both,
 or in a file of their own such as `/etc/modprobe.d/aurora-sep-guard.conf`,
-which leaves the read-only default in place. Remove the
-file and reboot to go back to read-only; what the enclave wrote meanwhile
-stays in the gigalocker (`aurora-xart status`). When the initrd unlocks a
-disk with the SEP it loads the driver with the options it carries, so
-rebuild it after changing the file. On a T6050, `aurora-sep-load` finishes
-an attach the initrd started only when the file sets both options as above;
-otherwise the key store works and Touch ID stays off.
+which leaves the read-only default in place. The file must be a regular
+file (or a link to one). modprobe.d has no comments after an option on the
+same line: kmod hands them to the driver, so put a comment on its own line.
+On a T6050 `aurora-sep-load` also refuses, wherever modprobe.d or the kernel
+command line has it, a bare `--` or a `"` in an `apple_sep` option (the
+kernel stops at the first and reads the second as a quote) and any
+`install apple_sep` command, since the driver would then not take the
+options the check sees. Remove the file and reboot to go back to read-only;
+what the enclave wrote meanwhile stays in the gigalocker
+(`aurora-xart status`).
+
+When the initrd unlocks a disk with the SEP, it loads the driver with the
+options it carries: on Fedora and Arch Linux ARM those of the modprobe.d
+files it was built with, on NixOS always the kernel's defaults, which turn
+writes on, since its initrd carries no such file. Finishing that attach on
+the real root reopens the gigalocker with those options, and the driver does
+not report them. So on a T6050 `aurora-sep-load` finishes an attach the
+initrd started only when the file sets both options to 1
+(`xart_writes=1 provision_keybag=1`). With a read-only file, or none, the
+key store works and Touch ID stays off. On Fedora and Arch Linux ARM,
+rebuild the initrd after changing the file.
 
 ## Other OSes' records: `xart_guard`
 

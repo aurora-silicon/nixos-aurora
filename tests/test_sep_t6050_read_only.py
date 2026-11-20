@@ -56,7 +56,31 @@ WRONG_OWNER_FILES = {
     'a duplicate across lines': OWNER_ON + 'options apple_sep xart_writes=1\n',
     'a value other than 0 or 1': 'options apple_sep xart_writes=2 provision_keybag=0\n',
     'a bare name': 'options apple_sep xart_writes provision_keybag=0\n',
+    'a bare name beside a value': 'options apple_sep xart_writes xart_writes=0 provision_keybag=0\n',
     'provisioning without writes': 'options apple_sep xart_writes=0 provision_keybag=1\n',
+    # The kernel stops reading options at a bare '--', and reads '"' as a
+    # quote that can swallow what follows.
+    'a bare --': 'options apple_sep -- xart_writes=0 provision_keybag=0\n',
+    'a quote swallowing both': 'options apple_sep x="y xart_writes=0 provision_keybag=0 "\n',
+    # modprobe.d has no comments after an option: kmod passes them on.
+    'a comment after the options': 'options apple_sep xart_writes=0 provision_keybag=0 # read-only\n',
+}
+
+# Other modprobe.d files (or the owner's path holding something else than a
+# regular file) that would give the driver writes while the options look
+# read-only: each stops the load on a T6050 with no owner file.
+HIDDEN_WRITES = {
+    'a bare -- in another file': {'etc/modprobe.d/00-local.conf': 'options apple_sep --\n'},
+    'an open quote in another file': {'etc/modprobe.d/00-local.conf': 'options apple_sep xart_gaurd="0\n'},
+    'an install command with insmod': {'etc/modprobe.d/00-local.conf':
+        'install apple_sep /usr/bin/insmod /lib/modules/7.3.0/kernel/drivers/soc/apple/apple-sep.ko\n'},
+    'an install command with modprobe': {'etc/modprobe.d/00-local.conf':
+        'install apple_sep /usr/bin/modprobe --ignore-install apple_sep\n'},
+    'an install command found on PATH': {'etc/modprobe.d/00-local.conf':
+        'install apple_sep modprobe --ignore-install apple_sep\n'},
+    'a directory at the owner path': {'etc/modprobe.d/aurora-sep.conf': ('dir', None)},
+    'a link from the owner path to /dev/null': {'etc/modprobe.d/aurora-sep.conf': ('link', '/dev/null')},
+    'a dangling link at the owner path': {'etc/modprobe.d/aurora-sep.conf': ('link', '/nonexistent.conf')},
 }
 
 # -c prints the configuration kmod reads from the test's root, then KCMDLINE
@@ -65,6 +89,8 @@ WRONG_OWNER_FILES = {
 MODPROBE = r'''#!/bin/sh
 CONFIG=
 for d in etc/modprobe.d run/modprobe.d usr/lib/modprobe.d; do
+    # SKIP_RUN: kmod does not read /run (as if SELinux kept it out).
+    [ -n "${SKIP_RUN:-}" ] && [ "$d" = run/modprobe.d ] && continue
     [ -d "$TEST_ROOT/$d" ] && CONFIG="$CONFIG --config=$TEST_ROOT/$d"
 done
 config() {
@@ -126,7 +152,12 @@ class LoadDriverCase(unittest.TestCase):
     def install(self, name, text):
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        if text == ('dir', None):
+            path.mkdir()
+        elif isinstance(text, tuple):
+            path.symlink_to(text[1])
+        else:
+            path.write_text(text)
 
     def mac(self, board='j714s', soc='t6050'):
         self.install('proc/device-tree/compatible', compatible(board, soc))
@@ -253,7 +284,7 @@ class T6050OwnerFileTest(LoadDriverCase):
                 self.setUp()
                 self.mac()
                 self.install('etc/modprobe.d/aurora-sep.conf', text)
-                self.assert_not_loaded(self.run_load_driver(), 'must set', 'not loading apple_sep')
+                self.assert_not_loaded(self.run_load_driver(), 'not loading apple_sep')
 
     def test_other_macs_load_whatever_the_owner_file_says(self):
         self.mac('j815', 't8142')
@@ -272,11 +303,35 @@ class T6050FailClosedTest(LoadDriverCase):
                                "modprobe would give apple_sep 'provision_keybag=0 xart_writes=0 "
                                "xart_writes=1'")
 
+    def test_settings_that_hide_writes_stop_the_load(self):
+        for case, files in HIDDEN_WRITES.items():
+            with self.subTest(case):
+                self.setUp()
+                self.mac()
+                for name, text in files.items():
+                    self.install(name, text)
+                self.assert_not_loaded(self.run_load_driver(), 'not loading apple_sep')
+
+    def test_a_link_from_the_owner_path_to_a_file_is_the_file(self):
+        self.mac()
+        self.install('etc/aurora/sep.conf', OWNER_ON)
+        self.install('etc/modprobe.d/aurora-sep.conf', ('link', '../aurora/sep.conf'))
+        self.assert_loaded_once_with(self.run_load_driver(), WRITES_ON)
+
+    def test_kmod_not_reading_the_read_only_file_stops_the_load(self):
+        self.mac()
+        self.env['SKIP_RUN'] = '1'
+        # What kmod then gives is whatever else it reads: the packaged
+        # defaults, or on NixOS (whose defaults are in /run too) nothing.
+        self.assert_not_loaded(self.run_load_driver(), "not 'xart_writes=0 provision_keybag=0'",
+                               'not loading apple_sep')
+
     def test_the_kernel_command_line_counts(self):
         for files, cmdline, ok in (
                 # The rig's read-only command line, on top of the default.
                 ({}, 'xart_writes=0 provision_keybag=0', False),
                 ({}, 'xart-writes=1', False),
+                ({}, '--', False),
                 ({'aurora-sep.conf': OWNER_ON}, 'xart_writes=1', False),
                 ({}, 'xart_guard=0', True)):
             with self.subTest(cmdline=cmdline, files=files):
@@ -391,7 +446,7 @@ class T6050InitrdAttachTest(LoadDriverCase):
         done, written = self.finish()
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(written, '')
-        self.assertIn('its attach stays unfinished', done.stderr)
+        self.assertIn('the attach the initrd started stays unfinished', done.stderr)
 
     def test_a_t6050_without_a_keybag_then_ends_cleanly(self):
         self.mac()
@@ -408,6 +463,36 @@ class T6050InitrdAttachTest(LoadDriverCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(written, '1\n')
         self.assertIn('finished the attach the initrd started', done.stderr)
+
+    def test_a_read_only_owner_file_leaves_it_unfinished(self):
+        # The initrd's own options may be the kernel's writes-on defaults (on
+        # NixOS they always are), and finishing would reopen xART with them.
+        for text in ('options apple_sep xart_writes=0 provision_keybag=0\n',
+                     'options apple_sep xart_writes=1 provision_keybag=0\n',
+                     'options apple_sep xart_guard=0 xart_writes=0 provision_keybag=0\n'):
+            with self.subTest(text=text):
+                self.setUp()
+                self.mac()
+                self.install('etc/modprobe.d/aurora-sep.conf', text)
+                self.sep_device()
+                done, written = self.finish()
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertEqual(written, '')
+                self.assertIn('only /', done.stderr)
+                self.assertIn('the attach the initrd started stays unfinished', done.stderr)
+                # Nothing to probe without a keybag.
+                self.assertEqual(self.probes(), [])
+
+    def test_something_else_at_the_owner_path_leaves_it_unfinished(self):
+        for text in (('dir', None), ('link', '/dev/null'), ('link', '/nonexistent.conf')):
+            with self.subTest(text=text):
+                self.setUp()
+                self.mac()
+                self.install('etc/modprobe.d/aurora-sep.conf', text)
+                done, written = self.finish()
+                self.assertEqual(done.returncode, 1)
+                self.assertEqual(written, '')
+                self.assertIn('is not a regular file', done.stderr)
 
     def test_a_wrong_owner_file_leaves_it_unfinished(self):
         for case, text in WRONG_OWNER_FILES.items():

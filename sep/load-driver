@@ -60,26 +60,54 @@ t6050() {
     tr '\0' '\n' 2>/dev/null <"$root/proc/device-tree/compatible" | grep -qx 'apple,t6050'
 }
 
-# The xart_writes and provision_keybag words modprobe will give apple_sep,
-# from modprobe.d and the kernel command line, sorted and space-separated.
-# Names are read as the kernel reads them ('-' as '_'); a bare name stays.
-given_options() {
-    modprobe -c 2>/dev/null | grep -E '^options apple[-_]sep ' | tr -s ' \t' '\n\n' |
-        while IFS= read -r word; do
-            name=$(printf '%s\n' "${word%%=*}" | tr - _)
-            case "$name=$word" in
-            xart_writes=*=* | provision_keybag=*=*) echo "$name=${word#*=}" ;;
-            xart_writes=* | provision_keybag=*) echo "$name" ;;
-            esac
-        done | sort | tr '\n' ' '
+# What is at the owner's path: "file" (a regular file, or a link to one),
+# "none", or "other" (a directory, a device, a dangling link), which kmod
+# skips or reads as empty; on a T6050 "other" is refused.
+owner_file() {
+    if [ -f "$owner_options" ]; then
+        echo file
+    elif [ -e "$owner_options" ] || [ -L "$owner_options" ]; then
+        echo other
+    else
+        echo none
+    fi
 }
 
-# On a T6050, what apple_sep will get must be each parameter once, 0 or 1,
-# with provision_keybag=1 only beside xart_writes=1; with $1, exactly that.
-# A second value makes the kernel refuse the driver; a missing one leaves
-# the kernel's default, which turns writes on. Sets $given.
+# On a T6050, what apple_sep will get from modprobe.d and the kernel command
+# line (modprobe -c) must be xart_writes and provision_keybag once each, 0 or
+# 1, with provision_keybag=1 only beside xart_writes=1; with $1, exactly
+# that. A second value makes the kernel refuse the driver, and a missing one
+# leaves the kernel's default, which turns writes on. Names are read as the
+# kernel reads them ('-' as '_'), and a bare name counts. Also refused, since
+# the kernel would read the rest differently or never see it: an install
+# command for apple_sep, a bare '--' (the kernel stops there), and any
+# character in an option but [A-Za-z0-9_.,=-], '"' (a quote) among them.
+# Sets $given.
 check_options() {
-    given=$(given_options)
+    given=
+    config=$(modprobe -c 2>/dev/null | grep -E '^(options|install) apple[-_]sep[[:space:]]') || :
+    install=$(printf '%s\n' "$config" | grep '^install ') || :
+    if [ -n "$install" ]; then
+        log "modprobe.d has an install command for apple_sep, whose options this check cannot see: '$install'"
+        return 1
+    fi
+    words=$(printf '%s\n' "$config" | grep '^options ' | tr -s ' \t' '  ' | cut -d ' ' -f 3- |
+        tr ' ' '\n') || :
+    odd=$({
+        printf '%s\n' "$words" | grep -v -x -E '[A-Za-z0-9_.,=-]*'
+        printf '%s\n' "$words" | grep -x -e '--'
+    } | tr '\n' ' ') || :
+    if [ -n "$odd" ]; then
+        log "modprobe would give apple_sep '${odd% }': the kernel stops at a bare '--' and reads '\"' as a quote, so only options made of A-Z, a-z, 0-9 and _.,=- are taken (modprobe.d has no comments after an option)"
+        return 1
+    fi
+    given=$(printf '%s\n' "$words" | while IFS= read -r word; do
+        name=$(printf '%s\n' "${word%%=*}" | tr - _)
+        case "$name=$word" in
+        xart_writes=*=* | provision_keybag=*=*) echo "$name=${word#*=}" ;;
+        xart_writes=* | provision_keybag=*) echo "$name" ;;
+        esac
+    done | sort | tr '\n' ' ')
     given=${given% }
     case "$given" in
     'provision_keybag=0 xart_writes=0' | 'provision_keybag=0 xart_writes=1' | 'provision_keybag=1 xart_writes=1')
@@ -92,7 +120,7 @@ check_options() {
         ;;
     esac
     if [ -n "${1:-}" ]; then
-        log "modprobe would give apple_sep '$given', not '$read_only'; not loading it"
+        log "modprobe would give apple_sep '$given', not '$read_only'"
     else
         log "on this Mac (T6050), $owner_options must set apple_sep's xart_writes and provision_keybag once each, to 0 or 1 (provision_keybag=1 needs xart_writes=1), but modprobe would give '$given'. Other apple_sep options go in a file of another name; see XART-SAFETY.md"
     fi
@@ -114,7 +142,10 @@ set_read_only() {
     fi
     # If kmod did not take the file, or something else (the kernel command
     # line included) sets these too, stop here.
-    check_options 'provision_keybag=0 xart_writes=0' || return 1
+    if ! check_options 'provision_keybag=0 xart_writes=0'; then
+        log "not loading apple_sep"
+        return 1
+    fi
     log "SEP writes are off by default on this Mac (T6050): apple_sep loads with $read_only, so no keybag is provisioned and Touch ID cannot enrol. To opt in, see XART-SAFETY.md"
 }
 
@@ -140,6 +171,8 @@ loaded_read_only() {
     return 1
 }
 
+not_regular="$owner_options is not a regular file, which kmod would skip or read as empty"
+
 # Root unlocked by the Secure Enclave: the initrd loaded the driver in its
 # key-store-only phase (1, or 2 for a root sealed to a user's password).
 # Finish that attach on the real root; modprobe would do nothing for the
@@ -147,21 +180,38 @@ loaded_read_only() {
 # boot, so the driver cannot be loaded a second time.
 case "$(cat "$root/sys/module/apple_sep/parameters/keystore_only" 2>/dev/null)" in
 1 | 2 | Y)
-    if t6050 && [ -e "$owner_options" ]; then
-        # The owner's file must hold, as for a load; the initrd carries the
-        # copy it was built with.
-        if ! check_options; then
-            log "not finishing the attach the initrd started"
+    finish=true
+    why="the initrd loaded apple_sep with options this Mac's (T6050) read-only default did not set"
+    if t6050; then
+        # The initrd chose the driver's options: on NixOS always the
+        # kernel's defaults (its initrd carries no such modprobe.d file),
+        # elsewhere the files it was built with. The key-store-only phase
+        # writes nothing to xART here (the T6050's xART guard), but finishing
+        # the attach reopens xART with the initrd's xart_writes and
+        # provisions a keybag if its options allow it. The driver reports
+        # the effective state, not those options, and a file read now cannot
+        # lower them. So finish only when the owner's file asks for both.
+        case "$(owner_file)" in
+        file)
+            if ! check_options; then
+                log "not finishing the attach the initrd started"
+                exit 1
+            fi
+            if [ "$given" != 'provision_keybag=1 xart_writes=1' ]; then
+                finish=false
+                why="on this Mac (T6050) the initrd's own options may turn writes on, so only $owner_options with xart_writes=1 provision_keybag=1 lets their attach finish, and this one gives '$given'"
+            fi
+            ;;
+        other)
+            log "$not_regular; on this Mac (T6050) not finishing the attach the initrd started"
             exit 1
-        fi
+            ;;
+        *) finish=false ;;
+        esac
     fi
-    if t6050 && [ ! -e "$owner_options" ]; then
-        # The initrd chose the driver's options, not the read-only default
-        # above. The key-store-only phase writes nothing to xART here (the
-        # T6050's xART guard), but finishing the attach would open it for
-        # writing, and provision a keybag, if those options allow it.
+    if [ "$finish" != true ]; then
         no_provisioning=true
-        log "the initrd loaded apple_sep with options this Mac's (T6050) read-only default did not set, so its attach stays unfinished: the key store works, Touch ID stays off. See XART-SAFETY.md"
+        log "$why, so the attach the initrd started stays unfinished: the key store works, Touch ID stays off. See XART-SAFETY.md"
     else
         attached=false
         for attr in "$root"/sys/bus/platform/drivers/apple_sep/*/complete_attach; do
@@ -181,17 +231,26 @@ case "$(cat "$root/sys/module/apple_sep/parameters/keystore_only" 2>/dev/null)" 
     ;;
 *)
     if t6050; then
-        if [ -e "$owner_options" ]; then
+        case "$(owner_file)" in
+        file)
             if ! check_options; then
                 log "not loading apple_sep"
                 exit 1
             fi
             log "this Mac (T6050) keeps SEP writes off by default; $owner_options sets apple_sep's options instead ($given)"
-        elif [ -e "$root/sys/module/apple_sep" ]; then
-            loaded_read_only || exit 1
-        else
-            set_read_only || exit 1
-        fi
+            ;;
+        other)
+            log "$not_regular; on this Mac (T6050) not loading apple_sep. See XART-SAFETY.md"
+            exit 1
+            ;;
+        *)
+            if [ -e "$root/sys/module/apple_sep" ]; then
+                loaded_read_only || exit 1
+            else
+                set_read_only || exit 1
+            fi
+            ;;
+        esac
     fi
     # Options come from modprobe.d, where /etc/modprobe.d/aurora-sep.conf replaces
     # the packaged defaults. Options given here would come after both, and the
