@@ -68,8 +68,9 @@ jobs:
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.requires
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.unitConfig.ConditionPathExists
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.blacklistedKernelModules
-          grep -Fx 'options apple_sep xart_writes=1 provision_keybag=1' \
-            "$(nix eval --raw '.#nixosConfigurations.aurora-kde.config.environment.etc."modprobe.d/aurora-sep-defaults.conf".source')"
+          sep_defaults=$(nix eval --raw .#nixosConfigurations.aurora-kde.config.systemd.tmpfiles.rules \
+            --apply 'rules: builtins.concatStringsSep " " (builtins.filter (r: builtins.match "C /run/modprobe[.]d/aurora-sep[.]conf - - - - .*" r != null) rules)')
+          grep -Fx 'options apple_sep xart_writes=1 provision_keybag=1' "${sep_defaults##* }"
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.initrd.availableKernelModules
   steam-packaging:
     runs-on: ubuntu-24.04-arm
