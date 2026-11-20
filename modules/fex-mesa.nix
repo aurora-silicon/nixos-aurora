@@ -5,6 +5,11 @@ let
   # Unit path directives expand percent specifiers. RequiresMountsFor also
   # splits words, so quote its path separately from the ExecStart arguments.
   unitRootfs = lib.replaceStrings [ "%" ] [ "%%" ] cfg.rootfs;
+  # Names the provider, through a bind, as FEX's global RootFS while it is
+  # mounted (FEX reads /run/fex-emu/Config.json over its global config).
+  selectRootfs = pkgs.writeShellScript "aurora-fex-rootfs" (''
+    export PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.util-linux ]}
+  '' + builtins.readFile ./aurora-fex-rootfs.sh);
 in {
   options.aurora.fexMesa = {
     enable = lib.mkOption {
@@ -12,8 +17,9 @@ in {
       default = true;
       description = ''
         Mount x86_64 and i686 Aurora Mesa over the guest rootfs at
-        `/var/lib/aurora/fex/mesa-rootfs`. Set `FEX_ROOTFS` only when the provider
-        is mounted and the user has not set it. False removes this integration
+        `/var/lib/aurora/fex/mesa-rootfs`. While it is mounted, FEX's global
+        RootFS is a read-only bind of it at `/run/fex-emu/rootfs`; a user's own
+        FEX config and `FEX_ROOTFS` override it. False removes this integration
         and unmounts the provider on a switch; guest distribution files remain.
       '';
     };
@@ -45,7 +51,8 @@ in {
       description = "Aurora Mesa graphics provider for FEX";
       wantedBy = [ "multi-user.target" ];
       after = [ "systemd-tmpfiles-setup.service" "local-fs.target" ];
-      before = [ "display-manager.service" ];
+      # Up before anyone logs in, so a session's first x86 program uses it.
+      before = [ "display-manager.service" "systemd-user-sessions.service" ];
       unitConfig.RequiresMountsFor = [ (builtins.toJSON unitRootfs) ];
       unitConfig.ConditionPathIsDirectory = "${unitRootfs}/usr";
       # Nix never overwrites the mounted store layer. Stop the old unit before
@@ -59,20 +66,10 @@ in {
         ExecStart = utils.escapeSystemdExecArgs [ "${pkgs.util-linux}/bin/mount" "-t" "overlay" "overlay"
           "-o" "ro,lowerdir=${cfg.package}:${cfg.rootfs}" provider ];
         ExecStop = "${pkgs.util-linux}/bin/umount ${provider}";
+        # FEX's global RootFS follows the provider; a failure leaves it unset.
+        ExecStartPost = "-${selectRootfs}";
+        ExecStopPost = "-${selectRootfs}";
       };
     };
-    # A rootfs is local user state, as on Fedora. Do not redirect FEX until
-    # the complete graphics provider has been mounted successfully.
-    environment.extraInit = ''
-      if ${pkgs.util-linux}/bin/mountpoint -q ${provider}; then
-        export FEX_ROOTFS="''${FEX_ROOTFS:-${provider}}"
-      fi
-    '';
-    environment.etc."systemd/user-environment-generators/60-aurora-fex-rootfs".source =
-      pkgs.writeShellScript "aurora-fex-rootfs-environment" ''
-        if [ -z "''${FEX_ROOTFS:-}" ] && ${pkgs.util-linux}/bin/mountpoint -q ${provider}; then
-          printf 'FEX_ROOTFS=%s\n' ${provider}
-        fi
-      '';
   };
 }
