@@ -38,9 +38,18 @@ in {
       # Explicit service loading waits for /var and per-machine firmware. This only
       # suppresses early alias loading; the boot timer enables SEP on the real root.
       boot.blacklistedKernelModules = [ "apple_sep" ];
-      # The driver's defaults. Named to sort before aurora-sep.conf and
-      # nixos.conf, so a read-only setting in either comes later and wins.
-      environment.etc."modprobe.d/aurora-sep-defaults.conf".source = ../sep/aurora-sep-modprobe.conf;
+      # The driver's defaults, copied to /run/modprobe.d/aurora-sep.conf at
+      # boot. kmod takes each file name from the first of /etc, /run and
+      # /usr/lib that has it, so /etc/modprobe.d/aurora-sep.conf
+      # (environment.etc) replaces them, as /usr/lib/modprobe.d does on
+      # Fedora and ALARM. Under another name both would reach the driver,
+      # and the kernel refuses a second value of an apple_sep parameter and
+      # then does not load it: so a read-only setting goes in that /etc file,
+      # not in boot.extraModprobeConfig.
+      systemd.tmpfiles.rules = [
+        "d /run/modprobe.d 0755 root root -"
+        "C /run/modprobe.d/aurora-sep.conf - - - - ${../sep/aurora-sep-modprobe.conf}"
+      ];
       # aurora-xart reset-touchid starts Touch ID over when its keybag is stuck.
       # aurora-sep-sk: OpenSSH ecdsa-sk keys in the Secure Enclave for members
       # of sep-key (its udev rule gives that group /dev/sep-key).
