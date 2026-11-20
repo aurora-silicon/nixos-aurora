@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/aurora-silicon/fedora-aurora",
+  "commit": "3856e33f965e1945c6161a83a4816784f17587cb",
+  "pull_request": "https://github.com/aurora-silicon/fedora-aurora/pull/450",
+  "source_directory": "packages/aurora-m5-platform-config",
+  "upstream_files_sha256": {
+    "50-aurora-m5-rtc-safety": "f9015811cbc452cbbf5fec77177a6fdab5eec2e860a95ce9b587fad96b509cd2",
+    "90-aurora-m5-deep.conf": "32d81a40e1f8c28418b86a13b5c8e83eae6ae838d5ac1c83e247ee9383d7c18e",
+    "90-aurora-m5-lid.conf": "6408366a20edaa1ab92bc503493a2800d8dd2963d9fe02f9822ae98b94608617",
+    "README.md": "76ef1216f7e445693a41d94fc35f3d75ac2e328413371d2e191ccd3e3adbce8e",
+    "aurora-m5-sleep-policy.service": "c46bfb79583278f97a5ea9738d5e29e39ba3ab246fe0d1c4bfe751b644a69750",
+    "aurora-m5-sleep.conf": "6a8308ab6d686894895c169d87e0c3bf472b807da6f1f12720ebdb1a762fd238"
+  },
+  "adaptations": "None in these files: change them in fedora-aurora first and copy them here. The package (overlay.nix aurora-m5-platform-config) puts the coreutils, grep, sed and util-linux store paths on the hook's PATH and its shebang in the store, points the unit's install and data paths into the store, and modules/m5-platform.nix links the hook into /etc/systemd/system-sleep, where NixOS's systemd-sleep runs hooks."
+}

@@ -717,6 +717,37 @@ in {
     checkPhase = "sh tests/run.sh";
     installFlags = [ "PREFIX=$(out)" ];
   };
+  # Deep sleep on the MacBook Pro (M5 Pro, J714s): the files of fedora-aurora's
+  # aurora-m5-platform-config (m5-platform/provenance.json), with store paths.
+  aurora-m5-platform-config = final.stdenvNoCC.mkDerivation {
+    pname = "aurora-m5-platform-config";
+    version = "1";
+    src = ./m5-platform;
+    dontBuild = true;
+    doCheck = true;
+    checkPhase = ''
+      sh -n 50-aurora-m5-rtc-safety
+      grep -q "grep -qx 'apple,j714s' || exit 0" 50-aurora-m5-rtc-safety
+      grep -qx 'ConditionFirmware=device-tree-compatible(apple,j714s)' aurora-m5-sleep-policy.service
+    '';
+    installPhase = ''
+      runHook preInstall
+      share=$out/share/aurora-m5-platform-config
+      install -Dm644 -t $share 90-aurora-m5-deep.conf 90-aurora-m5-lid.conf aurora-m5-sleep.conf
+      install -Dm644 README.md $out/share/doc/aurora-m5-platform-config/README.md
+      hook=$out/lib/systemd/system-sleep/50-aurora-m5-rtc-safety
+      install -Dm755 50-aurora-m5-rtc-safety $hook
+      sed -i '1a PATH=${final.lib.makeBinPath [ final.coreutils final.gnugrep final.gnused final.util-linux ]}:$PATH' $hook
+      patchShebangs --host $hook
+      unit=$out/lib/systemd/system/aurora-m5-sleep-policy.service
+      install -Dm644 aurora-m5-sleep-policy.service $unit
+      substituteInPlace $unit \
+        --replace-fail /usr/bin/install ${final.coreutils}/bin/install \
+        --replace-fail /usr/share/aurora-m5-platform-config $share \
+        --replace-fail /usr/share/doc $out/share/doc
+      runHook postInstall
+    '';
+  };
   # The camera denoise filter, a PipeWire user daemon. Backends load from the
   # package's own lib/aurora-camera-denoise: cdn-backend-ave.so (the video
   # encoder's temporal filter, the default where the kernel has it) and
