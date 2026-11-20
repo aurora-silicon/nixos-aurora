@@ -274,9 +274,12 @@ in {
       systemd.services.aurora-sep-greeter-fingerprint = {
         description = "Offer fingerprint at the GNOME login screen";
         documentation = [ "file://${pkgs.aurora-sep}/share/doc/aurora-sep/README.md" ];
-        # The login screen asks fprintd for the reader once, as it comes up.
-        wants = [ "aurora-sep-ready.service" ];
-        after = [ "aurora-sep-ready.service" ];
+        # Only prepares the login screen's shell, so it does not wait for
+        # Touch ID. The login screen right after boot takes the password
+        # anyway: as on macOS, where Touch ID is offered only after one
+        # password login since the restart, aurora-sep keeps
+        # require_password_after_boot = yes. Later login screens (after a log
+        # out) and the lock screen find the reader once it is up.
         before = [ "display-manager.service" ];
         wantedBy = [ "display-manager.service" ];
         path = [ pkgs.coreutils pkgs.gnugrep pkgs.gawk pkgs.glib.dev ];
