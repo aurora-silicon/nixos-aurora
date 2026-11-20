@@ -3,12 +3,12 @@
 { pkgs }:
 let
   commit = pkgs.mesa.auroraCommit;
-  # An x86-64 Vulkan driver beside the guest's loader (an ELF64 header and the
-  # layer's name), as the real layer has.
+  # An x86-64 Vulkan driver beside the guest's loader (an ELF header up to
+  # e_machine 62, then the layer's name), as the real layer has.
   layer = name: (pkgs.runCommand "fex-layer-${name}" { passthru = { inherit commit; }; } ''
     mkdir -p $out/usr/lib64
     echo ${name} > $out/usr/aurora-layer
-    printf '\177ELF\002\001\001\000\n${name}\n' > $out/usr/lib64/libvulkan_asahi.so
+    printf '\177ELF\002\001\001\000\000\000\000\000\000\000\000\000\003\000\076\000\n${name}\n' > $out/usr/lib64/libvulkan_asahi.so
     echo ${commit} > $out/.aurora-mesa-commit
   '');
   old = layer "old";
@@ -110,6 +110,20 @@ in pkgs.testers.runNixOSTest {
     machine.succeed("mv '" + rootfs + "/saved-usr' '" + rootfs + "/usr'")
     machine.succeed("systemctl start aurora-fex-mesa.service")
     machine.succeed(f"grep -x old {provider}/usr/aurora-layer")
+    selected("old")
+    # A full /run: no runtime config at all (FEX refuses an empty or partial
+    # one, even with a user's own RootFS), and a journal line saying why.
+    machine.succeed("systemctl stop aurora-fex-mesa.service")
+    machine.succeed("mount -t tmpfs -o size=4k fex-full /run/fex-emu")
+    machine.succeed("dd if=/dev/zero of=/run/fex-emu/fill bs=1k count=64 || true")
+    machine.succeed("systemctl start aurora-fex-mesa.service")
+    machine.succeed("systemctl is-active aurora-fex-mesa.service")
+    machine.fail(f"test -e {config}")
+    machine.succeed("test -z \"$(find /run/fex-emu -name '.Config.json.*')\"")
+    machine.succeed("journalctl -b -u aurora-fex-mesa.service | grep -F \"can't write\"")
+    machine.succeed("systemctl stop aurora-fex-mesa.service")
+    machine.succeed("umount /run/fex-emu")
+    machine.succeed("systemctl start aurora-fex-mesa.service")
     selected("old")
   '';
 }

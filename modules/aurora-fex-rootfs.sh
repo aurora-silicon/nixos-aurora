@@ -17,17 +17,35 @@ provider=/var/lib/aurora/fex/mesa-rootfs
 dir=/run/fex-emu
 rootfs=$dir/rootfs
 config=$dir/Config.json
+tmp=
+
+# Leave FEX without a runtime RootFS (a user's own one still applies), and
+# say why (the journal, from the service).
+fail() {
+	echo "aurora-fex-rootfs: $*; FEX gets no runtime RootFS" >&2
+	[ -z "$tmp" ] || rm -f "$tmp"
+	rm -f "$config"
+	exit 1
+}
+
+# An x86-64 ELF file: 64-bit, little-endian, e_machine 62 (EM_X86_64).
+x86_64() {
+	case $(od -An -N20 -tx1 "$1" 2>/dev/null | tr -d ' \n') in
+	7f454c460201????????????????????????3e00) return 0 ;;
+	esac
+	return 1
+}
 
 # The provider, mounted, with Aurora's Mesa layer over the guest root
 # filesystem: the x86-64 dynamic loader (where Fedora or Arch keep it) and, in
-# the same directory, an x86-64 (64-bit ELF) Vulkan driver from the layer.
-# Without a lower layer the overlay holds only Mesa, and a layer laid out for
-# another distribution's directories puts its i686 driver there.
+# the same directory, the layer's x86-64 Vulkan driver. Without a lower layer
+# the overlay holds only Mesa, and a layer laid out for another distribution's
+# directories puts its i686 driver there.
 usable() {
 	mountpoint -q "$provider" && [ -e "$provider/.aurora-mesa-commit" ] || return 1
 	for lib in usr/lib64 usr/lib; do
 		[ -e "$provider/$lib/ld-linux-x86-64.so.2" ] || continue
-		[ "$(od -An -N5 -tx1 "$provider/$lib/libvulkan_asahi.so" 2>/dev/null | tr -d ' \n')" = 7f454c4602 ]
+		x86_64 "$provider/$lib/libvulkan_asahi.so"
 		return
 	done
 	return 1
@@ -52,13 +70,14 @@ chmod 755 "$dir"
 # The same file system on both paths: the bind already shows this mount.
 if ! mountpoint -q "$rootfs" || [ "$(stat -c %d "$rootfs")" != "$(stat -c %d "$provider")" ]; then
 	release
-	if ! mount --bind -o ro "$provider" "$rootfs"; then
-		rm -f "$config"
-		exit 1
-	fi
+	mount --bind -o ro "$provider" "$rootfs" || fail "can't bind-mount $provider at $rootfs"
 fi
-tmp=$(mktemp "$dir/.Config.json.XXXXXX") || exit 1
-printf '{\n  "Config": {\n    "RootFS": "%s"\n  }\n}\n' "$rootfs" >"$tmp"
-chmod 644 "$tmp"
-# Renamed into place: FEX refuses to start on a partly written config.
-mv -f "$tmp" "$config"
+# FEX refuses to start on an empty or partly written config: write it in full
+# beside the old one, check it, then rename it into place. A full /run leaves
+# no config at all.
+want=$(printf '{\n  "Config": {\n    "RootFS": "%s"\n  }\n}' "$rootfs")
+tmp=$(mktemp "$dir/.Config.json.XXXXXX") || { tmp=; fail "can't create a file in $dir"; }
+printf '%s\n' "$want" >"$tmp" || fail "can't write $tmp"
+[ "$(cat "$tmp")" = "$want" ] || fail "$tmp doesn't hold the whole config"
+chmod 644 "$tmp" || fail "can't set the mode of $tmp"
+mv -f "$tmp" "$config" || fail "can't rename $tmp to $config"
