@@ -14,6 +14,7 @@ in (import ./nix-lint.nix { inherit pkgs; }) // {
   clean-boot = import ./clean-boot.nix { inherit pkgs nixpkgs self; };
   legacy-speaker-protection = import ./legacy-speaker-protection.nix { inherit pkgs nixpkgs makeSystem; };
   speakerguardd-v2-opt-in = import ./speakerguardd-v2-opt-in.nix { inherit pkgs nixpkgs makeSystem; };
+  removed-options = import ./removed-options.nix { inherit pkgs nixpkgs makeSystem; };
   diag-opt-in = import ./diag-opt-in.nix { inherit pkgs nixpkgs makeSystem; };
   gamemode-defaults = import ./gamemode-defaults.nix { inherit pkgs nixpkgs makeSystem; };
   sep-luks = import ./sep-luks.nix { inherit pkgs nixpkgs makeSystem; };
