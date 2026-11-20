@@ -182,12 +182,12 @@
   },
   "aurora-xart": {
     "repository": "https://github.com/aurora-silicon/aurora-xart",
-    "commit": "83ae1899d0a70e84cb464b8443a3458408b2d28e",
-    "version": "0.1.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/aurora-xart/tar.gz/83ae1899d0a70e84cb464b8443a3458408b2d28e",
-    "archive_root": "aurora-xart-83ae1899d0a70e84cb464b8443a3458408b2d28e",
-    "sha256": "1d91de60345f0c0633d00402aaec60de3ab52c8c560ae5d7a1ffc82909d7bdda",
-    "nix_hash": "sha256-HZHeYDRfDAYz0AQCquxg3jq1LIxWCuXXof/IKQnXvdo="
+    "commit": "c0c56af99d1440d5350a66668cf1597cbfce7235",
+    "version": "0.2.0",
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-xart/tar.gz/c0c56af99d1440d5350a66668cf1597cbfce7235",
+    "archive_root": "aurora-xart-c0c56af99d1440d5350a66668cf1597cbfce7235",
+    "sha256": "79a0953a3be7cbd8023d7982aece6a4b1f84bfa78c3827c5adcaa50c2ab94b42",
+    "nix_hash": "sha256-eaCVOjvny9gCPXmCrs5qSx+Ev6eMOCfFrcqlDCq5S0I="
   },
   "omarchy-ane-tools": {
     "repository": "https://github.com/joshuaswarren/omarchy-ane",
