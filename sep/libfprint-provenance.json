@@ -23,5 +23,6 @@
     "files": {
       "0011-run-a-close-requested-during-suspend-after-resume.patch": "67b06e93afe9158b563d462da55338d93c585a657fb6001423292af0e55da656"
     }
-  }
+  },
+  "adaptations": "Local 0012 reports ENOSPC as FP_DEVICE_ERROR_DATA_FULL; modules/sep.nix refuses an fprintd without auroraNoEnrollGc, so the driver never runs beside a daemon that would delete a SEP print to make room. The file hashes above remain the original provenance."
 }
