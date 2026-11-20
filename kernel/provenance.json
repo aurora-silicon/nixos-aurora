@@ -1,12 +1,12 @@
 {
-  "kernel_commit": "078e73cc335aeed22c96be109bc47260445247af",
+  "kernel_commit": "36faebf37f5b07044cd50f7c7f0dbcaac1094bef",
   "config_source": "kernel/config is the kernel source's own resolved configuration: make ARCH=arm64 LLVM=1 aurora_defconfig (arch/arm64/configs/aurora-base.config with asahi.config merged over it) at config_upstream.kernel_commit. The build regenerates it from the pinned source and fails if it differs; NixOS merges nothing over it except an owner's boot.kernelPatches settings, and checks kernel/nixos.config against it. Refresh the snapshot whenever the kernel pin changes.",
   "shared_fragment_source": "arch/arm64/configs/aurora-base.config and arch/arm64/configs/asahi.config at kernel_commit",
   "config_upstream": {
     "repository": "https://github.com/aurora-silicon/linux",
-    "commit": "078e73cc335aeed22c96be109bc47260445247af",
+    "commit": "36faebf37f5b07044cd50f7c7f0dbcaac1094bef",
     "config_path": "make ARCH=arm64 LLVM=1 aurora_defconfig",
     "config_sha256": "0f3dcb232ed689ecab5312f9e4ead65ea159164125c11a13f564578d3ef1941c",
-    "kernel_commit": "078e73cc335aeed22c96be109bc47260445247af"
+    "kernel_commit": "36faebf37f5b07044cd50f7c7f0dbcaac1094bef"
   }
 }
