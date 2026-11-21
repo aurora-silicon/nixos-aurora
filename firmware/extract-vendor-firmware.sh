@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 set -euo pipefail
-property=${AURORA_EFI_PROPERTY:-/sys/firmware/devicetree/base/chosen/asahi,efi-system-partition}
+property=${AURORA_EFI_PROPERTY:-/sys/firmware/devicetree/base/chosen/aurora,efi-system-partition}
 if [ ! -r "$property" ]; then exit 0; fi
 uuid=$(tr -d '\000' < "$property")
 [[ "$uuid" =~ ^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$ ]] || {

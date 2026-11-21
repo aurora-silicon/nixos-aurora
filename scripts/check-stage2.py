@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Check a combined ESP Stage 2 image before it can reach an ESP.
 
-The layout is the one asahi-scripts' update-m1n1 writes on ALARM and Fedora
+The layout is the one update-aura writes on ALARM and Fedora
 and the Apple Silicon NixOS module builds: the aura ESP Stage 2 binary,
 every Apple device tree of one kernel, U-Boot as one gzip member, then
-optional m1n1 option lines (chosen.*, display=, mitigations=). One image
+optional aura option lines (chosen.*, display=, mitigations=). One image
 serves every Mac, so the device trees of required boards (the MacBook Neo
 by default) must be present. Prints a JSON manifest; exits non-zero on any
 deviation.

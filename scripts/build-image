@@ -49,7 +49,7 @@ mount "${loop}p2" "$target/boot";mkdir -p "$target/boot/efi";mount "${loop}p1" "
 # checked Stage 2 hook. Give that hook the image ESP's identity, rather than
 # the physical Mac building the image; nixos-enter preserves this environment.
 # A universal image needs boot.bin regardless of the builder's Mach-O board.
-mkdir -p "$target/boot/efi/m1n1" "$target/run"
+mkdir -p "$target/boot/efi/aurora" "$target/run"
 blkid -s PARTUUID -o value "${loop}p1" > "$target/run/aurora-image-esp-partuuid"
 AURORA_DEVICE_TREE_ESP=/run/aurora-image-esp-partuuid \
   AURORA_DEVICE_TREE_COMPATIBLE=/dev/null \
@@ -131,16 +131,16 @@ python3 "$root/scripts/follow-channel.py" "$target/etc/nixos" "$revision" "$chan
 # Empty identity and host keys are regenerated separately on each Mac.
 rm -f "$target/etc/machine-id" "$target/var/lib/systemd/random-seed" "$target/etc/ssh/"ssh_host_*
 printf 'uninitialized\n' > "$target/etc/machine-id"
-[[ -s $target/boot/efi/m1n1/boot.bin && -s $target/boot/efi/EFI/BOOT/BOOTAA64.EFI ]]
+[[ -s $target/boot/efi/aurora/boot.bin && -s $target/boot/efi/EFI/BOOT/BOOTAA64.EFI ]]
 cp -a "$target/boot/efi" "$out/esp"
 python3 "$root/scripts/prepare-stage2.py" \
-  --combined "$out/esp/m1n1/boot.bin" \
-  --aura "$aura/lib/m1n1/m1n1.bin" \
-  --output "$out/esp/m1n1" --manifest "$out/stage2.json"
+  --combined "$out/esp/aurora/boot.bin" \
+  --aura "$aura/lib/aura/aura.bin" \
+  --output "$out/esp/aurora" --manifest "$out/stage2.json"
 # A Stage 1 with the CTXR window chainloads these, on Mach-O Macs. The image
 # gets them only with an aura that has no monitor, as a rebuild does.
 if [[ -e $aura/share/aura/monitor-free ]]; then
-  python3 "$root/scripts/prepare-ctxr-stage2.py" "$out/esp/m1n1"
+  python3 "$root/scripts/prepare-ctxr-stage2.py" "$out/esp/aurora"
 fi
 nix path-info --recursive --json "$system" > "$out/closure.json"
 cp "$target/etc/nixos/machine.nix" "$out/machine.nix"

@@ -16,7 +16,7 @@ let
     "aurora.userpages.enable = false leaves out both" = !(lib.elem "user4k=on" disabled.boot.kernelParams)
       && !(lib.elem pkgs.aurora-userpages disabled.environment.systemPackages);
     "the launcher builds from the kernel's own source" =
-      pkgs.aurora-userpages.src.outPath == pkgs.linux-asahi.kernel.src.outPath;
+      pkgs.aurora-userpages.src.outPath == pkgs.linux-aurora.kernel.src.outPath;
   };
 in pkgs.runCommand "aurora-userpages-evaluation" {
   failures = lib.concatStringsSep "\n" (lib.attrNames (lib.filterAttrs (_: met: !met) expectations));

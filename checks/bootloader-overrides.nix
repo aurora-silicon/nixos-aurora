@@ -1,13 +1,13 @@
 { pkgs }:
 let
-  custom = pkgs.m1n1.override { customLogo = ../logos/AuroraLogo-256.png; };
+  custom = pkgs.aura.override { customLogo = ../logos/AuroraLogo-256.png; };
 in
-assert pkgs.lib.assertMsg (custom.drvPath != pkgs.m1n1.drvPath
+assert pkgs.lib.assertMsg (custom.drvPath != pkgs.aura.drvPath
   && builtins.elem "BUILTIN_LOGO=custom" custom.makeFlags)
   "Aura must honor customLogo instead of silently retaining the stock logo";
 # Aura's build verifies the selected 48/128/256 px logos in both builds.
 pkgs.runCommand "aurora-custom-boot-logo" { } ''
-  test -s ${custom}/lib/m1n1/m1n1.bin
+  test -s ${custom}/lib/aura/aura.bin
   test -s ${custom}/share/aura/stage1/aura-raw.bin
   # The secure-flavour Stage 1 ships; its throwaway key does not.
   test -s ${custom}/share/aura/stage1/aura-secure-raw.bin

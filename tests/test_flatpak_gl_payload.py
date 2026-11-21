@@ -23,12 +23,12 @@ class PayloadFixture:
         self.root = Path(self.tmp.name)
         self.write('.aurora-mesa-commit', COMMIT)
         elf = b'\x7fELF\x02\x01' + bytes(12) + struct.pack('<H', 183)
-        for name in ('libvulkan_asahi.so', 'libvulkan_lvp.so', 'libEGL_mesa.so.0',
+        for name in ('libvulkan_aurora.so', 'libvulkan_lvp.so', 'libEGL_mesa.so.0',
                      'libGLX_mesa.so.0', 'libLLVM.so.22.1'):
             self.write('lib/' + name, elf + f' Mesa (git-{COMMIT[:10]}), Borealis'.encode())
-        for name in ('aurora', 'asahi', 'zink', 'swrast'):
+        for name in ('aurora', 'aurora', 'zink', 'swrast'):
             self.write('lib/dri/' + name + '_dri.so', elf)
-        for path, lib in (('vulkan/icd.d/asahi_icd.aarch64.json', 'libvulkan_asahi.so'),
+        for path, lib in (('vulkan/icd.d/aurora_icd.aarch64.json', 'libvulkan_aurora.so'),
                           ('vulkan/icd.d/lvp_icd.aarch64.json', 'libvulkan_lvp.so'),
                           ('glvnd/egl_vendor.d/50_mesa.json', 'libEGL_mesa.so.0')):
             self.write(path, json.dumps({'ICD': {'library_path': '/usr/lib/aarch64-linux-gnu/GL/aurora/lib/' + lib}}))
@@ -50,18 +50,18 @@ class PayloadValidationTests(PayloadFixture, unittest.TestCase):
             validator.validate_payload(self.root, COMMIT)
 
     def test_wrong_architecture_is_rejected(self):
-        self.write('lib/dri/asahi_dri.so', b'\x7fELF\x02\x01' + bytes(12) + struct.pack('<H', 62))
+        self.write('lib/dri/aurora_dri.so', b'\x7fELF\x02\x01' + bytes(12) + struct.pack('<H', 62))
         with self.assertRaisesRegex(ValueError, 'not an AArch64'):
             validator.validate_payload(self.root, COMMIT)
 
     def test_unstamped_driver_info_is_rejected(self):
-        path = self.root / 'lib/libvulkan_asahi.so'
+        path = self.root / 'lib/libvulkan_aurora.so'
         path.write_bytes(path.read_bytes()[:20] + b'Mesa 26.3.0-devel, Borealis')
         with self.assertRaisesRegex(ValueError, 'driverInfo'):
             validator.validate_payload(self.root, COMMIT)
 
     def test_symlink_outside_payload_is_rejected(self):
-        path = self.root / 'lib/dri/asahi_dri.so'
+        path = self.root / 'lib/dri/aurora_dri.so'
         path.unlink()
         path.symlink_to('/bin/sh')
         with self.assertRaisesRegex(ValueError, 'escapes'):
@@ -73,7 +73,7 @@ class PayloadValidationTests(PayloadFixture, unittest.TestCase):
             validator.validate_payload(self.root, COMMIT)
 
     def test_existing_but_wrong_json_target_is_rejected(self):
-        self.write('vulkan/icd.d/asahi_icd.aarch64.json',
+        self.write('vulkan/icd.d/aurora_icd.aarch64.json',
                    json.dumps({'ICD': {'library_path': 'libvulkan_lvp.so'}}))
         with self.assertRaisesRegex(ValueError, 'wrong driver'):
             validator.validate_payload(self.root, COMMIT)

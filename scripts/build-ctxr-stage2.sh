@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build ctxr/boot-ctxr-<board>.bin and a digest beside each, for the Macs that
-# boot m1n1/boot-ctxr.bin. This runs on every Mac's rebuild, so a problem here
+# boot aurora/boot-ctxr.bin. This runs on every Mac's rebuild, so a problem here
 # only warns and leaves that board's file out. aurora-install-stage2 warns on the
 # Mac that needs a missing file.
 #
