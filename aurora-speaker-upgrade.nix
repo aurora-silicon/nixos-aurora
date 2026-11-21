@@ -15,8 +15,7 @@ stdenvNoCC.mkDerivation {
   '';
   installPhase = ''
     runHook preInstall
-    make -C packaging/upgrade install DESTDIR= PREFIX=$out UNITDIR=$out/lib/systemd/system \
-      V2UNIT=speakerguardd-v2.service
+    make -C packaging/upgrade install DESTDIR= PREFIX=$out UNITDIR=$out/lib/systemd/system
     substituteInPlace $out/bin/aurora-speaker-upgrade \
       --replace-fail '#!/usr/bin/python3 -I' '#!${py}/bin/python3 -I'
     wrapProgram $out/bin/aurora-speaker-upgrade \
@@ -27,8 +26,11 @@ stdenvNoCC.mkDerivation {
     substituteInPlace $out/lib/aurora-speaker-upgrade/aurora_speaker_upgrade/upgrade.py \
       --replace-fail 'LIBEXEC = ("/usr/libexec/speakerguardd-v2",' 'LIBEXEC = ("${speakerguardd-v2}/libexec/speakerguardd-v2", "/usr/libexec/speakerguardd-v2",' \
       --replace-fail 'PARITY = ("/usr/share/speakerguardd/parity.json",)' 'PARITY = ("${speakerguardd-v2}/share/speakerguardd/parity.json", "/usr/share/speakerguardd/parity.json")'
-    substituteInPlace $out/lib/systemd/system/aurora-speaker-upgrade.service $out/lib/systemd/system/speakerguardd-v2.service.d/50-aurora-speaker-upgrade.conf \
+    # No speakerguardd-v2.service drop-in since speakerguardd#205: the
+    # supervisor unit applies the kernel interface itself.
+    substituteInPlace $out/lib/systemd/system/aurora-speaker-upgrade.service \
       --replace-fail /usr/bin/aurora-speaker-upgrade $out/bin/aurora-speaker-upgrade
+    test ! -e $out/lib/systemd/system/speakerguardd-v2.service.d
     runHook postInstall
   '';
   meta = {
