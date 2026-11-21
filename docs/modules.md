@@ -118,6 +118,18 @@ For persistent access, set `aurora.openssh.startAtBoot = true;` and
 `services.openssh.openFirewall = true;`. The temporary firewall change ends
 when the firewall reloads.
 
+USB4 and Thunderbolt devices get their PCIe tunnel (an NVMe enclosure, the
+PCIe devices of a dock) only once userspace authorizes them: the kernel's USB4
+domain is at security level `user`. Every profile sets
+`services.hardware.bolt.enable` by default, which on KDE also installs Plasma's
+Thunderbolt settings. boltd starts at the first Thunderbolt device and, where
+the domain reports `iommu_dma_protection` = 1, enrolls a new device itself with
+bolt's `iommu` policy, so its tunnel comes up before a USB4 enclosure gives up
+and falls back to USB 3 (about 10 s). `boltctl list` shows the enrolled devices
+and `boltctl forget` removes one. A drive already plugged in at power-on may
+fall back before boltd runs, for example while the disk passphrase prompt
+waits; plug it in again after login and it comes up over USB4.
+
 Vendor firmware and calibration are read from this Mac's EFI partition at
 boot into `/run/aurora-firmware`; they are not embedded in the distributable
 Nix-store closure. Peripheral admission follows the handoff, and Bluetooth is
