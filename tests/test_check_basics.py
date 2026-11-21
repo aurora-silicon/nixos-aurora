@@ -63,6 +63,21 @@ def touchid_files(etc, profile):
         write(etc / 'xdg/powerdevilrc', POWERDEVIL)
 
 
+# bolt as distributions package it: boltctl, its unit and the udev rule that
+# starts boltd at the first Thunderbolt device.
+BOLT_RULES = ('ACTION=="remove", GOTO="bolt_end"\n'
+              'SUBSYSTEM=="thunderbolt", TAG+="systemd", ENV{SYSTEMD_WANTS}+="bolt.service"\n'
+              'LABEL="bolt_end"\n')
+
+
+def bolt_files(usr, profile):
+    write(usr / 'bin/boltctl', mode=0o755)
+    write(usr / 'lib/systemd/system/bolt.service', '[Service]\nType=dbus\nBusName=org.freedesktop.bolt\n')
+    write(usr / 'lib/udev/rules.d/90-bolt.rules', BOLT_RULES)
+    if profile == 'kde':
+        write(usr / 'share/knotifications6/kded_bolt.notifyrc', '[Global]\n')
+
+
 class CheckBasicsTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -87,6 +102,7 @@ class CheckBasicsTests(unittest.TestCase):
         link(e / 'systemd/system/multi-user.target.wants/NetworkManager.service',
              '/usr/lib/systemd/system/NetworkManager.service')
         touchid_files(e, profile)
+        bolt_files(u, profile)
         if profile != 'minimal':
             logos(u)
         if profile == 'gnome':
@@ -190,6 +206,22 @@ class CheckBasicsTests(unittest.TestCase):
     def test_disabled_networkmanager_fails(self):
         self.assert_fails('minimal', lambda root: (
             root / 'etc/systemd/system/multi-user.target.wants/NetworkManager.service').unlink(), 'network: FAIL')
+
+    def test_missing_bolt_fails(self):
+        self.assert_fails('minimal', lambda root: (root / 'usr/bin/boltctl').unlink(),
+                          'usb4: FAIL: bolt is missing')
+
+    def test_masked_bolt_fails(self):
+        self.assert_fails('minimal', lambda root: link(root / 'etc/systemd/system/bolt.service', '/dev/null'),
+                          'bolt.service is masked')
+
+    def test_masked_bolt_udev_rule_fails(self):
+        self.assert_fails('gnome', lambda root: link(root / 'etc/udev/rules.d/90-bolt.rules', '/dev/null'),
+                          'no udev rule starts bolt.service')
+
+    def test_plasma_without_thunderbolt_settings_fails(self):
+        self.assert_fails('kde', lambda root: (root / 'usr/share/knotifications6/kded_bolt.notifyrc').unlink(),
+                          'plasma-thunderbolt')
 
     def test_lid_policy_and_masked_sleep_fail(self):
         self.assert_fails('minimal', lambda root: write(root / 'etc/systemd/logind.conf.d/10-lid.conf',
@@ -312,6 +344,10 @@ class CheckBasicsTests(unittest.TestCase):
         link(root / sw.lstrip('/') / 'share/icons/hicolor', logo_path)
         link(root / sw.lstrip('/') / 'share/pixmaps', '/nix/store/ffff-aurora-logos/share/pixmaps')
         touchid_files(root / etc.lstrip('/'), 'gnome')
+        write(root / sw.lstrip('/') / 'bin/boltctl', mode=0o755)
+        link(root / etc.lstrip('/') / 'systemd/system/bolt.service', '/nix/store/ffff-bolt/lib/systemd/system/bolt.service')
+        write(root / 'nix/store/ffff-bolt/lib/systemd/system/bolt.service', '[Service]\n')
+        write(root / etc.lstrip('/') / 'udev/rules.d/90-bolt.rules', BOLT_RULES)
         result = self.check('--profile', 'gnome', '--root', str(root), '--system', system, *self.boot())
         self.assertEqual(result.returncode, 0, result.stdout)
         write(root / etc.lstrip('/') / 'locale.conf', 'LANG=C\n')
