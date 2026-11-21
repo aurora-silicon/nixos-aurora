@@ -152,6 +152,14 @@ NixOS generations and rollback:
   trees, which is what the DT ABI guard protects.
 - A switch back to a configuration from before this change runs that configuration's own installer, which
   replaces the file directly and does not know about `aura-try`. Do that only without an armed trial.
+- Only the file this boot's Stage 1 loads (fedora-aurora#452). A Stage 1 from aura 1.0.0b12 on records the
+  SHA-256 of the image it loaded in `/chosen/aurora,boot-security`, and the target must have it. With an
+  older Stage 1 that has `aura-try`, the target must exist and carry the running Stage 2's version.
+  Otherwise nothing is written to the ESP, the bootloader install still succeeds, and the installer says which
+  file Stage 1 loads, for example `Stage 1 loads aura/stage2.bin, not m1n1/boot-ctxr.bin`.
+- Never an older aura: an image whose aura release is older than the running Stage 2's is not installed
+  unless `AURORA_STAGE2_ALLOW_DOWNGRADE=1` is set for that run. An armed candidate that never booted and
+  fails either check is withdrawn, even when the same image is installed again.
 
 ### DT ABI generations
 

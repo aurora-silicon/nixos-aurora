@@ -21,7 +21,10 @@ only what differs on NixOS:
   trials name the signed bytes.
 
 Attempts per candidate image and staging on a trial boot after its commit
-come from bootchain.py itself (fedora-aurora#207).
+come from bootchain.py itself (fedora-aurora#207), as do the checks that a
+Stage 2 goes only to the file this boot's Stage 1 loads and never takes the
+running Stage 2 back to an older aura (fedora-aurora#452). install applies
+them to the direct replacement too.
 
   nixos_stage2.py install|check|commit|guard
 
@@ -189,7 +192,8 @@ class NixosUpdate(bootchain.Update):
         return False
 
     def stage_trial(self, selected, payload):
-        if self.withdraw(selected):
+        # bootchain.py withdraws an armed candidate that fails its Stage 1 or downgrade check.
+        if self.withdraw(selected) and self.stage2_hold(self.target(), payload) is None:
             print(f'Stage 2 trial {selected} is already armed')
             return
         super().stage_trial(selected, payload)
@@ -263,6 +267,8 @@ class NixosUpdate(bootchain.Update):
         self.check_generations()
         if previous is not None and self.supports_trial():
             self.stage_trial(digest, payload)
+        elif hold := self.stage2_hold(target, payload):
+            self.keep(hold)
         else:
             self.replace(target, previous, payload)
 
