@@ -100,11 +100,11 @@ class SharedDistributionConfig(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_nixos_changes_only_the_release_suffix(self):
+    def test_nixos_changes_nothing(self):
         base = config_values(ROOT / "kernel/config")
         nixos = config_values(ROOT / "kernel/nixos.config")
         changed = {name for name, value in nixos.items() if base.get(name, "n") != value}
-        self.assertEqual(changed, {"CONFIG_LOCALVERSION"})
+        self.assertEqual(changed, set())
 
 
 if __name__ == "__main__":

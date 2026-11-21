@@ -7,10 +7,10 @@ let
     assert lib.assertMsg
       (kernelProvenance.kernel_commit == pin.commit
         && kernelProvenance.config_upstream.kernel_commit == kernelProvenance.kernel_commit)
-      "Refresh the canonical ALARM resolved config together with the kernel pin";
+      "Refresh kernel/config (make aurora_defconfig) together with the kernel pin";
     assert lib.assertMsg
       (builtins.hashFile "sha256" ../kernel/config == kernelProvenance.config_upstream.config_sha256)
-      "The vendored ALARM resolved config does not match its provenance";
+      "The vendored aurora_defconfig snapshot does not match its provenance";
     builtins.readFile ../kernel/config;
   kernelBaseFile = writeText "config" kernelBase;
   baseConfig = lib.listToAttrs (lib.concatMap (line:
@@ -61,21 +61,29 @@ let
         mkdir -p tools/aurora-bindgen/build/bin
         ln -s ${aurora-bindgen}/bin/bindgen tools/aurora-bindgen/build/bin/bindgen
       '';
-      # Start from the resolved configuration alarm-aurora ships for this
-      # kernel (kernel/config, see kernel/provenance.json), so every
-      # distribution builds the same options, and add only NixOS's own
-      # requirements on top.
+      # The kernel source owns the one configuration every Aurora kernel uses
+      # (make aurora_defconfig: aurora-base.config with asahi.config merged
+      # over it). kernel/config is its resolved snapshot for evaluation; only
+      # an owner's boot.kernelPatches settings are merged on top.
       configurePhase = ''
         runHook preConfigure
         # nixpkgs retains this tree beside source/ in the development output.
         # Its postInstall move must not target the build directory itself.
         export buildRoot="$NIX_BUILD_TOP/build"
         mkdir -- "$buildRoot"
-        cp ${kernelBaseFile} "$buildRoot/.config"
-        chmod u+w "$buildRoot/.config"
-        bash scripts/kconfig/merge_config.sh -m -O "$buildRoot" \
-          "$buildRoot/.config" ${stableFile ../kernel/nixos.config}${lib.optionalString (requests != [ ]) " ${configOverrides}"}
-        make "''${makeFlags[@]}" olddefconfig
+        make "''${makeFlags[@]}" aurora_defconfig
+        python3 - ${kernelBaseFile} "$buildRoot/.config" <<'PY'
+        import sys
+        def values(path):
+            return [line for line in open(path).read().splitlines()
+                    if line.startswith(('CONFIG_', '# CONFIG_'))]
+        if values(sys.argv[1]) != values(sys.argv[2]):
+            sys.exit('kernel/config is not this source\'s aurora_defconfig; refresh it with the pin')
+        PY
+        ${lib.optionalString (requests != [ ]) ''
+          bash scripts/kconfig/merge_config.sh -m -O "$buildRoot" "$buildRoot/.config" ${configOverrides}
+          make "''${makeFlags[@]}" olddefconfig
+        ''}
         runHook postConfigure
         make "''${makeFlags[@]}" prepare
         test "$(cat "$buildRoot/include/config/kernel.release")" = ${pin.version}
@@ -89,8 +97,8 @@ let
         grep -E ${lib.escapeShellArg "^(${optionalPattern})=|^# (${optionalPattern}) is not set$"} \
           "$buildRoot/.config" >> "$TMPDIR/aurora-kernel-optional.config" || true
       '' + ''
-        python3 ${stableFile ../kernel/validate-config.py} arch/arm64/configs/asahi.config \
-          ${stableFile ../kernel/nixos.config}${lib.optionalString (optionalRequests != [ ]) " \"$TMPDIR/aurora-kernel-optional.config\""}${lib.optionalString (requests != [ ]) " ${requiredOverrides}"} "$buildRoot/.config"
+        python3 ${stableFile ../kernel/validate-config.py} arch/arm64/configs/aurora-base.config \
+          arch/arm64/configs/asahi.config ${stableFile ../kernel/nixos.config}${lib.optionalString (optionalRequests != [ ]) " \"$TMPDIR/aurora-kernel-optional.config\""}${lib.optionalString (requests != [ ]) " ${requiredOverrides}"} "$buildRoot/.config"
         python3 ${stableFile ../kernel/check-required.py} "$buildRoot/.config"
         grep -qx 'CONFIG_RUST=y' "$buildRoot/.config"
         grep -qx 'CONFIG_ARM64_16K_PAGES=y' "$buildRoot/.config"
