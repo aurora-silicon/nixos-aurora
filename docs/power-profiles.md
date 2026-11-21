@@ -45,6 +45,24 @@ runs (see [Gaming](gaming.md)). To turn GameMode off:
 programs.gamemode.enable = false;
 ```
 
+## Power defaults
+
+Every Apple silicon Mac gets two defaults at boot from the
+`aurora-power-defaults` unit (`modules/platform.nix`), the same unit as
+Fedora's `aurora-platform-core` and ALARM's `aurora-system-fixes`: the PCIe
+ASPM policy `powersupersave`, so links whose two ends support L1.1/L1.2 (Wi-Fi,
+Bluetooth, the SD reader) enter them, and
+`kernel.sched_util_clamp_min_rt_default=0`, so realtime threads (threaded IRQs,
+PipeWire's data loop) no longer run their CPU at its top clock. Idle power fell
+14-19 % on a MacBook Neo, an M4 Pro and an M1 Pro, with no PipeWire xruns and
+no Wi-Fi or Bluetooth drops. The unit runs before `aurora-power-modes`, which
+takes the values it finds at start as its baseline, so Balanced keeps them. To
+keep the kernel's defaults:
+
+```nix
+systemd.services.aurora-power-defaults.enable = false;
+```
+
 ## Power Saver
 
 Power Saver gets a CPU power budget from `aurora-power-budget`, built from
