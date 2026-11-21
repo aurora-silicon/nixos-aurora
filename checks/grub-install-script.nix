@@ -4,8 +4,11 @@
 { pkgs, nixpkgs, self }:
 let
   inherit (nixpkgs) lib;
-  installers = map (profile: profile.config.system.build.installBootLoader)
-    (lib.attrValues self.nixosConfigurations);
+  # Stage 2 off keeps the kernel and aura out of the install script's
+  # closure; the GRUB module and its install-grub.pl are the same.
+  installers = map (profile: (profile.extendModules {
+    modules = [ { aurora.stage2.enable = false; } ];
+  }).config.system.build.installBootLoader) (lib.attrValues self.nixosConfigurations);
 in
 pkgs.runCommand "aurora-grub-install-script" { } ''
   for installer in ${lib.concatStringsSep " " installers}; do
