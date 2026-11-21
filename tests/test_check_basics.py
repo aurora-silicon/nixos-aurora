@@ -9,6 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'scripts/check-basics.py'
 BOOT = '2025cecd-807c-5835-9ad4-e547cfdeb279'
+ROOT_UUID = 'eb688499-cc41-4c4c-b00b-dbf33e05427c'
 PREAMBLE = '# Aurora: look for this installation only on the disk GRUB started from.\n'
 
 
@@ -247,7 +248,7 @@ class CheckBasicsTests(unittest.TestCase):
             write(self.base / 'boot' / name)
         if core is not None:
             write(self.base / 'esp/EFI/BOOT/BOOTAA64.EFI', grub_core(*core))
-        return self.check('--profile', 'minimal', *arguments, '--efi-uuid', '1E08-14ED')
+        return self.check('--profile', 'minimal', *arguments, '--efi-uuid', '1E08-14ED', '--root-uuid', ROOT_UUID)
 
     def assert_grub_fails(self, expected, *arguments, **options):
         result = self.grub(*arguments, **options)
@@ -299,9 +300,64 @@ class CheckBasicsTests(unittest.TestCase):
 
     def test_grub_environment_block_must_exist_unless_tested(self):
         self.assert_grub_passes('if [ -s $prefix/grubenv ]; then\n  load_env\nfi\n')
-        self.assert_grub_fails('save_env: /grub/grubenv', 'if [ "${next_entry}" ]; then\n  save_env next_entry\nfi\n')
-        self.assert_grub_passes('if [ "${next_entry}" ]; then\n  save_env next_entry\nfi\n',
-                                files=('grub/grubenv',))
+        savedefault = 'function savedefault {\n  saved_entry="${chosen}"\n  save_env saved_entry\n}\n'
+        self.assert_grub_fails('save_env: /grub/grubenv', savedefault)
+        self.assert_grub_passes(savedefault, files=('grub/grubenv',))
+
+    def test_grub_reads_the_environment_block_it_loads(self):
+        # next_entry is unset in the image's grubenv: that branch cannot run
+        # on the first boot. With it set, the branch runs and is checked.
+        main = ('if [ -s $prefix/grubenv ]; then\n  load_env\nfi\n'
+                'if [ "${next_entry}" ]; then\n  linux /vmlinuz-once\nfi\n')
+        write(self.base / 'boot/grub/grubenv', '# GRUB Environment Block\nsaved_entry=0\n')
+        self.assert_grub_passes(main)
+        write(self.base / 'boot/grub/grubenv', '# GRUB Environment Block\nnext_entry=1\n')
+        self.assert_grub_fails('linux: /vmlinuz-once is not on the boot filesystem', main)
+
+    def test_grub_reference_it_cannot_resolve_fails_closed(self):
+        missing = 'linux /vmlinuz-missing root=fstab\n'
+        for search, why in (('--label --set=root --hint="x" BOOT', '$root is only known when GRUB runs'),
+                            ('--file --set=root --hint="x" /vmlinuz', '$root is only known when GRUB runs'),
+                            (f'--fs-uuid --set=root --hint="${{aurora_disk}}," {ROOT_UUID}',
+                             'this check cannot read the root filesystem')):
+            with self.subTest(search=search):
+                self.assert_grub_fails(f'linux: cannot resolve /vmlinuz-missing: {why}',
+                                       f'search --no-floppy {search}\n' + missing)
+        self.assert_grub_fails('linux: cannot resolve (hd0,gpt2)/vmlinuz-missing: (hd0,gpt2) is not a filesystem',
+                               'linux (hd0,gpt2)/vmlinuz-missing\n')
+        found = 'regexp --set=1:dir \'^(.*)/[^/]*$\' "$cmdpath"\n'
+        self.assert_grub_fails('linux: cannot resolve $dir/vmlinuz: $dir is only known when GRUB runs',
+                               found + 'linux $dir/vmlinuz\n')
+        # Tested first, GRUB never loads it when it is missing.
+        self.assert_grub_passes(found + 'if [ -f $dir/vmlinuz ]; then\n  linux $dir/vmlinuz\nfi\n')
+
+    def test_grub_entry_and_function_variables_stay_inside(self):
+        for opener in ("menuentry 'Aurora' {", "submenu 'More' {", 'function choose {'):
+            with self.subTest(opener=opener):
+                self.assert_grub_fails('linux: /vmlinuz-missing is not on the boot filesystem',
+                                       f'{opener}\n  search --no-floppy --fs-uuid --set=root --hint="x" {ROOT_UUID}\n}}\n'
+                                       'linux /vmlinuz-missing\n')
+        # An entry runs with the variables the configuration ends with.
+        self.assert_grub_fails('linux: cannot resolve /vmlinuz: this check cannot read the root filesystem',
+                               "menuentry 'Aurora' {\n  linux /vmlinuz\n}\n"
+                               f'search --no-floppy --fs-uuid --set=root --hint="x" {ROOT_UUID}\n')
+
+    def test_grub_sourced_and_chained_configurations_are_checked(self):
+        write(self.base / 'boot/grub/extra.cfg', 'insmod not_there\n')
+        self.assert_grub_fails('/boot/grub/extra.cfg:1: insmod not_there: /grub/arm64-efi/not_there.mod',
+                               'source $prefix/extra.cfg\n')
+        write(self.base / 'boot/grub/next.cfg', 'source ${config_directory}/extra.cfg\n')
+        write(self.base / 'boot/grub/extra.cfg', 'linux /vmlinuz-missing\n')
+        self.assert_grub_fails('/boot/grub/extra.cfg:1: linux: /vmlinuz-missing is not on the boot filesystem',
+                               'configfile $prefix/next.cfg\n')
+        write(self.base / 'boot/grub/loop.cfg', 'source $prefix/loop.cfg\n')
+        self.assert_grub_fails('sources nest deeper than', 'source $prefix/loop.cfg\n')
+
+    def test_grub_braces_on_their_own_lines(self):
+        self.assert_grub_fails('linux: /vmlinuz-missing is not on the boot filesystem',
+                               "menuentry 'Aurora'\n{\n  linux /vmlinuz-missing\n}\n")
+        self.assert_grub_fails('} closes nothing', '}\n')
+        self.assert_grub_fails('{ is never closed', "menuentry 'Aurora' {\n  linux /vmlinuz\n")
 
     def test_grub_optional_files_tested_first_pass(self):
         self.assert_grub_passes('if [ -f  ${config_directory}/custom.cfg ]; then\n'
