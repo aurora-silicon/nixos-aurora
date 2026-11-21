@@ -29,8 +29,11 @@ in {
   boot.initrd.systemd.services.aurora-vendor-firmware = {
     description = "Extract this Mac's vendor firmware before peripheral admission";
     wantedBy = [ "initrd.target" ];
-    after = [ "systemd-udev-settle.service" ];
-    wants = [ "systemd-udev-settle.service" ];
+    # The extraction waits for the ESP itself (udevadm wait on its
+    # by-partuuid link), so it needs udevd running and the coldplug queued,
+    # not the whole udev queue drained.
+    after = [ "systemd-udevd.service" "systemd-udev-trigger.service" ];
+    wants = [ "systemd-udevd.service" "systemd-udev-trigger.service" ];
     before = [ "sysroot.mount" "cryptsetup-pre.target" "aurora-initrd-root.service" ];
     serviceConfig.Type = "oneshot";
     serviceConfig.ExecStart = "${loadFirmware}/bin/aurora-load-vendor-firmware";
