@@ -1,0 +1,97 @@
+name: Mirror the Nix cache to R2 (prototype)
+# Plans, and only when asked uploads, a static copy of an authenticated cache
+# release to an S3-compatible bucket served at a custom domain. Off by default:
+# without `upload` it writes nothing outside the run's artifact and needs no
+# secrets. The Pages cache, channels and installed systems are unchanged.
+on:
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: Cache release to mirror. Empty uses the cache the live Pages site serves
+        default: ''
+      upload:
+        description: Upload to the bucket (needs the R2_* secrets and variables). Off only plans
+        type: boolean
+        default: false
+permissions: {}
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: nix-cache-r2-mirror
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+      - name: Authenticate every cache entry and NAR of the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          set -euo pipefail
+          if [[ -z $RELEASE_TAG ]]; then
+            git fetch --quiet origin +refs/heads/channels:refs/remotes/origin/channels
+            RELEASE_TAG=$(git show origin/channels:channels.json | jq -er '.cache.tag')
+          fi
+          [[ $RELEASE_TAG =~ ^cache-[A-Za-z0-9._-]+$ ]]
+          python3 scripts/cache-channels.py authenticate --tag "$RELEASE_TAG" --site site --work "$RUNNER_TEMP/authenticate"
+          echo "Mirror plan for \`$RELEASE_TAG\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Plan the bucket layout (relative nar/ URLs, same signatures)
+        run: python3 scripts/r2-cache-mirror.py plan --cache site/cache --output mirror | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: r2-cache-mirror
+          path: mirror/
+          if-no-files-found: error
+          retention-days: 7
+
+  upload:
+    needs: plan
+    if: inputs.upload
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: r2-cache-mirror
+          path: mirror
+      - name: Copy missing NARs, then narinfo, then nix-cache-info
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PREFIX: nixos-aurora/cache
+        run: |
+          set -euo pipefail
+          aws --version
+          python3 scripts/r2-cache-mirror.py upload --plan mirror/plan.json --cache mirror/cache --work "$RUNNER_TEMP/nars" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Read the mirror back through the public URL
+        if: vars.PKGS_BASE_URL != ''
+        env:
+          BASE: ${{ vars.PKGS_BASE_URL }}
+        run: |
+          set -euo pipefail
+          url="$BASE/nixos-aurora/cache"
+          cmp <(curl -fsS "$url/nix-cache-info") mirror/cache/nix-cache-info
+          for info in $(ls mirror/cache/*.narinfo | shuf -n 20); do
+            cmp <(curl -fsS "$url/$(basename "$info")") "$info"
+          done
+          echo "Read back nix-cache-info and 20 narinfo files from $url." >> "$GITHUB_STEP_SUMMARY"
