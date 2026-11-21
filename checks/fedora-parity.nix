@@ -25,6 +25,10 @@ let
           && lib.elem "sysinit.target" config.systemd.services.aurora-power-defaults.wantedBy
           && config.systemd.services.aurora-power-defaults.unitConfig.ConditionFirmware
             == "device-tree-compatible(apple,arm-platform)";
+        "the Mission Control key opens the GNOME overview, as on Fedora and ALARM" =
+          config.aurora.desktop != "gnome"
+          || lib.hasInfix "[org.gnome.shell.keybindings]\ntoggle-overview=['XF86LaunchA']"
+            config.services.desktopManager.gnome.extraGSettingsOverrides;
         "trackpad clicks come from the host where the MTP trackpad has an actuator, as on Fedora and ALARM" =
           lib.any (package: (package.name or "") == "aurora-trackpad-clicks-rules") config.services.udev.packages;
         "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
