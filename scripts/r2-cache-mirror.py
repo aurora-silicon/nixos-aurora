@@ -15,7 +15,7 @@ static files from a bucket: `nix-cache-info`, `<hash>.narinfo` and
 
 `upload` uses the AWS CLI with R2's S3 endpoint. It reads AWS_ACCESS_KEY_ID,
 AWS_SECRET_ACCESS_KEY, R2_ACCOUNT_ID, R2_BUCKET and R2_PREFIX from the
-environment and GH_TOKEN for authenticated release downloads.
+environment and GH_TOKEN for authenticated release downloads (not API calls).
 """
 import argparse
 import concurrent.futures
@@ -167,23 +167,16 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
-def release_assets(repository, tag):
-    listed = subprocess.run(['gh', 'api', f'repos/{repository}/releases/tags/{tag}', '--jq',
-                             '[.assets[] | {name, id, size}]'], check=True, capture_output=True, text=True).stdout
-    return {item['name']: item for item in json.loads(listed)}
-
-
-def copy_nar(bucket, entry, assets, work):
-    asset = assets[(entry['source']['repository'], entry['source']['tag'])].get(entry['name'])
-    if asset is None or asset['size'] != entry['size']:
-        raise ValueError(f'{entry["source"]["tag"]} has no {entry["name"]} of {entry["size"]} bytes')
+def copy_nar(bucket, entry, work):
+    source = entry['source']
+    url = f'https://github.com/{source["repository"]}/releases/download/{source["tag"]}/{entry["name"]}'
     with tempfile.TemporaryDirectory(dir=work) as directory:
         path = Path(directory) / entry['name']
-        with open(path, 'wb') as stream:
-            # Authenticated API downloads are not subject to anonymous throttling.
-            subprocess.run(['gh', 'api', '-H', 'Accept: application/octet-stream',
-                            f'repos/{entry["source"]["repository"]}/releases/assets/{asset["id"]}'],
-                           check=True, stdout=stream)
+        # The release download URL, not the REST API: thousands of NARs would
+        # exhaust GITHUB_TOKEN's 1,000 API requests an hour. The token makes the
+        # download authenticated; curl drops it on the redirect to the asset host.
+        subprocess.run(['curl', '-fsSL', '--retry', '6', '--retry-all-errors', '--retry-delay', '5',
+                        '-H', 'Authorization: Bearer ' + os.environ['GH_TOKEN'], '-o', str(path), url], check=True)
         if path.stat().st_size != entry['size'] or sha256_file(path) != entry['sha256']:
             raise ValueError(f'{entry["name"]} does not match its FileHash and FileSize')
         bucket.put(entry['key'], path, 'application/x-nix-nar', IMMUTABLE, entry['sha256'])
@@ -204,11 +197,9 @@ def upload(plan_path, cache, work, jobs):
     todo = [entry for entry in data['nars'] if present.get(bucket.key(entry['key'])) != entry['size']]
     print(f'{len(data["nars"]) - len(todo)} NARs already in the bucket; copying {len(todo)} '
           f'({sum(entry["size"] for entry in todo) / 1e9:.2f} GB)')
-    sources = {(entry['source']['repository'], entry['source']['tag']) for entry in todo}
-    assets = {source: release_assets(*source) for source in sorted(sources)}
     work.mkdir(parents=True, exist_ok=True)
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
-        copied = sum(pool.map(lambda entry: copy_nar(bucket, entry, assets, work), todo))
+        copied = sum(pool.map(lambda entry: copy_nar(bucket, entry, work), todo))
     # Metadata last, nix-cache-info (last in the plan) at the very end.
     for item in data['metadata']:
         path = cache / item['key']
