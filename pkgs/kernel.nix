@@ -45,6 +45,12 @@ let
         auroraCtxrExecmem = kernelCtxrExecmem;
         auroraDtbAbi = kernelDtbAbi;
         auroraLegacySpeakerProtection = true;
+        # The oldest aurora-avd-firmware this kernel's device trees work with
+        # (modules/platform.nix checks it). The T8122 (M3) tree maps the CM3
+        # SRAM at +0x90000 (linux#2586), which only the 64 KiB v4 image of
+        # avd-fw ea8ae7c8 fits: the older 0x12000-byte image fails the probe
+        # with -EINVAL. Fedora and ALARM carry the same requirement.
+        auroraMinAvdFirmware = "0.1-unstable-2026-11-21";
         # Source overrides must not keep advertising the packaged revision.
         auroraSourceCommit = finalAttrs.src.rev or null;
       };
