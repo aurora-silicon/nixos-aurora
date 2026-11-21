@@ -1,25 +1,35 @@
 {
   "cache": {
     "actor": "DjDeveloperr",
-    "commit": "19f7c18a4781c91e354cd614133fdf8b5d1cb465",
-    "deployed_at": "2026-11-15T09:08:31Z",
+    "commit": "fd6219cd121d77ac0e23dbfe52299d712df90dc1",
+    "deployed_at": "2026-11-21T08:23:37Z",
     "provenance": "verified",
-    "released_at": "2026-11-15T07:46:52Z",
-    "run_id": "43697562640",
-    "tag": "cache-testing-20261115.2"
+    "released_at": "2026-11-21T05:31:09Z",
+    "run_id": "44884184607",
+    "tag": "cache-testing-20261121.4"
   },
   "channels": {
     "testing": {
       "actor": "DjDeveloperr",
-      "commit": "19f7c18a4781c91e354cd614133fdf8b5d1cb465",
-      "deployed_at": "2026-11-15T09:08:31Z",
+      "commit": "fd6219cd121d77ac0e23dbfe52299d712df90dc1",
+      "deployed_at": "2026-11-21T08:23:37Z",
       "provenance": "verified",
-      "released_at": "2026-11-15T07:46:52Z",
-      "run_id": "43697562640",
-      "tag": "cache-testing-20261115.2"
+      "released_at": "2026-11-21T05:31:09Z",
+      "run_id": "44884184607",
+      "tag": "cache-testing-20261121.4"
     }
   },
   "history": [
+    {
+      "actor": "DjDeveloperr",
+      "channel": "testing",
+      "commit": "fd6219cd121d77ac0e23dbfe52299d712df90dc1",
+      "deployed_at": "2026-11-21T08:23:37Z",
+      "provenance": "verified",
+      "released_at": "2026-11-21T05:31:09Z",
+      "run_id": "44884184607",
+      "tag": "cache-testing-20261121.4"
+    },
     {
       "actor": "DjDeveloperr",
       "channel": "testing",
