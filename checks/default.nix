@@ -40,4 +40,5 @@ in (import ./nix-lint.nix { inherit pkgs; }) // {
   package-overrides = import ./package-overrides.nix { inherit pkgs; };
   kernel-overrides = import ./kernel-overrides.nix { inherit pkgs; };
   bootloader-overrides = import ./bootloader-overrides.nix { inherit pkgs; };
+  grub-install-script = import ./grub-install-script.nix { inherit pkgs nixpkgs self; };
 }

@@ -4,7 +4,8 @@
     ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix ./dbus.nix
     ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix ./panel-nits.nix ./btsync.nix ./fido.nix ./awdl.nix ./sep-luks.nix
     ./userpages.nix ./boot-splash.nix ./speakerguardd-v2.nix ./speaker-upgrade.nix ./wifi-firmware.nix ./steam.nix
-    ./power-budget.nix ./gamemode.nix ./diag.nix ./secure-boot.nix ./m5-platform.nix ];
+    ./power-budget.nix ./gamemode.nix ./diag.nix ./secure-boot.nix ./m5-platform.nix
+    ./nixpkgs-grub.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";
@@ -39,17 +40,10 @@
     boot.loader.grub.efiSupport = true;
     boot.loader.grub.efiInstallAsRemovable = true;
     boot.loader.grub.device = "nodev";
-    # nixpkgs' install-grub.pl loads efi_gop and efi_uga on every EFI GRUB.
-    # UGA is an x86-only EFI protocol: arm64-efi GRUB has no efi_uga module,
-    # and loading it printed "error: ... file '/grub/arm64-efi/efi_uga.mod'
-    # not found." on the screen at every boot. efi_gop stays.
     # MTE stays off on the M5 (T8142) until it is qualified there. The M5 Pro
     # and Max (T6050) run with MTE: aura reserves the tag storage, and without
     # that reservation the kernel keeps MTE off by itself.
     boot.loader.grub.extraInstallCommands = ''
-      for cfg in ${lib.concatMapStringsSep " " (b: lib.escapeShellArg "${b.path}/grub/grub.cfg") config.boot.loader.grub.mirroredBoots}; do
-        ${pkgs.gnused}/bin/sed -i '/^[[:space:]]*insmod efi_uga[[:space:]]*$/d' "$cfg"
-      done
       if ${pkgs.coreutils}/bin/tr '\0' '\n' < /proc/device-tree/compatible 2>/dev/null \
           | ${pkgs.gnugrep}/bin/grep -qx 'apple,t8142'; then
         for cfg in ${lib.concatMapStringsSep " " (b: lib.escapeShellArg "${b.path}/grub/grub.cfg") config.boot.loader.grub.mirroredBoots}; do
