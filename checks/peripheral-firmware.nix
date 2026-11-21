@@ -41,7 +41,7 @@ pkgs.runCommand "aurora-peripheral-firmware-check" { nativeBuildInputs = [ pkgs.
   chmod +x modprobe
   mkdir system-firmware
   touch parameter
-  export AURORA_EFI_PROPERTY="$PWD/efi-property" AURORA_DT_COMPATIBLE="$PWD/compatible"
+  export AURORA_EFI_PROPERTY="$PWD/efi-property" AURORA_DT_ROOT="$PWD"
   export AURORA_FIRMWARE_DESTINATION="$PWD/destination" AURORA_MODPROBE="$PWD/modprobe"
   export AURORA_FIRMWARE_FALLBACK="$PWD/fallback" AURORA_SYSTEM_FIRMWARE="$PWD/system-firmware"
   export AURORA_FIRMWARE_PARAMETER="$PWD/parameter" AURORA_TEST_CALLS="$PWD/module-calls"
