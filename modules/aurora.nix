@@ -103,6 +103,15 @@
     services.displayManager.plasma-login-manager.enable = config.aurora.desktop == "kde";
     services.desktopManager.gnome.enable = config.aurora.desktop == "gnome";
     services.displayManager.gdm.enable = config.aurora.desktop == "gnome";
+    # The Mission Control key (F3 on every Apple silicon laptop keyboard and the
+    # Magic Keyboards: KEY_SCALE, keysym XF86LaunchA) shows every open window
+    # on macOS. GNOME binds nothing to it; give it the Activities overview, as
+    # Fedora and ALARM do. Super still opens the overview, and a user's own
+    # value for the binding wins.
+    services.desktopManager.gnome.extraGSettingsOverrides = ''
+      [org.gnome.shell.keybindings]
+      toggle-overview=['XF86LaunchA']
+    '';
     # Every Aurora desktop image comes with a web browser, as Fedora and ALARM do.
     programs.firefox.enable = config.aurora.desktop != "minimal";
     # Every image has the OpenSSH server, but nothing starts it: no unit at
