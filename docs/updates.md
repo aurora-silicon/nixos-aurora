@@ -280,7 +280,7 @@ installation or hardware qualification remain separate results.
 
 ## Edge
 
-Edge is the qualified channel for every M1, M2 and M3 Mac and the MacBook Neo ([aurora-distributions docs/edge-train.md](https://github.com/aurora-silicon/aurora-distributions/blob/main/docs/edge-train.md)). On NixOS it is the ref `channel-edge`: images built with `images.yml -f channel=edge` follow it, and `deploy-cache.yml -f advance-edge=true` moves it. That deploy reads `site/installer/edge-train.json` from aurora-distributions main and refuses any commit the adopted train does not name, or whose Edge pins (`kernel-aurora-edge`, `mesa-aurora-edge` in `sources.json`) are not the train's aurora-edge pair (`scripts/edgelib.py`).
+Edge is offered to the Macs whose chip family the adopted Edge train's rows qualify, one named machine per family; every other Mac stays on Nightly. The [Edge train document](https://github.com/aurora-silicon/aurora-distributions/blob/main/docs/edge-train.md) lists the families and machines. On NixOS it is the ref `channel-edge`: images built with `images.yml -f channel=edge` follow it, and `deploy-cache.yml -f advance-edge=true` moves it. That deploy reads `site/installer/edge-train.json` from aurora-distributions main and refuses any commit the adopted train does not name, or whose Edge pins (`kernel-aurora-edge`, `mesa-aurora-edge` in `sources.json`) are not the train's aurora-edge pair (`scripts/edgelib.py`).
 
 Signing (`testing-signing`) and cache releases accept only commits on main, so the Edge kernel and Mesa live on main beside Testing's:
 
