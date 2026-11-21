@@ -479,7 +479,8 @@ class InstallStage2Tests(unittest.TestCase):
 
 class PrepareCtxrStage2Tests(unittest.TestCase):
     AURA = b'AURA-STAGE2-BINARY'
-    BOARDS = {'j274': 't8103', 'j700': 't8140', 'j616s': 't6040', 'j614s': 't6040', 'j713': 't8132', 'j873g': 't8152'}
+    BOARDS = {'j274': 't8103', 'j700': 't8140', 'j616s': 't6040', 'j614s': 't6040', 'j616c': 't6041',
+              'j614c': 't6041', 'j713': 't8132', 'j873g': 't8152'}
 
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -501,8 +502,9 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
         self.split(boards)
         ctxr = self.root / 'ctxr'
         written = prepare_ctxr.prepare(boards, ctxr)
-        self.assertEqual(sorted(written), ['boot-ctxr-j614s.bin', 'boot-ctxr-j616s.bin', 'boot-ctxr-j700.bin',
-                                           'boot-ctxr-j713.bin', 'boot-ctxr-j873g.bin'])
+        self.assertEqual(sorted(written), ['boot-ctxr-j614c.bin', 'boot-ctxr-j614s.bin', 'boot-ctxr-j616c.bin',
+                                           'boot-ctxr-j616s.bin', 'boot-ctxr-j700.bin', 'boot-ctxr-j713.bin',
+                                           'boot-ctxr-j873g.bin'])
         image = (ctxr / 'boot-ctxr-j700.bin').read_bytes()
         manifest = check_stage2.check(image, self.AURA, ['j700'])
         self.assertEqual(manifest['boards'], ['apple,j700'])
@@ -543,11 +545,13 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
             prepare_ctxr.prepare(esp, esp)
 
     def test_required_board_missing_is_refused(self):
-        boards = self.root / 'boards'
-        self.split(boards)
-        (boards / 'boot-j616s.bin').unlink()
-        with self.assertRaises(ValueError):
-            prepare_ctxr.prepare(boards, self.root / 'ctxr')
+        for board in ('j616s', 'j614c'):
+            with self.subTest(board=board):
+                boards = self.root / ('boards-' + board)
+                self.split(boards)
+                (boards / f'boot-{board}.bin').unlink()
+                with self.assertRaisesRegex(ValueError, board):
+                    prepare_ctxr.prepare(boards, self.root / ('ctxr-' + board))
 
     def test_chip_list_matches_the_installer(self):
         for chip in MACHO_CHIPS:
