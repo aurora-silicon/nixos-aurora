@@ -25,7 +25,7 @@ investigations. Treat those details as snapshots; current package inputs are in
 - [Fedora parity, 28–29 October 2026](fedora-parity-20261029.md).
 - [Fedora merge sweep, 31 October 2026](fedora-parity-20261031.md), with its [merge inventory](fedora-merges-20261031.json).
 - [Userspace package parity, 31 October 2026](userspace-parity.md).
-- [AVD firmware changelog](avd-fw.md): the 1 November 2026 firmware updates.
+- [AVD firmware changelog](avd-fw.md): the 1 and 21 November 2026 firmware updates.
 - [Universal kernel configuration](universal-kernel-config.md): resolved-config inheritance and source/config contracts.
 - [Userspace boot defaults](clean-boot-userspace.md): BlueZ, Docker, swap ordering and cross-distribution workaround retirement.
 - [Native GL qualification draft](native-gl-default.md): driver-selection policy, qualification requirements and migration.

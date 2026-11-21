@@ -1,5 +1,20 @@
 # AVD firmware changelog
 
+## 2026-11-21: ea8ae7c8
+
+Update the pinned MIT-licensed firmware to
+`ea8ae7c8b19057865b99f16522e122566dabdaf4` (avd-fw#8), which maps the v4
+(T8122) SRAM at `+0x90000`. Only `avd-fw-v4-t0.bin` changes: it is now padded
+to 0x10000 bytes instead of 0x12000, SHA-256
+`92d30e532e9c9d0f3dcd0c8d689aec474696106b28338d5b5b4e127caec88c6f`. The
+other seven images are byte-identical to 6062e851.
+
+On a J615 (M3 Air), the open-queue transport needs the matching device tree
+(linux#2586); with the current device tree the driver falls back to the
+legacy transport, and decoding stays bit-exact either way. Keep upstream Meson
+defaults and the clang 22 toolchain requirements. Source archive SHA-256:
+`ebf4fae6872c4e6dc5747fb98a613b790cc9e0c9aa4c9bf3e0f96e3afcc369da`.
+
 ## 2026-11-01: 6062e851
 
 Update the pinned MIT-licensed firmware to
