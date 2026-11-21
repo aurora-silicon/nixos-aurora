@@ -23,8 +23,8 @@ OWNER, REPO = 'aurora-silicon', 'nixos-aurora'
 
 
 def follow(directory, revision, channel):
-    if not re.fullmatch(r'[0-9a-f]{40}', revision) or channel not in ('pinned', 'testing', 'stable'):
-        raise ValueError('expected a full commit and pinned, testing or stable')
+    if not re.fullmatch(r'[0-9a-f]{40}', revision) or channel not in ('pinned', 'testing', 'stable', 'edge'):
+        raise ValueError('expected a full commit and pinned, testing, stable or edge')
     directory = Path(directory)
     flake = directory / 'flake.nix'
     lock_path = directory / 'flake.lock'
@@ -61,5 +61,5 @@ def follow(directory, revision, channel):
 
 if __name__ == '__main__':
     if len(sys.argv) != 4:
-        raise SystemExit('usage: follow-channel.py ETC_NIXOS COMMIT pinned|testing|stable')
+        raise SystemExit('usage: follow-channel.py ETC_NIXOS COMMIT pinned|testing|stable|edge')
     follow(*sys.argv[1:])

@@ -9,7 +9,7 @@ on:
       channel:
         description: Update channel /etc/nixos follows (its flake.lock pins this build's commit either way)
         type: choice
-        options: [testing, stable, pinned]
+        options: [testing, stable, edge, pinned]
         default: testing
 permissions:
   contents: read
