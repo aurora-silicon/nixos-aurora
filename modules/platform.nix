@@ -1,10 +1,19 @@
-{ lib, pkgs, ... }:
-{
+{ config, lib, pkgs, ... }:
+let
+  avdFirmware = pkgs.aurora-avd-firmware;
+  # The oldest avd-fw the booted kernel's device trees work with (pkgs/kernel.nix).
+  minAvdFirmware = config.boot.kernelPackages.kernel.auroraMinAvdFirmware or null;
+in {
   hardware.bluetooth.enable = true;
   # BlueZ 5.87 includes the empty default-parameter transaction fix.
   assertions = [ {
     assertion = lib.versionAtLeast pkgs.bluez.version "5.87";
     message = "Aurora requires BlueZ >= 5.87 (empty default system config fix).";
+  } {
+    assertion = minAvdFirmware == null || lib.versionAtLeast avdFirmware.version minAvdFirmware;
+    message = "This kernel needs aurora-avd-firmware ${toString minAvdFirmware} or later, "
+      + "whose v4 image fits the T8122 CM3 SRAM window at +0x90000 (linux#2586); "
+      + "with ${avdFirmware.version} the M3 video decoder fails to probe.";
   } ];
   # The Touch Bar of the 13-inch M1 and M2 MacBook Pros (J293, J493), as Fedora
   # (aurora-platform requires tiny-dfr) and ALARM (in every image) ship it.
@@ -12,7 +21,7 @@
   # it stays inert on every other Mac.
   hardware.apple.touchBar.enable = lib.mkDefault true;
   hardware.enableRedistributableFirmware = true;
-  hardware.firmware = [ pkgs.aurora-avd-firmware ];
+  hardware.firmware = [ avdFirmware ];
   services.upower.enable = true;
   hardware.wirelessRegulatoryDatabase = true;
   systemd.packages = [ pkgs.speakerguardd ];
