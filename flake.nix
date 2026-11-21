@@ -91,6 +91,7 @@
         sep-sk = pkgs.aurora-sep-sk;
         xart = pkgs.aurora-xart;
         sep-luks = pkgs.aurora-sep-luks;
+        sep-host-state = pkgs.aurora-sep-host-state;
         firefox = pkgs.firefox-unwrapped;
       };
       # The payload runs in an ARM machine's x86 guest, and is built on x86.

@@ -86,3 +86,22 @@ with subtest("blocked xART matching stays a readiness failure"):
     machine.fail("systemctl start aurora-sep-ready.service")
     machine.succeed("journalctl -u aurora-sep-ready.service -b --no-pager | grep -F 'xART writes are disabled'")
     assert events().count("setup") == 1, events()
+
+with subtest("a truncated host-state store is recovered before the loader"):
+    # The unit and its helper come from the shared SEP userspace package;
+    # modules/sep.nix only orders them before the loader. A file the driver
+    # would refuse is moved to the quarantine, so Touch ID survives a power
+    # cut instead of dying with the loader.
+    machine.succeed("printf 'cut off by a power cut' > /var/lib/aurora-sep-host-state.bin")
+    machine.succeed("systemctl start aurora-sep-host-state-repair.service")
+    machine.wait_for_unit("aurora-sep-host-state-repair.service")
+    machine.fail("test -e /var/lib/aurora-sep-host-state.bin")
+    machine.succeed("test -f /var/lib/aurora-sep-quarantine/host-state-*.bin")
+    machine.succeed(
+        "journalctl -u aurora-sep-host-state-repair.service -b --no-pager"
+        " | grep -F 'the driver will create a fresh store'"
+    )
+    # The shipped unit's Before= and the module's wantedBy make the loader
+    # run the recovery first.
+    machine.succeed("systemctl show aurora-sep.service --property=After | grep -q aurora-sep-host-state-repair.service")
+    machine.succeed("systemctl show aurora-sep.service --property=Wants | grep -q aurora-sep-host-state-repair.service")
