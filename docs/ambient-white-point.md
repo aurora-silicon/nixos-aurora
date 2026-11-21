@@ -1,6 +1,6 @@
 # Ambient white point
 
-On a Mac whose ambient light sensor reports the colour of the light, the display white point can follow the room. Under a warm lamp the screen gets a little warmer, in daylight it stays neutral. It is off by default and it is your choice to turn it on.
+On a Mac whose ambient light sensor reports the colour of the light, the display white point can follow the room. Under a warm lamp the screen gets a little warmer, in daylight it stays neutral. It is on by default on those Macs, and a switch in Settings turns it off.
 
 ## How it works
 
@@ -28,21 +28,21 @@ How much it adapts is a starting value that may be tuned. It follows the colour 
 
 Night Light always wins. The screen gets the warmer of the two temperatures, so the ambient white point can never make the screen bluer than Night Light asks for, and the hand-over at sunset is smooth. That holds during a Night Light preview too, so a preview's fade starts from what is on screen.
 
-## Turning it on
+## Turning it off and on
 
-GNOME:
+GNOME: Settings, Displays, Night Light, **Adapt to Ambient Light**. The switch is there when the Mac has a light sensor that reports colour. From a terminal:
 
 ```
-gsettings set org.gnome.settings-daemon.plugins.color ambient-white-point-enabled true
+gsettings set org.gnome.settings-daemon.plugins.color ambient-white-point-enabled false
 ```
 
 KDE Plasma:
 
 ```
-kwriteconfig6 --notify --file kwinrc --group NightColor --key AmbientWhitePoint true
+kwriteconfig6 --notify --file kwinrc --group NightColor --key AmbientWhitePoint false
 ```
 
-KWin picks the change up right away. Set either back to `false` to turn it off. aurora-diag has a live demo with the sensor reading, the chosen white point and a toggle (`aurora-diag demo whitepoint`).
+KWin picks the change up right away. Set either back to `true` to turn it on again. aurora-diag has a live demo with the sensor reading, the chosen white point and a toggle (`aurora-diag demo whitepoint`).
 
 ## Checking it
 
@@ -78,4 +78,4 @@ busctl --user get-property org.kde.KWin.NightLight /org/kde/KWin/NightLight org.
 
 ## Packages
 
-The overlay patches `iio-sensor-proxy` (3.9), `gnome-settings-daemon` (50.1) and `kdePackages.kwin` (6.7.5), so every Aurora NixOS system gets them with no option to set. The GNOME colour plugin tests run in the build (`gcm-self-test`, `ambient-policy`, `ambient-service`). The packages are exposed as `iio-sensor-proxy`, `gnome-settings-daemon` and `kwin` in the flake. Fedora and Arch Linux ARM carry the same patches.
+The overlay patches `iio-sensor-proxy` (3.9), `gnome-settings-daemon` (50.1) and `kdePackages.kwin` (6.7.5), so every Aurora NixOS system gets them with no option to set. The GNOME colour plugin tests run in the build (`gcm-self-test`, `ambient-policy`, `ambient-service`). The packages are exposed as `iio-sensor-proxy`, `gnome-settings-daemon` and `kwin` in the flake. Fedora and Arch Linux ARM carry the same patches. The overlay also patches `gnome-control-center` (50.4) for the Settings switch.

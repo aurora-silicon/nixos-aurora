@@ -136,8 +136,9 @@ in {
   aurora-logos = final.callPackage ./logos/package.nix { };
   plymouth-theme-aurora = final.callPackage ./plymouth-theme-aurora/package.nix { };
   kdePackages = prev.kdePackages.overrideScope (_: kdePrev: {
-    # Opt-in ambient white point in Night Light (AmbientWhitePoint in kwinrc,
-    # off by default), fed by iio-sensor-proxy's ColorTemperature. The same
+    # Ambient white point in Night Light (AmbientWhitePoint in kwinrc, on by
+    # default where a light sensor reports colour), fed by iio-sensor-proxy's
+    # ColorTemperature. The same
     # patch is in fedora-aurora's and alarm-aurora's kwin packages. Also
     # upstream c9d72079 (6.8 branch), as in Fedora's kwin 6.8.2-3: no crash on
     # a scanout device without a render device (DisplayLink).
@@ -190,10 +191,18 @@ in {
       runHook postCheck
     '';
   });
-  # Opt-in ambient white point in the colour plugin
-  # (org.gnome.settings-daemon.plugins.color ambient-white-point-enabled, off
-  # by default). The same patch is in fedora-aurora's and alarm-aurora's
-  # gnome-settings-daemon packages.
+  # Ambient white point in the colour plugin
+  # (org.gnome.settings-daemon.plugins.color ambient-white-point-enabled, on by
+  # default where a light sensor reports colour). The same patch is in
+  # fedora-aurora's and alarm-aurora's gnome-settings-daemon packages.
+  # Settings switch for the ambient white point on the Night Light page, shown
+  # where a light sensor reports colour. The same patch is in fedora-aurora's
+  # and alarm-aurora's gnome-control-center packages.
+  gnome-control-center = prev.gnome-control-center.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (stableFile ./patches/gnome-control-center-ambient-white-point-switch.patch)
+    ];
+  });
   gnome-settings-daemon = prev.gnome-settings-daemon.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       (stableFile ./patches/gnome-settings-daemon-ambient-white-point.patch)
