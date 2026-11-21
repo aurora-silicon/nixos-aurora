@@ -219,6 +219,17 @@ class CheckBasicsTests(unittest.TestCase):
         self.assert_fails('gnome', lambda root: link(root / 'etc/udev/rules.d/90-bolt.rules', '/dev/null'),
                           'no udev rule starts bolt.service')
 
+    def test_comment_only_or_non_thunderbolt_bolt_udev_rule_fails(self):
+        for text in (
+            '# SUBSYSTEM=="thunderbolt", TAG+="systemd", ENV{SYSTEMD_WANTS}+="bolt.service"\n',
+            'SUBSYSTEM=="usb", ENV{SYSTEMD_WANTS}+="bolt.service"\n',
+            'SUBSYSTEM=="thunderbolt", TAG+="systemd"\n# bolt.service\n',
+        ):
+            with self.subTest(rule=text.splitlines()[0]):
+                self.assert_fails('gnome', lambda root, text=text: write(root / 'etc/udev/rules.d/90-bolt.rules', text),
+                                  'no udev rule starts bolt.service')
+                self.fresh()
+
     def test_plasma_without_thunderbolt_settings_fails(self):
         self.assert_fails('kde', lambda root: (root / 'usr/share/knotifications6/kded_bolt.notifyrc').unlink(),
                           'plasma-thunderbolt')

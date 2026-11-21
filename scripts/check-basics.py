@@ -207,6 +207,18 @@ def check_network(root, profile):
     return None
 
 
+def bolt_udev_rule(text):
+    """Whether a udev rules file starts bolt.service for Thunderbolt devices."""
+    for line in text.replace('\\\n', ' ').splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if (re.search(r'(?:^|[\s,])SUBSYSTEM\s*==\s*"thunderbolt"', line)
+                and re.search(r'(?:^|[\s,])ENV\{SYSTEMD_WANTS\}\s*\+?=\s*"(?:[^"]*\s)?bolt\.service(?:\s[^"]*)?"', line)):
+            return True
+    return False
+
+
 def check_usb4(root, profile):
     # A USB4 or Thunderbolt domain at security level "user" builds a PCIe
     # tunnel only once userspace authorizes the device; bolt does that. Its
@@ -226,7 +238,7 @@ def check_usb4(root, profile):
             for entry in root.path(directory).iterdir():
                 if entry.name.endswith('.rules'):
                     rules[entry.name] = root.path(f'{directory}/{entry.name}')
-    if not any(path.is_file() and 'bolt.service' in path.read_text(errors='replace')
+    if not any(path.is_file() and bolt_udev_rule(path.read_text(errors='replace'))
                for path in rules.values()):
         return 'no udev rule starts bolt.service for Thunderbolt devices'
     # plasma-thunderbolt: the new-device notification and the System Settings page.
