@@ -187,10 +187,11 @@ def fs_key(oid, kind, rest=b''):
 
 
 def apfs(files, *, role=helper.APFS_ROLE_HARDWARE, flags=1, bsd_flags=0, path=None,
-         hashed=True, extra_volume=True, newer=None):
+         hashed=True, extra_volume=True, newer=None, slack=0):
     """A container whose Hardware volume holds `files` in its factory cache.
     `newer` maps to a second, newer checkpoint superblock pointing at another
-    container built from those files."""
+    container built from those files. Each file's extent is `slack` blocks
+    longer than its data."""
     blocks = {}
     path = helper.APFS_FACTORY if path is None else path
     entries, next_block, next_oid = [], 20, 16
@@ -210,8 +211,8 @@ def apfs(files, *, role=helper.APFS_ROLE_HARDWARE, flags=1, bsd_flags=0, path=No
             for index in range(count):
                 blocks[next_block + index] = data[index * BS:(index + 1) * BS].ljust(BS, b'\0')
             entries.append((fs_key(oid, 8, struct.pack('<Q', 0)),
-                            struct.pack('<QQQ', count * BS, next_block, 0)))
-            next_block += count
+                            struct.pack('<QQQ', (count + slack) * BS, next_block, 0)))
+            next_block += count + slack
     entries.sort(key=lambda e: e[0])
     blocks[10] = node(entries, False, oid=1027)
     blocks[9] = node([(struct.pack('<QQ', 1027, 1), struct.pack('<IIQ', 0, BS, 10))], True, oid=9)
@@ -317,6 +318,54 @@ class ContainerTests(unittest.TestCase):
         image[BS + 200] ^= 1  # a damaged newest checkpoint is skipped
         with self.assertRaises(helper.Refused):
             helper.Container(reader(bytes(image))).hardware()
+
+
+    def test_a_long_extent_is_read_only_up_to_the_file_size(self):
+        # Each extent claims 64 blocks more than its file; only the file's
+        # bytes are read, never the whole extent.
+        files = records()
+        image = apfs(files, slack=64)
+        reads = []
+
+        def counting(offset, length):
+            reads.append(length)
+            return image[offset:offset + length]
+
+        self.assertEqual(helper.Container(counting, len(image)).hardware(), files)
+        self.assertLessEqual(max(reads), BS)
+        self.assertLess(sum(reads), 64 * BS)
+
+    def test_the_container_must_fit_its_partition(self):
+        image = apfs(records())
+        self.assertEqual(helper.Container(reader(image), len(image)).hardware(), records())
+        with self.assertRaisesRegex(helper.Refused, 'larger than its partition'):
+            helper.Container(reader(image), len(image) - BS)
+
+    def test_the_factory_records_have_a_byte_budget_in_all(self):
+        files = records()
+        total = sum(len(data) for data in files.values())
+        image = apfs(files)
+        with patch.object(helper, 'FACTORY_BUDGET', total):
+            self.assertEqual(helper.Container(reader(image)).hardware(), files)
+        with patch.object(helper, 'FACTORY_BUDGET', total - 1), \
+                self.assertRaisesRegex(helper.Refused, 'too large in all'):
+            helper.Container(reader(image)).hardware()
+        # Refused metadata is a clean refusal: no records, a reason.
+        with patch.object(helper, 'FACTORY_BUDGET', total - 1):
+            self.assertEqual(helper.factory(reader(image), len(image)),
+                             ({}, 'factory records too large in all'))
+
+    def test_a_file_whose_data_the_partition_does_not_hold_is_refused(self):
+        files = records()
+        image = apfs(files)
+        # The container's last block is cut off by the end of the device.
+        with self.assertRaises(helper.Refused):
+            helper.Container(reader(image[:-BS]), len(image) - BS)
+        # A read that comes back short is refused, not padded.
+        short = lambda offset, length: image[offset:offset + length][:max(0, length - 1)] \
+            if offset >= 20 * BS else image[offset:offset + length]
+        with self.assertRaisesRegex(helper.Refused, 'shorter than its size'):
+            helper.Container(short, len(image)).hardware()
 
 
 class ManifestTests(unittest.TestCase):

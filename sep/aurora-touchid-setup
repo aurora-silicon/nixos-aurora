@@ -368,15 +368,19 @@ APFS_MAX_BLOCK = 65536
 APFS_MAX_NODES = 16384
 APFS_MAX_DEPTH = 8
 APFS_MAX_FILES = 4096
+# All factory records read, together: room for four records at RECORD_LIMIT.
+FACTORY_BUDGET = 4 * RECORD_LIMIT
 
 
 class Container:
     """Read-only APFS, just enough for one directory of the Hardware volume:
     the newest valid checkpoint, the container and volume object maps, the
     file-system tree and uncompressed, unencrypted regular files. Every object
-    read is checksummed; any other layout is refused."""
+    read is checksummed; any other layout is refused. `size`, the partition's
+    size in bytes, bounds the blocks the container may claim; file data is
+    read only up to each file's logical size and FACTORY_BUDGET in all."""
 
-    def __init__(self, read):
+    def __init__(self, read, size=None):
         self._read = read
         head = read(0, 4096)
         if len(head) < 4096 or head[32:36] != b'NXSB':
@@ -384,7 +388,10 @@ class Container:
         self.block_size, self.blocks = struct.unpack_from('<IQ', head, 36)
         if not 4096 <= self.block_size <= APFS_MAX_BLOCK or self.block_size & (self.block_size - 1):
             raise Refused('unsupported APFS block size')
+        if size is not None and self.blocks * self.block_size > size:
+            raise Refused('the APFS container is larger than its partition')
         self.nodes = 0
+        self.budget = FACTORY_BUDGET
         first = self.block(0, 0x1)
         base, count = struct.unpack_from('<Q', first, 112)[0], struct.unpack_from('<I', first, 104)[0]
         if count & 0x80000000 or not 0 < count <= 65536:
@@ -538,6 +545,9 @@ class Container:
             at += length + 7 & ~7
         if size > RECORD_LIMIT:
             raise Refused('oversized factory record')
+        if size > self.budget:
+            raise Refused('factory records too large in all')
+        self.budget -= size
         data, covered = bytearray(), 0
         for logical, length, block in sorted(extents.get(private_id, [])):
             if covered >= size:
@@ -545,11 +555,16 @@ class Container:
             if logical != covered or not length or length % self.block_size or \
                     not 0 < block <= self.blocks - length // self.block_size:
                 raise Refused('sparse or malformed APFS extent')
-            data += self._read(block * self.block_size, length)
+            # The extent may be longer than the file: read only what is left of it.
+            wanted = min(length, size - covered)
+            chunk = self._read(block * self.block_size, wanted)
+            if len(chunk) != wanted:
+                raise Refused('factory record shorter than its size')
+            data += chunk
             covered += length
-        if covered < size or len(data) < size:
+        if covered < size or len(data) != size:
             raise Refused('factory record shorter than its size')
-        return bytes(data[:size])
+        return bytes(data)
 
 
 def xid(obj):
@@ -787,9 +802,9 @@ class Wanted:
         self.evidence = {}
 
 
-def factory(read):
+def factory(read, size=None):
     try:
-        return Container(read).hardware(), None
+        return Container(read, size).hardware(), None
     except Refused as error:
         return {}, str(error)
 
@@ -808,11 +823,11 @@ def carve(device, extractor, work=None):
         return output.read_bytes()
 
 
-def build(read, device, extractor, identity, names, work=None):
+def build(read, device, extractor, identity, names, work=None, size=None):
     """The files this Mac's sensor loads, built from its own factory data."""
     calibration = Wanted('calibration', names[0])
     wanted = [calibration]
-    records, unreadable = factory(read)
+    records, unreadable = factory(read, size)
     try:
         if any(name.startswith('FSC2-') for name in records):
             calibration.data, calibration.evidence = admit(records, identity, b'FSC2')
@@ -996,7 +1011,7 @@ def boot_id():
 
 
 def setup(read, device, extractor, tree, firmware, state, run, *, check=False, trigger='user',
-          search=None, sep_bio=Path('/dev/sep-bio'), devices=DIAG):
+          search=None, sep_bio=Path('/dev/sep-bio'), devices=DIAG, size=None):
     """Set up (or, with `check`, only report) this Mac's Touch ID files."""
     result = {'tool': 'aurora-touchid-setup', 'version': 1,
               'time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
@@ -1020,7 +1035,7 @@ def setup(read, device, extractor, tree, firmware, state, run, *, check=False, t
         fcntl.flock(lock, fcntl.LOCK_EX)
     try:
         ours = installed_by_us(state) if state.is_dir() else set()
-        wanted = build(read, device, extractor, identity, names, None if check else state)
+        wanted = build(read, device, extractor, identity, names, None if check else state, size)
         for item in wanted:
             target = firmware / item.name
             installed = read_installed(target)
@@ -1130,7 +1145,8 @@ def main(argv=None):
         fd = os.open(DEVICE, os.O_RDONLY | os.O_CLOEXEC)
         try:
             result = setup(lambda offset, length: os.pread(fd, length, offset), DEVICE, EXTRACTOR,
-                           DT, firmware, STATE, RUN, check=args.check, trigger=trigger, search=search)
+                           DT, firmware, STATE, RUN, check=args.check, trigger=trigger, search=search,
+                           size=os.lseek(fd, 0, os.SEEK_END))
         finally:
             os.close(fd)
     except (OSError, ValueError) as error:
