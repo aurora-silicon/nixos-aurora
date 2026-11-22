@@ -52,10 +52,6 @@ def rule_files(directory):
     return {p.name: p.read_text() for p in directory.iterdir() if p.name.endswith('.rules')}
 
 
-def section(spec, start, end):
-    return spec.split(start, 1)[1].split(end, 1)[0]
-
-
 class AccelPermissionTests(unittest.TestCase):
     NODE = {'SUBSYSTEM': 'accel', 'KERNEL': 'accel0'}
 
@@ -76,14 +72,29 @@ class AccelPermissionTests(unittest.TestCase):
 
     def test_platform_module_installs_the_rule_and_the_group_on_every_system(self):
         platform = (MODULES / 'platform.nix').read_text()
-        rule = platform.split('name = "aurora-accel-rules";', 1)[1].split('})', 1)[0]
+        rule = platform.split('name = "aurora-accel-rules";', 1)[1].split('};', 1)[0]
         self.assertIn('destination = "/lib/udev/rules.d/70-aurora-accel.rules";', rule)
         self.assertIn('text = builtins.readFile ./70-aurora-accel.rules;', rule)
+        self.assertIn('\n    accelRules\n  ];', platform)
         self.assertRegex(platform, r'(?m)^  users\.groups\.accel = \{ \};$')
         # platform.nix has no enable option: every Aurora system imports it.
         self.assertNotIn('mkIf', platform)
         self.assertIn('./platform.nix', (MODULES / 'aurora.nix').read_text())
         self.assertIn('"aurora-accel-rules"', (ROOT / 'checks' / 'fedora-parity.nix').read_text())
+
+    def test_a_switch_reapplies_the_policy_to_existing_nodes(self):
+        platform = (MODULES / 'platform.nix').read_text()
+        unit = platform.split('systemd.services.aurora-accel-permissions = {', 1)[1].split('\n  };\n', 1)[0]
+        # An add event: a change event does not reapply GROUP and MODE.
+        self.assertIn('trigger --action=add --subsystem-match=accel', unit)
+        self.assertNotIn('--action=change', unit)
+        # Restarted when the rule changes, after udevd, and only with a running udevd;
+        # a failure does not fail the switch.
+        self.assertIn('restartTriggers = [ accelRules ];', unit)
+        self.assertIn('"systemd-udevd.service"', unit)
+        self.assertIn('ConditionPathExists = "/run/udev/control";', unit)
+        self.assertEqual(unit.count('"-${udevadm} '), 2)
+        self.assertIn('RemainAfterExit = true;', unit)
 
     def test_the_ane_tools_carry_no_device_policy(self):
         self.assertEqual(rule_files(ROOT / 'ane'), {})

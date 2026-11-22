@@ -33,7 +33,9 @@ let
           config.users.groups ? accel
           && lib.any (package: (package.name or "") == "aurora-accel-rules"
             && lib.hasInfix ''GROUP="accel", MODE="0660", TAG+="uaccess"'' (package.text or ""))
-            config.services.udev.packages;
+            config.services.udev.packages
+          && config.systemd.services.aurora-accel-permissions.enable
+          && lib.elem "multi-user.target" config.systemd.services.aurora-accel-permissions.wantedBy;
         "trackpad clicks come from the host where the MTP trackpad has an actuator, as on Fedora and ALARM" =
           lib.any (package: (package.name or "") == "aurora-trackpad-clicks-rules") config.services.udev.packages;
         "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;

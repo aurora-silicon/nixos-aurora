@@ -40,7 +40,13 @@ while that session is in the foreground; systemd's own rules give accel nodes
 no such ACL and would otherwise leave them mode 0666. For access outside a
 local session (ssh, services), enroll the user in `accel` (Fedora/ALARM:
 `sudo usermod -aG accel USER`; NixOS: `users.users.USER.extraGroups = [ "accel" ];`),
-then log in again.
+then log in again. Until this rule, a default install left the node mode 0666,
+so ssh-only accounts and test harnesses that used it without the tools lose
+access until they are in `accel`. An upgrade applies the mode to an existing
+node at once (Fedora `%posttrans`, an ALARM pacman hook, a NixOS unit that runs
+on switch), with an add event: a change event does not reapply the group and
+mode. Fedora's SELinux policy has no file context for `/dev/accel` (the node is
+`device_t`), so this covers unconfined users only, as before.
 Run `omarchy-ane-smoke`: it checks 20 add calls and emits one JSON result.
 An unsupported chip or missing driver returns exit 2. Firmware fetching is
 always an explicit owner action; no install hook runs it.

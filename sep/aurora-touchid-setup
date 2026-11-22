@@ -368,19 +368,32 @@ APFS_MAX_BLOCK = 65536
 APFS_MAX_NODES = 16384
 APFS_MAX_DEPTH = 8
 APFS_MAX_FILES = 4096
-# All factory records read, together: room for four records at RECORD_LIMIT.
+# File-system tree records kept while looking for the factory cache, and the
+# bytes of their keys and values.
+APFS_MAX_RECORDS = 65536
+APFS_MAX_RECORD_BYTES = 16 * 1024 * 1024
+# The factory records read, together: room for four records at RECORD_LIMIT.
+# Only the families below are read and counted; other factory files are not.
 FACTORY_BUDGET = 4 * RECORD_LIMIT
+
+
+def consumed(name):
+    """A factory record that build() and admit() use: the FSC2 calibration,
+    the MSRk root key, the seal and the trust bundles."""
+    return name.startswith(('FSC2-', 'MSRk-', 'trustobject-')) or name.lower().startswith('seal-')
 
 
 class Container:
     """Read-only APFS, just enough for one directory of the Hardware volume:
     the newest valid checkpoint, the container and volume object maps, the
     file-system tree and uncompressed, unencrypted regular files. Every object
-    read is checksummed; any other layout is refused. `size`, the partition's
-    size in bytes, bounds the blocks the container may claim; file data is
-    read only up to each file's logical size and FACTORY_BUDGET in all."""
+    read is checksummed, each tree block is visited once per walk, and any
+    other layout, including a record too short for its fields, is refused.
+    `size`, the partition's size in bytes, bounds the blocks the container may
+    claim; file data is read only for the records consume() names, up to each
+    file's logical size and FACTORY_BUDGET in all."""
 
-    def __init__(self, read, size=None):
+    def __init__(self, read, size):
         self._read = read
         head = read(0, 4096)
         if len(head) < 4096 or head[32:36] != b'NXSB':
@@ -388,7 +401,7 @@ class Container:
         self.block_size, self.blocks = struct.unpack_from('<IQ', head, 36)
         if not 4096 <= self.block_size <= APFS_MAX_BLOCK or self.block_size & (self.block_size - 1):
             raise Refused('unsupported APFS block size')
-        if size is not None and self.blocks * self.block_size > size:
+        if self.blocks * self.block_size > size:
             raise Refused('the APFS container is larger than its partition')
         self.nodes = 0
         self.budget = FACTORY_BUDGET
@@ -417,12 +430,17 @@ class Container:
             raise Refused('unexpected APFS object')
         return data
 
-    def entries(self, number, resolve=None, depth=0):
+    def entries(self, number, resolve=None, depth=0, seen=None):
         """Each (key, value) of the B-tree at block `number`, in order; a
-        virtual tree's children go through `resolve`."""
+        virtual tree's children go through `resolve`. A block that comes up
+        twice in one walk is refused."""
         self.nodes += 1
         if self.nodes > APFS_MAX_NODES or depth > APFS_MAX_DEPTH:
             raise Refused('APFS tree too large')
+        seen = set() if seen is None else seen
+        if number in seen:
+            raise Refused('APFS tree block reached twice')
+        seen.add(number)
         node = self.block(number)
         if struct.unpack_from('<I', node, 24)[0] & 0xffff not in (0x2, 0x3):
             raise Refused('unexpected APFS object')
@@ -450,12 +468,16 @@ class Container:
             if level == 0:
                 yield key, value
             else:
+                if len(value) < 8:
+                    raise Refused('malformed APFS tree node')
                 child = struct.unpack_from('<Q', value)[0]
-                yield from self.entries(resolve(child) if resolve else child, resolve, depth + 1)
+                yield from self.entries(resolve(child) if resolve else child, resolve, depth + 1, seen)
 
     def lookup(self, root, oid, as_of):
         found = None
         for key, value in self.entries(root):
+            if len(key) < 16 or len(value) < 16:
+                raise Refused('malformed APFS object map record')
             key_oid, key_xid = struct.unpack_from('<QQ', key)
             if key_oid == oid and key_xid <= as_of and (found is None or key_xid > found[0]):
                 found = key_xid, value
@@ -468,7 +490,15 @@ class Container:
 
     def hardware(self):
         """{name: bytes} of the regular files in the Hardware volume's
-        factory cache."""
+        factory cache that consumed() names."""
+        try:
+            return self._hardware()
+        except struct.error:
+            # A field read past the end of its record: refused like any
+            # other malformed metadata, so the carve fallback still runs.
+            raise Refused('malformed APFS record') from None
+
+    def _hardware(self):
         volumes = []
         count = min(struct.unpack_from('<I', self.superblock, 180)[0], 100)
         for index in range(count):
@@ -494,10 +524,20 @@ class Container:
 
         hashed = struct.unpack_from('<Q', volume, 56)[0] & 0x9
         directories, inodes, extents = {}, {}, {}
+        kept = kept_bytes = 0
         for key, value in self.entries(resolve(struct.unpack_from('<Q', volume, 136)[0]), resolve):
+            if len(key) < 8:
+                raise Refused('malformed APFS file-system record')
             header = struct.unpack_from('<Q', key)[0]
             oid, kind = header & (1 << 60) - 1, header >> 60
+            if kind not in (3, 8, 9):
+                continue
+            kept, kept_bytes = kept + 1, kept_bytes + len(key) + len(value)
+            if kept > APFS_MAX_RECORDS or kept_bytes > APFS_MAX_RECORD_BYTES:
+                raise Refused('APFS file-system tree too large')
             if kind == 9:
+                if len(key) < (12 if hashed else 10) or len(value) < 18:
+                    raise Refused('malformed APFS directory entry')
                 if hashed:
                     length, name_at = struct.unpack_from('<I', key, 8)[0] & 0x3ff, 12
                 else:
@@ -511,6 +551,8 @@ class Container:
             elif kind == 3:
                 inodes[oid] = value
             elif kind == 8:
+                if len(key) < 16 or len(value) < 16:
+                    raise Refused('malformed APFS file extent')
                 logical = struct.unpack_from('<Q', key, 8)[0]
                 length, physical_block = struct.unpack_from('<QQ', value)
                 extents.setdefault(oid, []).append((logical, length & (1 << 56) - 1, physical_block))
@@ -522,10 +564,11 @@ class Container:
             directory = entry[0]
         found = {}
         for name, (file_id, kind) in sorted(directories.get(directory, {}).items()):
-            if kind == 8:
+            text = name.decode('utf-8', 'replace')
+            if kind == 8 and consumed(text):
                 if len(found) == APFS_MAX_FILES:
                     raise Refused('too many factory records')
-                found[name.decode('utf-8', 'replace')] = self.contents(inodes.get(file_id), extents)
+                found[text] = self.contents(inodes.get(file_id), extents)
         return found
 
     def contents(self, inode, extents):
@@ -536,11 +579,15 @@ class Container:
         private_id = struct.unpack_from('<Q', inode, 8)[0]
         count = struct.unpack_from('<H', inode, 92)[0]
         types, at, size = 96, 96 + 4 * count, 0
+        if at > len(inode):
+            raise Refused('malformed APFS inode')
         for index in range(count):
             field, _, length = struct.unpack_from('<BBH', inode, types + 4 * index)
             if at + length > len(inode):
                 raise Refused('malformed APFS inode')
             if field == 8:
+                if length < 8:
+                    raise Refused('malformed APFS inode')
                 size = struct.unpack_from('<Q', inode, at)[0]
             at += length + 7 & ~7
         if size > RECORD_LIMIT:
@@ -802,7 +849,7 @@ class Wanted:
         self.evidence = {}
 
 
-def factory(read, size=None):
+def factory(read, size):
     try:
         return Container(read, size).hardware(), None
     except Refused as error:
@@ -823,7 +870,7 @@ def carve(device, extractor, work=None):
         return output.read_bytes()
 
 
-def build(read, device, extractor, identity, names, work=None, size=None):
+def build(read, device, extractor, identity, names, work, size):
     """The files this Mac's sensor loads, built from its own factory data."""
     calibration = Wanted('calibration', names[0])
     wanted = [calibration]
@@ -1010,8 +1057,8 @@ def boot_id():
         return None
 
 
-def setup(read, device, extractor, tree, firmware, state, run, *, check=False, trigger='user',
-          search=None, sep_bio=Path('/dev/sep-bio'), devices=DIAG, size=None):
+def setup(read, device, extractor, tree, firmware, state, run, *, size, check=False,
+          trigger='user', search=None, sep_bio=Path('/dev/sep-bio'), devices=DIAG):
     """Set up (or, with `check`, only report) this Mac's Touch ID files."""
     result = {'tool': 'aurora-touchid-setup', 'version': 1,
               'time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),

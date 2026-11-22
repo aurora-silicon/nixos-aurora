@@ -3,6 +3,16 @@ let
   avdFirmware = pkgs.aurora-avd-firmware;
   # The oldest avd-fw the booted kernel's device trees work with (pkgs/kernel.nix).
   minAvdFirmware = config.boot.kernelPackages.kernel.auroraMinAvdFirmware or null;
+  # /dev/accel (the Neural Engine) for the accel group and the local
+  # session user, instead of systemd's mode 0666; with or without
+  # aurora.ane. Same rule as Fedora's aurora-platform-core and ALARM's
+  # aurora-system-fixes.
+  accelRules = pkgs.writeTextFile {
+    name = "aurora-accel-rules";
+    destination = "/lib/udev/rules.d/70-aurora-accel.rules";
+    text = builtins.readFile ./70-aurora-accel.rules;
+  };
+  udevadm = "${config.systemd.package}/bin/udevadm";
 in {
   hardware.bluetooth.enable = true;
   # BlueZ 5.87 includes the empty default-parameter transaction fix.
@@ -61,17 +71,28 @@ in {
       destination = "/lib/udev/rules.d/64-aurora-trackpad-clicks.rules";
       text = builtins.readFile ./64-aurora-trackpad-clicks.rules;
     })
-    # /dev/accel (the Neural Engine) for the accel group and the local
-    # session user, instead of systemd's mode 0666; with or without
-    # aurora.ane. Same rule as Fedora's aurora-platform-core and ALARM's
-    # aurora-system-fixes.
-    (pkgs.writeTextFile {
-      name = "aurora-accel-rules";
-      destination = "/lib/udev/rules.d/70-aurora-accel.rules";
-      text = builtins.readFile ./70-aurora-accel.rules;
-    })
+    accelRules
   ];
   users.groups.accel = { };
+  # A switch gives an existing /dev/accel node the rule's group and mode, not
+  # only the next boot: NixOS restarts udevd when the rules change but replays
+  # no events, and only an add event reapplies GROUP and MODE (a change event
+  # does not). Fedora (%posttrans) and ALARM (a pacman hook) do the same.
+  systemd.services.aurora-accel-permissions = {
+    description = "Apply the /dev/accel permissions to existing nodes";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "systemd-udevd.service" "systemd-udev-trigger.service" ];
+    restartTriggers = [ accelRules ];
+    unitConfig.ConditionPathExists = "/run/udev/control";
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = [
+        "-${udevadm} control --reload"
+        "-${udevadm} trigger --action=add --subsystem-match=accel --settle"
+      ];
+    };
+  };
   # The sense-PCM udev rule starts the feed-forward guardian only on J700.
   systemd.services.speakersafetyd.serviceConfig = {
     # Preserve the board-specific legacy daemon selector.
