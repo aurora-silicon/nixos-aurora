@@ -25,10 +25,6 @@ dt_nodes() {
     while read -r path; do echo "${path%/compatible}"; done
 }
 
-# Per-device firmware is named after the board: the root's first compatible.
-board=$(tr '\000' '\n' < "$dt/compatible" | head -n 1)
-board=${board#apple,}
-
 # An AOP ambient light sensor whose node names a calibration file reads it
 # while aop probes, and aop does not probe again. Hold aop back until the
 # file is in place.
@@ -69,11 +65,14 @@ if [ -n "$wifi" ] && tr '\000' '\n' < "$dt$wifi/compatible" | grep -qxF pci14c3,
   done
 fi
 
-# A built-in trackpad on the keyboard's DockChannel reads
-# apple/tpmtfw-<board>.bin while it probes.
+# A built-in trackpad on the keyboard's DockChannel reads the file that its
+# multi-touch node names in firmware-name while it probes. Without the
+# property the driver sends no firmware, so there is nothing to check.
 for node in $(dt_nodes apple,dockchannel-hid); do
-  if [ -d "$node/multi-touch" ] && ! has_firmware "apple/tpmtfw-$board.bin"; then
-    echo 'Aurora: trackpad firmware missing; keyboard probe continues' >&2
+  [ -r "$node/multi-touch/firmware-name" ] || continue
+  trackpad=$(tr -d '\000' < "$node/multi-touch/firmware-name")
+  if ! has_firmware "$trackpad"; then
+    echo "Aurora: trackpad firmware $trackpad missing; keyboard probe continues" >&2
   fi
 done
 # The Neo and M2 and later MacBooks share this keyboard and trackpad driver.

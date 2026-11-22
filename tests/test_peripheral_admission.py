@@ -22,7 +22,8 @@ NEO = 'apple,j700\0apple,t8140\0'
 M2 = 'apple,j413\0apple,t8112\0'
 
 
-def device_tree(root, compatible, radio='pci14e4,4433', als_calibration=None, trackpad=True):
+def device_tree(root, compatible, radio='pci14e4,4433', als_calibration=None, trackpad=True,
+                trackpad_firmware=None):
     """A device tree in the shape of the live one: the parts the admission reads."""
     dt = root / 'dt'
     dt.mkdir(parents=True, exist_ok=True)
@@ -48,6 +49,8 @@ def device_tree(root, compatible, radio='pci14e4,4433', als_calibration=None, tr
     if trackpad:
         hid = node('soc/fifo@314b14000/input@8000', 'apple,dockchannel-hid\0')
         (hid / 'multi-touch').mkdir()
+        if trackpad_firmware is not None:
+            (hid / 'multi-touch/firmware-name').write_bytes(trackpad_firmware.encode() + b'\0')
     return dt
 
 
@@ -81,7 +84,8 @@ class PeripheralAdmissionTests(unittest.TestCase):
             path.write_bytes(b'fixture')
 
     def neo(self, root):
-        device_tree(root, NEO, radio='pci14c3,7932', als_calibration='apple/j700-aop-als-cal.bin')
+        device_tree(root, NEO, radio='pci14c3,7932', als_calibration='apple/j700-aop-als-cal.bin',
+                    trackpad_firmware='apple/tpmtfw-j700.bin')
 
     def test_neo_keyboard_probe_follows_firmware_admission(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -90,12 +94,12 @@ class PeripheralAdmissionTests(unittest.TestCase):
             self.firmware(root, 'apple/tpmtfw-j700.bin')
             calls, stderr = self.admit(root, NEO)
             self.assertEqual(calls, ['dockchannel-hid'])
-            self.assertNotIn(b'trackpad firmware missing', stderr)
+            self.assertNotIn(b'trackpad firmware', stderr)
             self.assertIn(b'ALS calibration apple/j700-aop-als-cal.bin missing', stderr)
 
             (root / 'firmware/apple/tpmtfw-j700.bin').unlink()
             calls, stderr = self.admit(root, NEO)
-            self.assertIn(b'trackpad firmware missing', stderr)
+            self.assertIn(b'trackpad firmware apple/tpmtfw-j700.bin missing', stderr)
             self.assertEqual(calls, ['dockchannel-hid'])
 
     def test_neo_admits_aop_and_radio_once_their_firmware_is_in_place(self):
@@ -124,7 +128,7 @@ class PeripheralAdmissionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.firmware(root, 'apple/tpmtfw-j413.bin', *MT7932_FIRMWARE)
-            calls, stderr = self.admit(root, M2, radio='pci14c3,7932')
+            calls, stderr = self.admit(root, M2, radio='pci14c3,7932', trackpad_firmware='apple/tpmtfw-j413.bin')
             self.assertEqual(calls, ['dockchannel-hid', 'aop', 'mt7932-fullmac'], stderr)
 
     def test_other_macs_keep_their_keyboard_driver(self):
@@ -132,19 +136,42 @@ class PeripheralAdmissionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.firmware(root, 'apple/tpmtfw-j413.bin')
-            calls, stderr = self.admit(root, M2)
+            calls, stderr = self.admit(root, M2, trackpad_firmware='apple/tpmtfw-j413.bin')
             self.assertEqual(calls, ['dockchannel-hid', 'aop'])
-            self.assertNotIn(b'trackpad firmware missing', stderr)
+            self.assertNotIn(b'trackpad firmware', stderr)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            calls, stderr = self.admit(root, M2)
+            calls, stderr = self.admit(root, M2, trackpad_firmware='apple/tpmtfw-j413.bin')
             self.assertEqual(calls, ['dockchannel-hid', 'aop'])
-            self.assertIn(b'trackpad firmware missing', stderr)
+            self.assertIn(b'trackpad firmware apple/tpmtfw-j413.bin missing', stderr)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             calls, stderr = self.admit(root, 'apple,j274\0apple,t8103\0', trackpad=False)
             self.assertEqual(calls, ['dockchannel-hid', 'aop'])
-            self.assertNotIn(b'trackpad firmware missing', stderr)
+            self.assertNotIn(b'trackpad firmware', stderr)
+
+    def test_trackpad_firmware_is_the_one_its_node_names(self):
+        # The multi-touch node's firmware-name decides the file, not the board.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.firmware(root, 'apple/tpmtfw-j700.bin')
+            calls, stderr = self.admit(root, NEO, trackpad_firmware='apple/tpmtfw-j413.bin')
+            self.assertEqual(calls, ['dockchannel-hid', 'aop'])
+            self.assertIn(b'trackpad firmware apple/tpmtfw-j413.bin missing', stderr)
+            self.assertNotIn(b'tpmtfw-j700', stderr)
+
+            vendor = root / 'firmware/vendor/apple/tpmtfw-j413.bin'
+            vendor.parent.mkdir(parents=True)
+            vendor.write_bytes(b'fixture')
+            calls, stderr = self.admit(root, NEO)
+            self.assertNotIn(b'trackpad firmware', stderr)
+        # Without the property the driver sends no firmware: nothing to check,
+        # even with no trackpad file for the board.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            calls, stderr = self.admit(root, M2)
+            self.assertEqual(calls, ['dockchannel-hid', 'aop'])
+            self.assertNotIn(b'trackpad firmware', stderr)
 
     def extract(self, root, esp, cpio_body=None):
         """Runs the module's extraction script with the ESP mounted at esp."""
