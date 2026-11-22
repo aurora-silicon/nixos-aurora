@@ -61,7 +61,17 @@ in {
       destination = "/lib/udev/rules.d/64-aurora-trackpad-clicks.rules";
       text = builtins.readFile ./64-aurora-trackpad-clicks.rules;
     })
+    # /dev/accel (the Neural Engine) for the accel group and the local
+    # session user, instead of systemd's mode 0666; with or without
+    # aurora.ane. Same rule as Fedora's aurora-platform-core and ALARM's
+    # aurora-system-fixes.
+    (pkgs.writeTextFile {
+      name = "aurora-accel-rules";
+      destination = "/lib/udev/rules.d/70-aurora-accel.rules";
+      text = builtins.readFile ./70-aurora-accel.rules;
+    })
   ];
+  users.groups.accel = { };
   # The sense-PCM udev rule starts the feed-forward guardian only on J700.
   systemd.services.speakersafetyd.serviceConfig = {
     # Preserve the board-specific legacy daemon selector.
