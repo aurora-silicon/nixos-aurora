@@ -9,9 +9,9 @@ Apple Silicon options remain available; see the links in the module guide. For d
 
 ## `aurora.ane.enable`
 
-Install the Apple Neural Engine (ANE) tools and compiler, create the `accel` group and add
-device access rules. Disabling this omits that userspace integration;
-it does not change the kernel driver or fetch firmware.
+Install the Apple Neural Engine (ANE) tools and compiler. The `accel` group and the
+`/dev/accel` access rule come from the platform module either way. Disabling this
+omits the tools; it does not change the kernel driver or fetch firmware.
 
 **Type:** boolean
 

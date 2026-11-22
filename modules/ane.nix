@@ -4,9 +4,9 @@ in {
   options.aurora.ane = {
     enable = lib.mkEnableOption "Apple Neural Engine (ANE) userspace tools and compiler" // {
       description = ''
-        Install the Apple Neural Engine (ANE) tools and compiler, create the `accel` group and add
-        device access rules. Disabling this omits that userspace integration;
-        it does not change the kernel driver or fetch firmware.
+        Install the Apple Neural Engine (ANE) tools and compiler. The `accel` group and the
+        `/dev/accel` access rule come from the platform module either way. Disabling this
+        omits the tools; it does not change the kernel driver or fetch firmware.
       '';
     };
     firmwarePackage = lib.mkOption {
@@ -22,8 +22,6 @@ in {
   };
   config = lib.mkIf cfg.enable {
     environment.systemPackages = [ pkgs.omarchy-ane-tools pkgs.mil-hwx-compiler ];
-    users.groups.accel = { };
-    services.udev.packages = [ pkgs.omarchy-ane-tools ];
     hardware.firmware = lib.optional (cfg.firmwarePackage != null)
       (cfg.firmwarePackage // { compressFirmware = false; });
     # The firmware validator and fetcher pin the raw image, not a .zst file.
