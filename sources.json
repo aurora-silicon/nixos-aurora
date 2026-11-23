@@ -191,23 +191,23 @@
   },
   "omarchy-ane-tools": {
     "repository": "https://github.com/joshuaswarren/omarchy-ane",
-    "commit": "68e92712bbffa08f5002dcc542434fe1393f0578",
-    "version": "0.5.7",
-    "source_url": "https://codeload.github.com/joshuaswarren/omarchy-ane/tar.gz/68e92712bbffa08f5002dcc542434fe1393f0578",
-    "archive_root": "omarchy-ane-68e92712bbffa08f5002dcc542434fe1393f0578",
-    "sha256": "09fee8d386728939d4752acb21a3ff99192809bf608f8d1bca6cd426b460aea6",
-    "nix_hash": "sha256-Cf7o04ZyiTnUdSrLIaP/mRkoCb9gj40bymzUJrRgrqY=",
+    "commit": "a0acd9af12346c870ee1538947cbe9f2740cb7fe",
+    "version": "0.5.13",
+    "source_url": "https://codeload.github.com/joshuaswarren/omarchy-ane/tar.gz/a0acd9af12346c870ee1538947cbe9f2740cb7fe",
+    "archive_root": "omarchy-ane-a0acd9af12346c870ee1538947cbe9f2740cb7fe",
+    "sha256": "e7a6d40a1735952eb06aebdca358ac3cee94184da48aebf8aa7cbf3ea2a9ed22",
+    "nix_hash": "sha256-56bUChc1lS6wauvco1isPO6UGE2kiuv4qny/PqKp7SI=",
     "redistribute_source": false
   },
   "mil-hwx-compiler": {
     "repository": "https://github.com/joshuaswarren/mil-hwx-compiler",
-    "commit": "927013f5480768b07c8e62a866e1514c41aba778",
-    "source_url": "https://codeload.github.com/joshuaswarren/mil-hwx-compiler/tar.gz/927013f5480768b07c8e62a866e1514c41aba778",
-    "archive_root": "mil-hwx-compiler-927013f5480768b07c8e62a866e1514c41aba778",
-    "sha256": "45eddcad03d68aaccb78d622711b91f144a88f9df952784e8c64c9bd1eb03790",
-    "version": "0.3.1",
-    "tag": "v0.3.1",
-    "nix_hash": "sha256-Re3crQPWiqzLeNYicRuR8USoj535UnhOjGTJvR6wN5A=",
+    "commit": "b7008384be29e61404be510dbe8128bf3cd50903",
+    "source_url": "https://codeload.github.com/joshuaswarren/mil-hwx-compiler/tar.gz/b7008384be29e61404be510dbe8128bf3cd50903",
+    "archive_root": "mil-hwx-compiler-b7008384be29e61404be510dbe8128bf3cd50903",
+    "sha256": "50af5b67c68799e4b1d7d75dce354a5ecac7a96f22188cd3f0ad152fccb250fc",
+    "version": "0.3.3",
+    "tag": "v0.3.3",
+    "nix_hash": "sha256-UK9bZ8aHmeSx19ddzjVKXsrHqW8iGIzT8K0VL8yyUPw=",
     "redistribute_source": false,
     "extra_sources": {
       "gnustep-base": {
@@ -341,11 +341,11 @@
   },
   "omdrop-awdl": {
     "repository": "https://github.com/netmojo-systems/omdrop-awdl",
-    "commit": "ffc201f33773541063f2f3d57c8a279cad5ede11",
-    "version": "0.10.5",
-    "source_url": "https://codeload.github.com/netmojo-systems/omdrop-awdl/tar.gz/ffc201f33773541063f2f3d57c8a279cad5ede11",
-    "archive_root": "omdrop-awdl-ffc201f33773541063f2f3d57c8a279cad5ede11",
-    "sha256": "bc52318293615f773ef0f9a9523772a83bf73edaaf87b528e2a32856ff02d385",
+    "commit": "9b59420299203805b213f7f65fbcba1d7690177f",
+    "version": "0.10.7",
+    "source_url": "https://codeload.github.com/netmojo-systems/omdrop-awdl/tar.gz/9b59420299203805b213f7f65fbcba1d7690177f",
+    "archive_root": "omdrop-awdl-9b59420299203805b213f7f65fbcba1d7690177f",
+    "sha256": "a332002304b6c76986dfcfb2ba82c27d0b23c298200bb4e325bab2bf53de275c",
     "extra_sources": {
       "omdrop-plugin": {
         "repository": "https://github.com/netmojo-systems/omdrop-plugin",
@@ -355,7 +355,7 @@
         "sha256": "db362d1fc13be701643cb5e4c390f292ea4e3ce006c0ebda5440b07763b90c41"
       }
     },
-    "nix_hash": "sha256-vFIxgpNhX3c+8PmpUjdyqDv3Ptqvh7Uo4qMoVv8C04U="
+    "nix_hash": "sha256-ozIAIwS2x2mG38+yuoLCfQsjwpggC7TjJbqyv1PeJ1w="
   },
   "aurora-speaker-upgrade": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",

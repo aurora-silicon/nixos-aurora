@@ -935,7 +935,7 @@ in {
   # patches as fedora-aurora's and alarm-aurora's omdrop-awdl; modules/awdl.nix
   # installs it with aurora.awdl.enable, off by default.
   omdrop-awdl = let
-    py = final.python3.withPackages (ps: [ ps.libarchive-c ps.pillow ps.dbus-python ps.pygobject3 ]);
+    py = final.python3.withPackages (ps: [ ps.ifaddr ps.libarchive-c ps.pillow ps.dbus-python ps.pygobject3 ps.zeroconf ]);
     plugin = let pin = pins.omdrop-awdl.extra_sources.omdrop-plugin; in final.fetchurl {
       name = "omdrop-plugin-${pin.commit}.tar.gz";
       url = pin.source_url;
