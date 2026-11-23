@@ -22,7 +22,11 @@ let
   # of linux#2586 no longer fits.
   olderAvdFirmware = installed.extendModules {
     modules = [ { nixpkgs.overlays = lib.mkAfter [ (_: prev: {
-      aurora-avd-firmware = prev.aurora-avd-firmware.overrideAttrs { version = "0.1-unstable-2026-11-01.2"; };
+      # Only the version matters here: the platform assertion compares it.
+      aurora-avd-firmware = prev.aurora-avd-firmware.overrideAttrs {
+        version = "0.1-unstable-2026-11-01.2";
+        __intentionallyOverridingVersion = true;
+      };
     }) ]; } ];
   };
   awdl = installed.extendModules {
