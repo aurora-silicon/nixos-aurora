@@ -1054,6 +1054,24 @@ while retaining the launcher. Kernel-command-line changes need a reboot.
 
 **Declared in:** [userpages.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/userpages.nix)
 
+## `aurora.video.proresV4l2`
+
+Give applications the ProRes engine's V4L2 encoder and decoder. Installs
+aurora-ffmpeg, nixpkgs' FFmpeg with the `prores_v4l2m2m` codecs, as the
+system's `ffmpeg`, and puts the `video4linux2` plugin of
+aurora-gst-plugins-good (`v4l2proresdec`, `v4l2proresenc`) on
+`GST_PLUGIN_PATH_1_0` for every session. GStreamer scans that path
+before `GST_PLUGIN_SYSTEM_PATH_1_0`, where nixpkgs' wrappers put an
+application's own plugins, and keeps the first plugin it finds under a
+file name, so the patched plugin replaces nixpkgs' copy of the same
+plugin and nothing else. False leaves both unchanged.
+
+**Type:** boolean
+
+**Default:** `true`
+
+**Declared in:** [video.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/video.nix)
+
 ## `aurora.wifiFirmware.followMacOS`
 
 Keep the ESP's Wi-Fi firmware on the installed macOS's, as macOS does (aurora-wifi-firmware).

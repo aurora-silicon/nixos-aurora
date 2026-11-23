@@ -44,6 +44,8 @@ NEEDS = {
     'flatpak-gl': ['mesa-aurora'],
     'alsa-utils': ['alsa-utils'],
     'pipewire': [],  # nixpkgs' pinned release, with the local patches
+    'ffmpeg': [],  # nixpkgs' pinned release, with the V4L2 ProRes patches
+    'gst-plugins-good': [],  # nixpkgs' pinned release, with the V4L2 ProRes patches
     'firefox': [],  # nixpkgs' pinned release, with the RDD V4L2 Request patch
     'audio': ['aurora-audio'],
     'ucm': ['alsa-ucm-conf-aurora'],

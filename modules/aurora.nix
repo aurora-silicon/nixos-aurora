@@ -5,7 +5,7 @@
     ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix ./panel-nits.nix ./btsync.nix ./fido.nix ./awdl.nix ./sep-luks.nix
     ./userpages.nix ./boot-splash.nix ./speakerguardd-v2.nix ./speaker-upgrade.nix ./wifi-firmware.nix ./steam.nix
     ./power-budget.nix ./gamemode.nix ./diag.nix ./secure-boot.nix ./m5-platform.nix
-    ./nixpkgs-grub.nix ];
+    ./nixpkgs-grub.nix ./video.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";

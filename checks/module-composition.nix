@@ -18,6 +18,11 @@ let
     modules = [ { aurora.speakerguardd.upgrade.enable = false; } ];
   };
   upgradePackage = installed.pkgs.aurora-speaker-upgrade;
+  withoutProres = installed.extendModules {
+    modules = [ { aurora.video.proresV4l2 = false; } ];
+  };
+  proresFfmpeg = installed.pkgs.aurora-ffmpeg;
+  gstPluginPath = config: config.environment.sessionVariables.GST_PLUGIN_PATH_1_0 or null;
   # avd-fw 6062e851, whose 0x12000-byte v4 image the T8122 (M3) device tree
   # of linux#2586 no longer fits.
   olderAvdFirmware = installed.extendModules {
@@ -59,4 +64,13 @@ assert lib.assertMsg
     && !(refusesAvdFirmware installed) && refusesAvdFirmware olderAvdFirmware
     && lib.hasInfix "('v4-t0', 0x10000, '" (builtins.readFile ../firmware/check-avd.py))
   "The kernel must require the avd-fw whose 64 KiB v4 image fits the T8122 SRAM window, and refuse an older one";
+assert lib.assertMsg
+  (lib.elem proresFfmpeg installed.config.environment.systemPackages
+    && builtins.match "/nix/store/[^/:]+-aurora-gst-video4linux2/lib/gstreamer-1.0" (gstPluginPath installed.config) != null
+    && !(installed.config.environment.sessionVariables ? GST_PLUGIN_SYSTEM_PATH_1_0))
+  "Every profile must install aurora-ffmpeg and put only the patched video4linux2 plugin on GST_PLUGIN_PATH_1_0";
+assert lib.assertMsg
+  (!(lib.elem proresFfmpeg withoutProres.config.environment.systemPackages)
+    && gstPluginPath withoutProres.config == null)
+  "Turning aurora.video.proresV4l2 off must leave FFmpeg and the GStreamer plugin path unchanged";
 pkgs.runCommand "aurora-module-composition" { } "touch $out"
