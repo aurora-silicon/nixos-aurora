@@ -14,7 +14,9 @@
   # The CPU frequency driver in the initrd, so the cores leave the boot
   # loader's clock there instead of after the switch to the real root (MacBook
   # Neo: 744 MHz until ~7 s otherwise). It binds by the cluster controllers'
-  # compatible, so it loads on every Apple silicon Mac, as on Fedora and ALARM.
+  # compatible, so it loads on every Apple silicon Mac. The kernel builds it as
+  # a module (CONFIG_ARM_APPLE_SOC_CPUFREQ=m); scripts/check-parity.py checks
+  # that the image's initrd carries it.
   boot.initrd.availableKernelModules = [ "apple-soc-cpufreq" ];
   hardware.enableRedistributableFirmware = true;
   hardware.firmware = [ pkgs.aurora-avd-firmware ];
