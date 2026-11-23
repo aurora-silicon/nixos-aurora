@@ -623,7 +623,12 @@ in {
     # the gate's, which also runs as the older daemons' ExecCondition.
     buildInputs = [ final.python3 ];
     nativeCheckInputs = [ final.python3 ];
-    postCheck = "python3 -I packaging/session/test_provision.py";
+    postCheck = ''
+      python3 -I packaging/session/test_provision.py
+      python3 -I packaging/session/test_wiring.py
+      python3 -I packaging/session/test_verify.py
+      python3 -I packaging/session/test_session.py
+    '';
     postInstall = ''
       lx=$out/libexec/speakerguardd-v2
       mkdir -p $lx $out/lib/lv2/sgv2.lv2 $out/lib/systemd/system $out/lib/systemd/user

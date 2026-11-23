@@ -22,10 +22,13 @@ stdenvNoCC.mkDerivation {
       --set-default AURORA_LZFSE_LIB ${lzfse}/lib/liblzfse.so \
       --prefix PATH : ${lib.makeBinPath [ util-linux alsa-utils systemd ]}
     # v2's helpers live in its store path, not /usr/libexec: point the tool there
-    # (without it the tool reports v2 as not installed and never switches).
+    # (without it the tool reports v2 as not installed and never switches). The
+    # same for its parity attestations and gate.json, whose protected playback
+    # rows decide whether the boot unit may switch a speaker (speakerguardd#238).
     substituteInPlace $out/lib/aurora-speaker-upgrade/aurora_speaker_upgrade/upgrade.py \
       --replace-fail 'LIBEXEC = ("/usr/libexec/speakerguardd-v2",' 'LIBEXEC = ("${speakerguardd-v2}/libexec/speakerguardd-v2", "/usr/libexec/speakerguardd-v2",' \
-      --replace-fail 'PARITY = ("/usr/share/speakerguardd/parity.json",)' 'PARITY = ("${speakerguardd-v2}/share/speakerguardd/parity.json", "/usr/share/speakerguardd/parity.json")'
+      --replace-fail 'PARITY = ("/usr/share/speakerguardd/parity.json",)' 'PARITY = ("${speakerguardd-v2}/share/speakerguardd/parity.json", "/usr/share/speakerguardd/parity.json")' \
+      --replace-fail 'GATE = "/usr/share/speakerguardd/gate.json"' 'GATE = "${speakerguardd-v2}/share/speakerguardd/gate.json"'
     # No speakerguardd-v2.service drop-in since speakerguardd#205: the
     # supervisor unit applies the kernel interface itself.
     substituteInPlace $out/lib/systemd/system/aurora-speaker-upgrade.service \
