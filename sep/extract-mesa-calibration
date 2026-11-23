@@ -304,13 +304,21 @@ def find_comb_calibrations(data):
 ISC_NAME = 'iBootSystemContainer'
 DT_ESP = 'chosen/asahi,efi-system-partition'
 ESP_MOUNTS = ('/boot/efi', '/boot')
-# Transports of disks that can be plugged in; lsblk's RM and HOTPLUG cover
+# Transports of disks that can be plugged in (FireWire disks show as sbp); lsblk's RM and HOTPLUG cover
 # removable media and devices behind a hot-plug port (Thunderbolt).
-EXTERNAL_TRAN = ('usb', 'mmc', 'ieee1394')
+EXTERNAL_TRAN = ('usb', 'mmc', 'sbp')
 
 
 def _flag(value):
     return value is True or str(value).strip().lower() in ('1', 'true')
+
+
+def _external(item, devices):
+    """Whether a partition or disk, or the disk it sits on, can be plugged in."""
+    parent = next((d for d in devices if d.get('path') == item.get('pkname')), None)
+    return any(_flag(d.get('rm')) or _flag(d.get('hotplug')) or
+               (d.get('tran') or '').lower() in EXTERNAL_TRAN
+               for d in (item, parent) if d)
 
 
 def block_devices(run):
@@ -339,12 +347,25 @@ def esp_partition(devices, run, dt):
     """The system ESP: the partition whose PARTUUID the boot loader put in
     the device tree, else the vfat file system mounted at /boot/efi or /boot."""
     try:
-        uuid = (dt / DT_ESP).read_bytes().split(b'\0')[0].decode().strip().lower()
-    except (OSError, UnicodeDecodeError):
-        uuid = ''
-    if uuid:
-        matches = [d.get('path') for d in devices if d.get('type') == 'part'
-                   and (d.get('partuuid') or '').lower() == uuid]
+        raw = (dt / DT_ESP).read_bytes()
+    except FileNotFoundError:
+        raw = None
+    except OSError as e:
+        raise Refused(f'the device tree ESP property could not be read ({e})') from None
+    if raw is not None:
+        try:
+            uuid = raw.split(b'\0')[0].decode().strip().lower()
+        except UnicodeDecodeError:
+            uuid = ''
+        if not uuid:
+            raise Refused('the device tree ESP property is empty or not text')
+        # A removable or external disk can carry a copy of the ESP's PARTUUID;
+        # it is not counted, so it can neither be chosen nor hide the real one.
+        found = [d for d in devices if d.get('type') == 'part'
+                 and (d.get('partuuid') or '').lower() == uuid]
+        matches = [d.get('path') for d in found if not _external(d, devices)]
+        if not matches and found:
+            raise Refused(f'the system ESP (PARTUUID {uuid}) is only on a removable or external disk')
         if len(matches) != 1:
             raise Refused(f'the system ESP (PARTUUID {uuid}) matches {len(matches)} partitions, not one')
         return matches[0]
@@ -372,8 +393,7 @@ def system_container(run=subprocess.run, dt=DT):
     if not esp or not disk or esp.get('type') != 'part' or disk.get('type') != 'disk':
         raise Refused(f'the disk holding the system ESP {esp_dev} was not found')
     for item in (esp, disk):
-        if _flag(item.get('rm')) or _flag(item.get('hotplug')) or \
-                (item.get('tran') or '').lower() in EXTERNAL_TRAN:
+        if _external(item, devices):
             raise Refused(f'the system ESP {esp_dev} is on a removable or external disk '
                           f'({disk["path"]})')
     found = [d.get('path') for d in devices if d.get('pkname') == disk['path']
@@ -386,7 +406,11 @@ def system_container(run=subprocess.run, dt=DT):
 
 def discover_isc_inputs(run=subprocess.run, dt=DT):
     """The iBoot System Container of the disk that holds the system ESP."""
-    return [system_container(run, dt)]
+    try:
+        return [system_container(run, dt)]
+    except Refused as error:
+        raise Refused(f"{error}; pass the container's block device or a raw "
+                      "partition dump explicitly") from None
 
 
 def scan_input(path):
@@ -482,11 +506,6 @@ def main():
     args = parse_args()
     try:
         inputs = [args.input] if args.input is not None else discover_isc_inputs()
-        if not inputs:
-            raise RuntimeError(
-                "no iBootSystemContainer partition found; pass its block device "
-                "or a raw partition dump explicitly"
-            )
         validate_output(args.output, inputs)
 
         candidates = []

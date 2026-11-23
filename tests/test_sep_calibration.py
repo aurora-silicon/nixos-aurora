@@ -353,7 +353,7 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_discovery_without_a_known_esp_is_refused_cleanly(self):
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "pass the container's block device"):
                 extractor.discover_isc_inputs(lsblk_run(self.INTERNAL, self.PLUGGED), self.tree(directory, None))
             output = Path(directory) / "calibration.bin"
             err = io.StringIO()

@@ -542,6 +542,99 @@ class SystemContainerTests(unittest.TestCase):
             self.assertNotRegex((PACKAGE / name).read_text(), r'''["']/dev/disk/by-partlabel''', name)
 
 
+class EspPropertyTests(unittest.TestCase):
+    tree = SystemContainerTests.tree
+
+    def raw_tree(self, data):
+        root = self.tree(None)
+        (root / 'chosen').mkdir()
+        (root / 'chosen' / 'asahi,efi-system-partition').write_bytes(data)
+        return root
+
+    def test_an_empty_or_binary_property_is_refused_not_skipped(self):
+        # The mounted ESP would resolve; a property that is present but
+        # unusable must not fall back to it.
+        run = BootDisk(INTERNAL, mounts={'/boot/efi': '/dev/nvme0n1p4 vfat\n'})
+        for name, data in (('empty', b''), ('nul only', b'\0'), ('blank', b' \0'), ('binary', b'\xff\xfe\0')):
+            with self.subTest(name), self.assertRaisesRegex(helper.Refused, 'empty or not text'):
+                helper.system_container(run, self.raw_tree(data))
+
+    def test_an_external_copy_of_the_esp_partuuid_is_not_counted(self):
+        copy = disk('/dev/sda', part('/dev/sda1', 'iBootSystemContainer'),
+                    part('/dev/sda2', 'EFI', ESP_UUID), tran='usb')
+        for order in ((INTERNAL, copy), (copy, INTERNAL)):
+            with self.subTest(first=order[0]['path']):
+                self.assertEqual(helper.system_container(BootDisk(*order), self.tree()),
+                                 Path('/dev/nvme0n1p1'))
+        # Alone, the external copy is still not chosen.
+        with self.assertRaises(helper.Refused):
+            helper.system_container(BootDisk(copy), self.tree())
+
+    def test_a_firewire_disk_is_external(self):
+        firewire = disk('/dev/sdc', part('/dev/sdc1', 'iBootSystemContainer'),
+                        part('/dev/sdc2', 'EFI', ESP_UUID), tran='sbp')
+        with self.assertRaises(helper.Refused):
+            helper.system_container(BootDisk(firewire), self.tree())
+
+
+def listed(*rows):
+    """Rows as lsblk prints them for these columns: one flat list, PKNAME set."""
+    return [dict(zip(('path', 'pkname', 'partlabel', 'partuuid', 'rm', 'hotplug', 'tran', 'type'), row))
+            for row in rows]
+
+
+# util-linux 2.41 on an M2 (PARTUUIDs replaced): the disk and its two extra
+# NVMe namespaces are separate disks, and nothing is nested.
+LISTING = listed(
+    ('/dev/nvme0n1', None, None, None, False, False, 'nvme', 'disk'),
+    ('/dev/nvme0n1p1', '/dev/nvme0n1', 'iBootSystemContainer', '11111111-0000-4000-8000-000000000001', False, False, 'nvme', 'part'),
+    ('/dev/nvme0n1p2', '/dev/nvme0n1', 'Container', '11111111-0000-4000-8000-000000000002', False, False, 'nvme', 'part'),
+    ('/dev/nvme0n1p3', '/dev/nvme0n1', None, '11111111-0000-4000-8000-000000000003', False, False, 'nvme', 'part'),
+    ('/dev/nvme0n1p4', '/dev/nvme0n1', None, ESP_UUID, False, False, 'nvme', 'part'),
+    ('/dev/nvme0n1p7', '/dev/nvme0n1', 'RecoveryOSContainer', '11111111-0000-4000-8000-000000000007', False, False, 'nvme', 'part'),
+    ('/dev/nvme0n2', None, None, None, False, False, 'nvme', 'disk'),
+    ('/dev/nvme0n3', None, None, None, False, False, 'nvme', 'disk'),
+)
+STICK = listed(
+    ('/dev/sda', None, None, None, False, False, 'usb', 'disk'),
+    ('/dev/sda1', '/dev/sda', 'iBootSystemContainer', '22222222-0000-4000-8000-000000000001', False, False, 'usb', 'part'),
+)
+
+
+class ListingTests(unittest.TestCase):
+    tree = SystemContainerTests.tree
+
+    def test_a_flat_listing_with_pkname_resolves(self):
+        for order in (LISTING + STICK, STICK + LISTING):
+            self.assertEqual(helper.system_container(BootDisk(*order), self.tree()), Path('/dev/nvme0n1p1'))
+
+    def test_flags_printed_as_strings_are_read(self):
+        # lsblk before 2.33 prints RM and HOTPLUG as "0"/"1".
+        def strings(rows):
+            return [{k: str(int(v)) if isinstance(v, bool) else v for k, v in row.items()} for row in rows]
+        self.assertEqual(helper.system_container(BootDisk(*strings(LISTING + STICK)), self.tree()),
+                         Path('/dev/nvme0n1p1'))
+        external = strings(listed(
+            ('/dev/nvme1n1', None, None, None, False, True, 'nvme', 'disk'),
+            ('/dev/nvme1n1p1', '/dev/nvme1n1', 'iBootSystemContainer', None, False, True, 'nvme', 'part'),
+            ('/dev/nvme1n1p2', '/dev/nvme1n1', 'EFI', ESP_UUID, False, True, 'nvme', 'part')))
+        with self.assertRaisesRegex(helper.Refused, 'removable or external'):
+            helper.system_container(BootDisk(*external), self.tree())
+
+    def test_an_automount_row_does_not_hide_the_mounted_esp(self):
+        run = BootDisk(*LISTING, mounts={'/boot/efi': 'systemd-1 autofs\n/dev/nvme0n1p4 vfat\n'})
+        self.assertEqual(helper.system_container(run, self.tree(None)), Path('/dev/nvme0n1p1'))
+        run = BootDisk(*LISTING, mounts={'/boot/efi': 'systemd-1 autofs\n'})
+        with self.assertRaises(helper.Refused):
+            helper.system_container(run, self.tree(None))
+
+    def test_both_tools_carry_the_same_resolver(self):
+        def block(name):
+            text = (PACKAGE / name).read_text()
+            return text[text.index('the boot disk\n'):text.index("    return Path(found[0])\n")]
+        self.assertEqual(block('aurora-touchid-setup'), block('extract-mesa-calibration'))
+
+
 class ManifestTests(unittest.TestCase):
     def test_properties_are_walked_as_der(self):
         objects = helper.manifest(seal())
