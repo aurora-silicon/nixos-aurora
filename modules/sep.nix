@@ -38,9 +38,9 @@ in {
       # Explicit service loading waits for /var and per-machine firmware. This only
       # suppresses early alias loading; the boot timer enables SEP on the real root.
       boot.blacklistedKernelModules = [ "apple_sep" ];
-      # The driver's defaults. Named to sort before aurora-sep.conf and
-      # nixos.conf, so a read-only setting in either comes later and wins.
-      environment.etc."modprobe.d/aurora-sep-defaults.conf".source = ../sep/aurora-sep-modprobe.conf;
+      # No apple_sep options: SEP writes and identity-keybag provisioning are
+      # always on, and the driver has no parameter that turns them off
+      # (aurora-silicon/linux#2591).
       # aurora-xart reset-touchid starts Touch ID over when its keybag is stuck.
       # aurora-sep-sk: OpenSSH ecdsa-sk keys in the Secure Enclave for members
       # of sep-key (its udev rule gives that group /dev/sep-key).

@@ -174,28 +174,3 @@ jobs:
           channels=()
           [[ $ADVANCE != true ]] || channels=(testing)
           python3 scripts/cache-channels.py record --state channel-state.json --channels "${channels[@]}"
-
-  images:
-    # Optional (AUTO_IMAGES=true): rebuild the three images when main is the
-    # commit testing now serves, so every hardware output is in the cache.
-    needs: record
-    if: always() && needs.record.result == 'success' && inputs.advance-testing && vars.AUTO_IMAGES == 'true'
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.release-tag }}
-        run: |
-          set -euo pipefail
-          commit=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .target_commitish)
-          main=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
-          if [[ $commit != "$main" ]]; then
-            echo "main moved past $commit; images wait for the next cache." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          for desktop in minimal kde gnome; do
-            gh workflow run images.yml --repo "$GITHUB_REPOSITORY" --ref main -f desktop="$desktop"
-          done

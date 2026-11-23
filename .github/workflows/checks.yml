@@ -54,8 +54,9 @@ jobs:
           nix build --no-link .#checks.aarch64-linux.profiles .#checks.aarch64-linux.plymouth-initrd .#checks.aarch64-linux.firstboot-image .#checks.aarch64-linux.sep-kernel-transition \
             .#checks.aarch64-linux.stage2-tools .#checks.aarch64-linux.stage2-trial .#checks.aarch64-linux.fedora-parity .#checks.aarch64-linux.ane-packaging \
             .#checks.aarch64-linux.legacy-speaker-protection .#checks.aarch64-linux.speakerguardd-v2-opt-in .#checks.aarch64-linux.sep-luks .#checks.aarch64-linux.secure-boot \
-            .#checks.aarch64-linux.userpages .#checks.aarch64-linux.module-composition \
-            .#checks.aarch64-linux.kernel-overrides .#checks.aarch64-linux.bootloader-overrides .#checks.aarch64-linux.package-overrides \
+            .#checks.aarch64-linux.userpages .#checks.aarch64-linux.module-composition .#checks.aarch64-linux.removed-options \
+            .#checks.aarch64-linux.kernel-overrides .#checks.aarch64-linux.bootloader-overrides .#checks.aarch64-linux.grub-install-script \
+            .#checks.aarch64-linux.package-overrides \
             .#checks.aarch64-linux.peripheral-firmware
       - name: Inspect KDE graphical login configuration
         run: |
@@ -68,8 +69,25 @@ jobs:
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.requires
           nix eval --json .#nixosConfigurations.aurora-kde.config.systemd.services.plasmalogin.unitConfig.ConditionPathExists
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.blacklistedKernelModules
-          grep -Fx 'options apple_sep xart_writes=1 provision_keybag=1' \
-            "$(nix eval --raw '.#nixosConfigurations.aurora-kde.config.environment.etc."modprobe.d/aurora-sep-defaults.conf".source')"
+      - name: Check that no profile sets an apple_sep write option
+        # SEP writes are always on (aurora-silicon/linux#2591): no modprobe.d
+        # file, modprobe configuration, tmpfiles rule or kernel parameter may
+        # give apple_sep xart_writes or provision_keybag.
+        run: |
+          for profile in kde gnome minimal; do
+            nix eval --json ".#nixosConfigurations.aurora-$profile.config" --apply '
+              c: let
+                removed = s: builtins.length (builtins.split "xart_writes|provision_keybag" s) > 1;
+                etc = builtins.filter (e: e.enable && builtins.match "modprobe[.]d/.*" e.target != null)
+                  (builtins.attrValues c.environment.etc);
+                found = builtins.filter removed (
+                  [ c.boot.extraModprobeConfig (c.boot.initrd.extraModprobeConfig or "") ]
+                  ++ c.boot.kernelParams ++ c.systemd.tmpfiles.rules
+                  ++ map (e: e.target) etc
+                  ++ map (e: if e.text == null then "" else e.text) etc);
+              in if found == [ ] then map (e: e.target) etc
+                 else throw "apple_sep write options: ${builtins.toJSON found}"'
+          done
           nix eval --json .#nixosConfigurations.aurora-kde.config.boot.initrd.availableKernelModules
   steam-packaging:
     runs-on: ubuntu-24.04-arm

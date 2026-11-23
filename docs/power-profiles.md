@@ -28,7 +28,8 @@ not apply to PPD here.
 
 ## Games (GameMode)
 
-With `programs.gamemode.enable = true`, `modules/gamemode.nix` gives GameMode
+GameMode is on by default in the KDE and GNOME profiles (`minimal` leaves it
+off), and `modules/gamemode.nix` gives it
 the same defaults Fedora and ALARM install as `/etc/gamemode.ini`
 ([aurora-platform `power/GAMEMODE.md`](https://github.com/aurora-silicon/aurora-platform/blob/main/power/GAMEMODE.md)):
 games started with GameMode run on the P cores (`pin_cores = "yes"`), and the
@@ -37,6 +38,30 @@ MacBook Pro M4 Pro that takes two-frames-in-flight rendering from 197 to
 179 us per frame (geometry) and 162 to 145 us (fill) at the same energy per
 frame. Macs with fewer than four P cores (A18 Pro) are left unpinned by
 GameMode itself. Any `programs.gamemode.settings` value you set wins.
+Aurora's `steam` registers every game it starts with GameMode while the game
+runs (see [Gaming](gaming.md)). To turn GameMode off:
+
+```nix
+programs.gamemode.enable = false;
+```
+
+## Power defaults
+
+Every Apple silicon Mac gets two defaults at boot from the
+`aurora-power-defaults` unit (`modules/platform.nix`), the same unit as
+Fedora's `aurora-platform-core` and ALARM's `aurora-system-fixes`: the PCIe
+ASPM policy `powersupersave`, so links whose two ends support L1.1/L1.2 (Wi-Fi,
+Bluetooth, the SD reader) enter them, and
+`kernel.sched_util_clamp_min_rt_default=0`, so realtime threads (threaded IRQs,
+PipeWire's data loop) no longer run their CPU at its top clock. Idle power fell
+14-19 % on a MacBook Neo, an M4 Pro and an M1 Pro, with no PipeWire xruns and
+no Wi-Fi or Bluetooth drops. The unit runs before `aurora-power-modes`, which
+takes the values it finds at start as its baseline, so Balanced keeps them. To
+keep the kernel's defaults:
+
+```nix
+systemd.services.aurora-power-defaults.enable = false;
+```
 
 ## Power Saver
 

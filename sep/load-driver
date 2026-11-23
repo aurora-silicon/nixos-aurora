@@ -3,25 +3,29 @@ set -eu
 
 keybag=/var/lib/aurora-sep-keybag.bin
 refkey=/var/lib/aurora-sep-refkey.bin
+devices=${AURORA_SEP_SYSFS:-/sys/bus/platform/devices}
 
-# Seconds to wait for the enclave to seal and unseal a trusted key. On J700 the key store arrives around 43 s after boot, and the
-# driver waits up to 90 s for it before it brings Touch ID up, so the first
-# wait has to outlast that. Set either in the environment, for example with a
-# drop-in for aurora-sep.service.
+# Seconds to wait for the enclave's bring-up to end. On the J700 the key store
+# has arrived around 43 s after boot, and the driver waits up to 90 s for it
+# before it brings Touch ID up, so this has to outlast that. Set it in the
+# environment, for example with a drop-in for aurora-sep.service.
 ready_timeout=${AURORA_SEP_READY_TIMEOUT:-120}
+
+# How often to look at diag/keystore while the bring-up runs. The bring-up
+# ends 1.5 to 4 s after the driver loads (diag/ready_ms on the J700, M1 Pro,
+# M2 and J616s), so this adds at most a tenth of a second.
+poll_interval=0.1
 
 log() {
     echo "aurora-sep-load: $*" >&2
 }
 
-for budget in "$ready_timeout"; do
-    case "$budget" in
-        '' | *[!0-9]*)
-            log "timeouts must be whole seconds, not '$budget'"
-            exit 2
-            ;;
-    esac
-done
+case "$ready_timeout" in
+    '' | *[!0-9]*)
+        log "AURORA_SEP_READY_TIMEOUT must be whole seconds, not '$ready_timeout'"
+        exit 2
+        ;;
+esac
 
 # Seconds since boot. Unlike the wall clock it cannot jump when the time is
 # first synchronised during boot.
@@ -60,8 +64,10 @@ case "$(cat /sys/module/apple_sep/parameters/keystore_only 2>/dev/null)" in
     log "finished the attach the initrd started for the key store"
     ;;
 *)
-    # Options come from modprobe.d, where /etc/modprobe.d/aurora-sep.conf replaces
-    # the packaged defaults. Options given here would override both.
+    # No options: SEP writes are always on, and the driver has no parameter
+    # that turns them off (aurora-silicon/linux#2591). On a kernel from
+    # before that, a value given here and again on the kernel command line
+    # or in modprobe.d stopped the driver from loading.
     modprobe apple_sep
     ;;
 esac
@@ -71,7 +77,7 @@ esac
 # so no SEP device exists and no key will ever be sealed. Say so and stop,
 # instead of holding the boot for the whole ready timeout.
 sep_device=false
-for d in "${AURORA_SEP_SYSFS:-/sys/bus/platform/devices}"/*.sep; do
+for d in "$devices"/*.sep; do
     [ -e "$d" ] && sep_device=true && break
 done
 if [ "$sep_device" != true ]; then
@@ -79,14 +85,14 @@ if [ "$sep_device" != true ]; then
     exit 0
 fi
 
-# The driver gives up creating the identity keybag for the rest of the boot
-# when it can't prove an earlier attempt left nothing (diag/keybag "failed").
-# Trusted keys are sealed under it, so none can be sealed this boot.
-keybag_failed() {
-    for k in "${AURORA_SEP_SYSFS:-/sys/bus/platform/devices}"/*.sep/diag/keybag; do
-        [ "$(cat "$k" 2>/dev/null || true)" = failed ] && return 0
+# One diag attribute of the SEP device, or "absent" when this kernel does not
+# have it. Reading one takes no driver lock and sends nothing to the enclave.
+diag_attr() {
+    value=
+    for f in "$devices"/*.sep/diag/"$1"; do
+        [ -r "$f" ] && read -r value <"$f" && break
     done
-    return 1
+    echo "${value:-absent}"
 }
 
 work=$(mktemp -d /run/aurora-sep-load.XXXXXX)
@@ -100,46 +106,61 @@ trap cleanup EXIT HUP INT TERM
 start=$(uptime_s)
 deadline=$((start + ready_timeout))
 
-# The kernel instantiates every key under one global mutex, and a trusted key
-# made before the enclave's bring-up has ended waits there for it, up to 90 s.
-# Meanwhile no other key can be created, and systemd creates one for each
-# service it starts, so the whole boot stalls behind this probe. The driver's
-# diag/keystore attribute leaves "unknown" once the bring-up has ended, and
-# reading it takes no lock, so wait on that first. Without the attribute the
-# probe below still works, as before.
-for keystore in /sys/bus/platform/drivers/apple_sep/*/diag/keystore; do
-    [ -r "$keystore" ] || continue
-    while [ "$(cat "$keystore" 2>/dev/null || echo unknown)" = unknown ] &&
-        [ "$(uptime_s)" -lt "$deadline" ]; do
-        sleep 0.1
-    done
-done
-
-verified=false
-while :; do
-    key_id=$(printf 'new 32' | keyctl padd trusted aurora-sep-check @s 2>/dev/null || true)
-    if [ -n "$key_id" ]; then
-        if keyctl pipe "$key_id" >"$work/sealed"; then
-            { printf 'load '; tr -d '\n\r ' <"$work/sealed"; } >"$work/load"
-            loaded_id=$(keyctl padd trusted aurora-sep-load-check @s <"$work/load" 2>/dev/null || true)
-            if [ -n "$loaded_id" ]; then
-                keyctl revoke "$loaded_id" >/dev/null 2>&1 || true
-                verified=true
-            fi
-        fi
-        keyctl revoke "$key_id" >/dev/null 2>&1 || true
-    fi
-    [ "$verified" = true ] && break
-    if keybag_failed; then
-        log "the enclave has no Touch ID keybag this boot, so no trusted key can be sealed; run 'aurora-xart status'"
+# The kernel instantiates every key under one global mutex
+# (key_construction_mutex), and a trusted key made before the enclave's
+# bring-up has ended waits there for it, up to 90 s. Meanwhile no other key
+# can be created, and systemd creates one for each service it starts, so the
+# whole boot would stall behind the probe below. So wait first for
+# diag/keystore to leave "unknown": "open" once the key store has opened,
+# which leaves only the last bring-up steps (keybag provisioning, publishing
+# the device nodes) for the probe to wait for, or "closed" once the bring-up
+# has ended without it. The driver sends no event when it changes (no
+# sysfs_notify, no uevent), so this polls;
+# https://github.com/aurora-silicon/linux/issues/2313 tracks both.
+keystore=$(diag_attr keystore)
+while [ "$keystore" = unknown ]; do
+    if [ "$(uptime_s)" -ge "$deadline" ]; then
+        log "the enclave's bring-up did not end within ${ready_timeout} s (diag/keystore is still unknown)"
         exit 1
     fi
-    [ "$(uptime_s)" -lt "$deadline" ] || break
-    sleep 0.1
+    sleep "$poll_interval"
+    keystore=$(diag_attr keystore)
 done
 
-if [ "$verified" != true ]; then
-    log "the enclave did not seal and unseal a trusted key within ${ready_timeout} s"
+# The bring-up opens the key store at most once per boot; closed is final.
+if [ "$keystore" = closed ]; then
+    log "the enclave's key store did not open this boot, so no trusted key can be sealed; run 'aurora-sep status'"
+    exit 1
+fi
+
+# Seal a new trusted key and load it back. The first call waits in the
+# kernel for the rest of the bring-up (on a kernel without diag/keystore, for
+# all of it), and after that the driver's answer is final for this boot: a
+# retry gets the same one.
+probe() {
+    key_id=$(printf 'new 32' | keyctl padd trusted aurora-sep-check @s 2>/dev/null) || return 1
+    ok=1
+    if keyctl pipe "$key_id" >"$work/sealed"; then
+        { printf 'load '; tr -d '\n\r ' <"$work/sealed"; } >"$work/load"
+        if loaded_id=$(keyctl padd trusted aurora-sep-load-check @s <"$work/load" 2>/dev/null); then
+            ok=0
+            # Best effort: the session keyring dies with this process anyway.
+            keyctl revoke "$loaded_id" >/dev/null 2>&1 || :
+        fi
+    fi
+    keyctl revoke "$key_id" >/dev/null 2>&1 || :
+    return "$ok"
+}
+
+if ! probe; then
+    # The driver gives up creating the identity keybag for the rest of the
+    # boot when it can't prove an earlier attempt left nothing; trusted keys
+    # are sealed under it.
+    if [ "$(diag_attr keybag)" = failed ]; then
+        log "the enclave has no Touch ID keybag this boot, so no trusted key can be sealed; run 'aurora-xart status'"
+    else
+        log "the enclave did not seal and unseal a trusted key (key store $keystore, keybag $(diag_attr keybag)); run 'aurora-sep status'"
+    fi
     exit 1
 fi
 log "trusted keys work after $(($(uptime_s) - start)) s"

@@ -236,6 +236,8 @@ in {
       ./sep/0008-aurora-report-the-touch-id-lockout-as-locked-out.patch
       ./sep/0009-aurora-say-why-touch-id-needs-the-password.patch
       ./sep/0010-let-a-front-end-ask-whether-the-reader-needs-the-password.patch
+      # From alarm-aurora (aurora-silicon/alarm-aurora#254).
+      ./sep/0011-run-a-close-requested-during-suspend-after-resume.patch
     ];
     postPatch = (old.postPatch or "") + ''
       install -Dm644 ${stableFile ./sep/apple-sep.h} aurora-uapi/linux/apple-sep.h
@@ -410,7 +412,7 @@ in {
   linux-asahi = final.lib.makeOverridable ({ _kernelPatches ? [ ] }:
     final.lib.recurseIntoAttrs (final.linuxPackagesFor (import ./pkgs/kernel.nix {
       # Preserve buildLinux's .override API (features, extraMakeFlags, ...).
-      inherit (final) lib callPackage path writeText openssl kmod binutils aurora-bindgen;
+      inherit (final) lib callPackage path writeText openssl binutils aurora-bindgen;
       src = source "kernel-aurora" // { rev = pins.kernel-aurora.commit; };
       pin = pins.kernel-aurora;
       llvmPackages = kernelLLVM;
@@ -594,8 +596,8 @@ in {
     '';
   };
   # speakerguardd 1.0 (the v2 branch): a new program, packaged beside the 0.1
-  # daemon above. Opt-in: modules/speakerguardd-v2.nix installs it only with
-  # aurora.speakerguardd.v2.enable (default false), and even then its gate
+  # daemon above. modules/speakerguardd-v2.nix installs it with
+  # aurora.speakerguardd.v2.enable (on in the Aurora platform), and its gate
   # keeps speakersafetyd in charge until aurora-speaker-upgrade switches.
   speakerguardd-v2 = let
     # The crates this package ships; the rig and benchmark crates stay out.
@@ -714,6 +716,37 @@ in {
     doCheck = true;
     checkPhase = "sh tests/run.sh";
     installFlags = [ "PREFIX=$(out)" ];
+  };
+  # Deep sleep on the MacBook Pro (M5 Pro, J714s): the files of fedora-aurora's
+  # aurora-m5-platform-config (m5-platform/provenance.json), with store paths.
+  aurora-m5-platform-config = final.stdenvNoCC.mkDerivation {
+    pname = "aurora-m5-platform-config";
+    version = "1";
+    src = ./m5-platform;
+    dontBuild = true;
+    doCheck = true;
+    checkPhase = ''
+      sh -n 50-aurora-m5-rtc-safety
+      grep -q "grep -qx 'apple,j714s' || exit 0" 50-aurora-m5-rtc-safety
+      grep -qx 'ConditionFirmware=device-tree-compatible(apple,j714s)' aurora-m5-sleep-policy.service
+    '';
+    installPhase = ''
+      runHook preInstall
+      share=$out/share/aurora-m5-platform-config
+      install -Dm644 -t $share 90-aurora-m5-deep.conf 90-aurora-m5-lid.conf aurora-m5-sleep.conf
+      install -Dm644 README.md $out/share/doc/aurora-m5-platform-config/README.md
+      hook=$out/lib/systemd/system-sleep/50-aurora-m5-rtc-safety
+      install -Dm755 50-aurora-m5-rtc-safety $hook
+      sed -i '1a PATH=${final.lib.makeBinPath [ final.coreutils final.gnugrep final.gnused final.util-linux ]}:$PATH' $hook
+      patchShebangs --host $hook
+      unit=$out/lib/systemd/system/aurora-m5-sleep-policy.service
+      install -Dm644 aurora-m5-sleep-policy.service $unit
+      substituteInPlace $unit \
+        --replace-fail /usr/bin/install ${final.coreutils}/bin/install \
+        --replace-fail /usr/share/aurora-m5-platform-config $share \
+        --replace-fail /usr/share/doc $out/share/doc
+      runHook postInstall
+    '';
   };
   # The camera denoise filter, a PipeWire user daemon. Backends load from the
   # package's own lib/aurora-camera-denoise: cdn-backend-ave.so (the video

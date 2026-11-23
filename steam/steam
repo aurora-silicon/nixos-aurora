@@ -28,6 +28,77 @@ if [ -z "${AURORA_STEAM_ROOT:-}" ]; then
 			--prefix "${XDG_STATE_HOME:-$HOME/.local/state}/aurora-steam-native/prefix"
 	fi
 fi
+# Games run under GameMode (aurora-gamemode's /etc/gamemode.ini: on the P cores
+# of Macs with at least four, governor left at schedutil). Steam has no global
+# launch option, and the whole client under gamemoderun would hold GameMode,
+# its screen saver inhibition and the P core pinning for as long as Steam is
+# open. Instead a watcher registers each process Steam tracks for a game with
+# gamemoded, as gamemoderun %command% would. The client logs them in
+# logs/gameprocess_log.txt ("AppID N adding PID P as a tracked process"); the
+# watcher sleeps in select() on inotify for that file and on a pidfd for this
+# process, so it wakes only when the log changes or Steam exits. gamemoded
+# drops each PID when it exits, so GameMode ends with the game.
+# AURORA_STEAM_GAMEMODE=0 in the environment turns this off.
+IFS= read -r -d '' gamemode_watch <<'PY' || :
+import ctypes, os, re, select, struct, subprocess, sys
+root, steam = sys.argv[1], int(sys.argv[2])
+logs = os.path.join(root, "logs")
+name = b"gameprocess_log.txt"
+path = os.path.join(logs, name.decode())
+IN_MODIFY, IN_MOVED_TO, IN_CREATE = 0x2, 0x80, 0x100
+os.makedirs(logs, exist_ok=True)
+libc = ctypes.CDLL(None, use_errno=True)
+fd = libc.inotify_init1(os.O_CLOEXEC)
+if fd < 0 or libc.inotify_add_watch(fd, os.fsencode(logs), IN_MODIFY | IN_MOVED_TO | IN_CREATE) < 0:
+    sys.exit(1)
+alive = os.pidfd_open(steam)
+tracked = re.compile(rb"AppID \d+ adding PID (\d+) as a tracked process")
+try:
+    offset = os.path.getsize(path)
+except OSError:
+    offset = 0
+rest = b""
+def register(pid):
+    subprocess.run(["busctl", "--user", "call", "com.feralinteractive.GameMode", "/com/feralinteractive/GameMode",
+                    "com.feralinteractive.GameMode", "RegisterGameByPID", "ii", str(os.getpid()), pid],
+                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def read_new():
+    global offset, rest
+    try:
+        with open(path, "rb") as f:
+            if os.fstat(f.fileno()).st_size < offset:
+                offset, rest = 0, b""
+            f.seek(offset)
+            data = f.read()
+            offset = f.tell()
+    except OSError:
+        return
+    *lines, rest = (rest + data).split(b"\n")
+    for line in lines:
+        match = tracked.search(line)
+        if match:
+            register(match.group(1).decode())
+while True:
+    ready = select.select([fd, alive], [], [])[0]
+    if alive in ready:
+        break
+    events, i, changed = os.read(fd, 65536), 0, False
+    while i < len(events):
+        mask, size = struct.unpack_from("iIII", events, i)[1::2]
+        if events[i + 16:i + 16 + size].rstrip(b"\0") == name:
+            if mask & (IN_CREATE | IN_MOVED_TO):
+                offset, rest = 0, b""
+            changed = True
+        i += 16 + size
+    if changed:
+        read_new()
+PY
+if [ "${AURORA_STEAM_GAMEMODE:-1}" != 0 ] && [[ $(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus \
+	org.freedesktop.DBus ListActivatableNames 2>/dev/null) == *'"com.feralinteractive.GameMode"'* ]]; then
+	steam_root=${AURORA_STEAM_ROOT:-$(readlink -f -- "$HOME/.steam/root" 2>/dev/null || true)}
+	[ -z "$steam_root" ] || (exec -a aurora-steam-gamemode python3 -c "$gamemode_watch" "$steam_root" "$$" \
+		</dev/null >/dev/null 2>&1) &
+fi
 # Steam starts its runtime launcher by name, including after client updates.
 export PATH="${AURORA_STEAM_ROOT:-$HOME/.steam/root}/steamapps/common/SteamLinuxRuntime_4-arm64/pressure-vessel/bin:$PATH"
 exec "$lib/bin/steam-native4k" "$@"

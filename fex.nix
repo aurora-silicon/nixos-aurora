@@ -28,6 +28,9 @@ fex.overrideAttrs (_finalAttrs: old: {
   # nixpkgs' postPatch writes FEX-<version> as the describe string.
   version = "${pin.version}-aurora-g${short}";
   inherit src;
+  # FEX reads /run/fex-emu/Config.json over its global config, which
+  # modules/fex-mesa.nix writes while the guest graphics provider is mounted.
+  patches = (old.patches or [ ]) ++ [ ./patches/fex-runtime-config.patch ];
   # FEX tunes for the build machine by default (-mcpu from its /proc/cpuinfo),
   # which crashes with SIGILL on Apple CPUs when CI builds on Neoverse.
   cmakeFlags = old.cmakeFlags ++ [ (lib.cmakeFeature "TUNE_CPU" "none") ];

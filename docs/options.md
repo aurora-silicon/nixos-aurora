@@ -9,9 +9,9 @@ Apple Silicon options remain available; see the links in the module guide. For d
 
 ## `aurora.ane.enable`
 
-Install the Apple Neural Engine (ANE) tools and compiler, create the `accel` group and add
-device access rules. Disabling this omits that userspace integration;
-it does not change the kernel driver or fetch firmware.
+Install the Apple Neural Engine (ANE) tools and compiler. The `accel` group and the
+`/dev/accel` access rule come from the platform module either way. Disabling this
+omits the tools; it does not change the kernel driver or fetch firmware.
 
 **Type:** boolean
 
@@ -39,19 +39,6 @@ no Apple firmware is included or fetched by a build.
 Add `snd-seq` to the modules available in the initrd for early display
 audio. This includes the module without forcing an early load; false
 omits Aurora's additional entry.
-
-**Type:** boolean
-
-**Default:** `true`
-
-**Declared in:** [audio.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/audio.nix)
-
-## `aurora.audio.pipewireFixes`
-
-Run the PipeWire daemon from aurora-pipewire, nixpkgs' PipeWire with
-the filter-graph volume and latency fixes and the AirPlay sender fixes
-that Fedora and Arch Linux ARM carry. Without it, an update that repeats
-the current volume or mute state applies the speaker volume twice.
 
 **Type:** boolean
 
@@ -286,8 +273,9 @@ The aurora-diag package to use.
 ## `aurora.fexMesa.enable`
 
 Mount x86_64 and i686 Aurora Mesa over the guest rootfs at
-`/var/lib/aurora/fex/mesa-rootfs`. Set `FEX_ROOTFS` only when the provider
-is mounted and the user has not set it. False removes this integration
+`/var/lib/aurora/fex/mesa-rootfs`. While it is mounted, FEX's global
+RootFS is a read-only bind of it at `/run/fex-emu/rootfs`; a user's own
+FEX config and `FEX_ROOTFS` override it. False removes this integration
 and unmounts the provider on a switch; guest distribution files remain.
 
 **Type:** boolean
@@ -921,7 +909,7 @@ follow a change of an expired password at login.
 
 ## `aurora.speakerguardd.upgrade.enable`
 
-Install aurora-speaker-upgrade (the legacy-to-speakerguardd-v2 upgrade tool); it never runs by itself.
+Install aurora-speaker-upgrade and run it at boot: it moves the speakers to speakerguardd v2 when this Mac's own tuning passes the silent self-check (needs aurora.speakerguardd.v2.enable). The legacy protection keeps a refused Mac; sudo aurora-speaker-upgrade --revert goes back. The Aurora platform turns it on.
 
 **Type:** boolean
 
@@ -936,7 +924,7 @@ speakersafetyd, with its gate on both stacks. Nothing changes for the
 speakers by itself: the gate keeps speakersafetyd in charge until
 aurora-speaker-upgrade (aurora.speakerguardd.upgrade.enable) has
 verified this Mac's own tuning and switched the dual-interface
-kernel to v2's lease. Off by default.
+kernel to v2's lease. The Aurora platform turns it on.
 
 **Type:** boolean
 
@@ -999,46 +987,11 @@ This validates contents, not which boards are included by the kernel.
 
 **Declared in:** [installed.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/installed.nix)
 
-## `aurora.systemFixes.drkonqiOrdering`
-
-Break the ordering cycle that drkonqi's coredump cleanup timer and sentry
-path units create, which makes systemd delete a stop job every time a
-Plasma session stops (KDE bug 528003). Used only with Plasma; false
-retains the packaged units unchanged.
-
-**Type:** boolean
-
-**Default:** `true`
-
-**Declared in:** [system-fixes.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/system-fixes.nix)
-
 ## `aurora.systemFixes.malcontentSignal`
 
 Add the signal-handling and exit-status drop-ins for malcontent's optional
 daemons. This does not start or install absent daemons; false omits the
 drop-ins and retains their packaged behavior.
-
-**Type:** boolean
-
-**Default:** `true`
-
-**Declared in:** [system-fixes.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/system-fixes.nix)
-
-## `aurora.systemFixes.nmDispatcherPersist`
-
-Run NetworkManager's dispatcher with `--persist` and stop it after
-NetworkManager, avoiding failed event activation during shutdown. Used
-only when NetworkManager is enabled; false retains its packaged lifecycle.
-
-**Type:** boolean
-
-**Default:** `true`
-
-**Declared in:** [system-fixes.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/system-fixes.nix)
-
-## `aurora.systemFixes.nmKeepWakeOnLan`
-
-Keep a Wake-on-LAN/WLAN device that is still activated after wake instead of reconnecting it.
 
 **Type:** boolean
 

@@ -14,8 +14,10 @@ in (import ./nix-lint.nix { inherit pkgs; }) // {
   clean-boot = import ./clean-boot.nix { inherit pkgs nixpkgs self; };
   legacy-speaker-protection = import ./legacy-speaker-protection.nix { inherit pkgs nixpkgs makeSystem; };
   speakerguardd-v2-opt-in = import ./speakerguardd-v2-opt-in.nix { inherit pkgs nixpkgs makeSystem; };
+  removed-options = import ./removed-options.nix { inherit pkgs nixpkgs makeSystem; };
   diag-opt-in = import ./diag-opt-in.nix { inherit pkgs nixpkgs makeSystem; };
   gamemode-defaults = import ./gamemode-defaults.nix { inherit pkgs nixpkgs makeSystem; };
+  power-defaults = import ./power-defaults.nix { inherit pkgs nixpkgs makeSystem; };
   sep-luks = import ./sep-luks.nix { inherit pkgs nixpkgs makeSystem; };
   secure-boot = import ./secure-boot.nix { inherit pkgs nixpkgs makeSystem; };
   ane-packaging = import ./ane-packaging.nix { inherit pkgs nixpkgs system overlays; };
@@ -38,4 +40,5 @@ in (import ./nix-lint.nix { inherit pkgs; }) // {
   package-overrides = import ./package-overrides.nix { inherit pkgs; };
   kernel-overrides = import ./kernel-overrides.nix { inherit pkgs; };
   bootloader-overrides = import ./bootloader-overrides.nix { inherit pkgs; };
+  grub-install-script = import ./grub-install-script.nix { inherit pkgs nixpkgs self; };
 }

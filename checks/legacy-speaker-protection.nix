@@ -4,19 +4,16 @@ let
   profile = makeSystem "minimal";
   inherit (profile) config;
   unit = name: config.systemd.units.${name} or { enable = false; text = ""; };
-  guarded = name: lib.hasInfix "speakerguardd-gate" (unit name).text;
-  preview = package: (package.pname or "") == "speakerguardd-v2";
-in assert lib.assertMsg (!config.aurora.speakerguardd.v2.enable)
-     "The v2 preview must stay disabled by default";
-   assert lib.assertMsg (!(lib.any preview config.environment.systemPackages)
-     && !(lib.any preview config.systemd.packages)) "The image must not install v2";
+# The legacy protection stays installed and available as the fallback the v2
+# gate starts on a Mac aurora-speaker-upgrade has not switched.
+in assert lib.assertMsg (config.aurora.speakerguardd.v2.enable && config.aurora.speakerguardd.upgrade.enable)
+     "The image ships speakerguardd v2 and aurora-speaker-upgrade";
    # Services imported from systemd.packages do not all appear in
    # config.systemd.units. Check their package imports here, and the
    # actual packaged unit files in the derivation below.
    assert lib.assertMsg (lib.all (package: lib.elem package config.systemd.packages)
-     [ profile.pkgs.speakersafetyd profile.pkgs.speakerguardd ]
-     && !(guarded "speakersafetyd.service") && !(guarded "speakerguardd.service"))
-     "Legacy daemons must remain available without the v2 gate";
+     [ profile.pkgs.speakersafetyd profile.pkgs.speakerguardd ])
+     "Legacy daemons must remain available as the fallback";
    assert lib.assertMsg (lib.hasInfix "use-feedback-guard" (unit "speakersafetyd.service").text)
      "Keep the board-specific legacy protection selector";
    assert lib.assertMsg (config.boot.kernelPackages.kernel.auroraLegacySpeakerProtection or false)

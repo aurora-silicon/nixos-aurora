@@ -1,9 +1,10 @@
 { config, lib, pkgs, ... }:
 # speakerguardd 1.0 (the v2 branch), the in-graph speaker protection.
-# Opt-in (default false): speakersafetyd stays the speaker protection. With
-# enable = true it is installed beside the 0.1 speakerguardd and
-# speakersafetyd, and its gate (speakerguardd-gate, upstream's) starts exactly
-# one stack per boot. On a dual-interface kernel (linux 98cb6a86+) that is
+# The option defaults to false; the Aurora platform turns it on
+# (modules/platform.nix) with aurora-speaker-upgrade. Enabled, it is
+# installed beside the 0.1 speakerguardd and speakersafetyd, and its gate
+# (speakerguardd-gate, upstream's) starts exactly one stack per boot. On a
+# dual-interface kernel (linux 98cb6a86+) that is
 # speakersafetyd until aurora-speaker-upgrade made v2 this Mac's choice and
 # every proof passed; on a legacy-only kernel it is always speakersafetyd.
 # Fedora's and ALARM's speakerguardd-v2 packages are its counterparts.
@@ -27,7 +28,7 @@ in {
         speakers by itself: the gate keeps speakersafetyd in charge until
         aurora-speaker-upgrade (aurora.speakerguardd.upgrade.enable) has
         verified this Mac's own tuning and switched the dual-interface
-        kernel to v2's lease. Off by default.
+        kernel to v2's lease. The Aurora platform turns it on.
       '';
     };
     package = lib.mkPackageOption pkgs "speakerguardd-v2" { };
