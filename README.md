@@ -18,4 +18,9 @@ The flake exposes `aurora-kde`, `aurora-gnome` and `aurora-minimal` NixOS config
 nix build .#kernel .#mesa .#steam
 ```
 
-Firmware and calibration are read from the installed Mac; builds do not include per-device firmware. Images remain development releases; build checks alone do not establish device or game compatibility.
+Aurora reads firmware and calibration from the installed Mac. For optional
+adapters, add their firmware to `hardware.firmware` or set
+`hardware.enableRedistributableFirmware = true;` in your NixOS configuration.
+
+Images remain development releases. Build checks alone do not establish device
+or game compatibility.
