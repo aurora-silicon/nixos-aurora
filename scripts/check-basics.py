@@ -9,7 +9,9 @@ filesystems the installer writes):
   terminal   desktops ship their terminal and its launcher
   wallpaper  GNOME's backgrounds and default picture; Plasma's wallpapers
   boot       GRUB finds /boot by filesystem UUID on the startup disk only:
-             no partition number in the core, no lookup without a hint
+             no partition number in the core, no lookup without a hint;
+             every module, font, file and filesystem UUID its
+             configurations name is in the image
   network    NetworkManager is enabled; desktops ship its settings UI
   lid        logind still suspends on lid close; sleep is not masked
   touchid    sudo, polkit and the lock screen offer a fingerprint, the login
@@ -26,6 +28,7 @@ import argparse
 import os
 from pathlib import Path, PurePosixPath
 import re
+import struct
 import sys
 
 PREAMBLE = 'Aurora: look for this installation only on the disk GRUB started from.'
@@ -419,6 +422,498 @@ def check_touchid(root, profile):
     return '; '.join(problems) or None
 
 
+# GRUB references: every module, font and file a GRUB configuration names
+# must be where GRUB looks for it on an Apple silicon Mac (arm64-efi), and
+# every filesystem UUID it searches for must be in the image. A missing one
+# prints "error: ... not found." or "no such device" on the screen at boot.
+#
+# The configuration is read as the image's first boot runs it: GRUB's own
+# variables, the image's grubenv once load_env reads it, and unset variables
+# empty. A value only GRUB knows when it runs (regexp or probe results, a
+# search by label or file, $cmdpath) is unknown, and a reference that needs
+# one fails closed: "cannot resolve" unless an enclosing [ -f/-e/-s/-d PATH ]
+# tests that path first. Branches that cannot run on arm64-efi are skipped;
+# a command used as a condition is still checked, since GRUB only hides its
+# error. menuentry, submenu and function bodies run after the configuration
+# in a copy of its variables; source and configfile targets are read too.
+GRUB_TARGET = 'arm64-efi'
+# Normal mode sets these to "y" (grub-core/normal/main.c, GRUB 2.02 and later).
+GRUB_FEATURES = ('feature_chainloader_bpb', 'feature_ntldr', 'feature_platform_search_hint',
+                 'feature_default_font_path', 'feature_all_video_module', 'feature_menuentry_id',
+                 'feature_menuentry_options', 'feature_200_final', 'feature_nativedisk_cmd',
+                 'feature_timeout_style')
+# Set by GRUB while it runs; never known to this check.
+GRUB_RUNTIME = ('cmdpath', 'fw_path', 'chosen')
+GRUB_PROBES = {'-f', '-e', '-s', '-d'}
+GRUB_BLOCKS = ('menuentry', 'submenu', 'function')
+GRUB_DEPTH = 8
+GRUB_UNKNOWN = None
+
+
+def grub_core_modules(data):
+    """The modules grub-mkimage built into a GRUB EFI core image (empty if none)."""
+    start = 0
+    while (index := data.find(b'mimg', start)) >= 0 and index + 24 <= len(data):
+        start = index + 1
+        _, _, offset, size = struct.unpack_from('<IIQQ', data, index)
+        if not (16 <= offset <= 32 and 24 <= size <= len(data) - index):
+            continue
+        position, end, names = index + offset, index + size, set()
+        while position + 8 <= end:
+            kind, length = struct.unpack_from('<II', data, position)
+            if length < 8 or position + length > end:
+                names = set()
+                break
+            if kind == 0:  # an ELF module object
+                names.add(elf_section(data[position + 8:position + length], b'.modname')
+                          .split(b'\0', 1)[0].decode())
+            position += length
+        if names:
+            return names
+    return set()
+
+
+def elf_section(elf, wanted):
+    if elf[:4] != b'\x7fELF':
+        return b''
+    table, = struct.unpack_from('<Q', elf, 0x28)
+    size, count, strings = struct.unpack_from('<HHH', elf, 0x3a)
+
+    def header(number):
+        return struct.unpack_from('<IIQQQQ', elf, table + number * size)
+    names = header(strings)[4]
+    for number in range(count):
+        name, _, _, _, offset, length = header(number)
+        if elf[names + name:].split(b'\0', 1)[0] == wanted:
+            return elf[offset:offset + length]
+    return b''
+
+
+def grub_statements(text):
+    """GRUB script as (line, words): quotes removed, variables left in, and
+    each { and } a statement of its own."""
+    words, word, quote, quoted, line, start, index = [], '', None, False, 1, 1, 0
+
+    def flush():
+        statement = []
+        for item in words:
+            if item in ('{', '}'):
+                if statement:
+                    yield start, statement
+                yield start, [item]
+                statement = []
+            else:
+                statement.append(item)
+        if statement:
+            yield start, statement
+    while index < len(text):
+        char = text[index]
+        if char == '\n':
+            line += 1
+        if quote:
+            if char == quote:
+                quote = None
+            elif char == '\\' and quote == '"' and text[index + 1:index + 2] in ('"', '\\', '$'):
+                index += 1
+                word += text[index]
+            else:
+                word += char
+        elif char in '\'"':
+            quote, quoted = char, True
+        elif char == '\\' and index + 1 < len(text):
+            index += 1
+            if text[index] == '\n':
+                line += 1
+            else:
+                word += text[index]
+        elif char == '#' and not word and not quoted:
+            while index + 1 < len(text) and text[index + 1] != '\n':
+                index += 1
+        elif char in ' \t\n;':
+            if word or quoted:
+                words.append(word)
+            word, quoted = '', False
+            if char in '\n;' and words:
+                yield from flush()
+                words = []
+        else:
+            if not words and not word:
+                start = line
+            word += char
+        index += 1
+    if word or quoted:
+        words.append(word)
+    yield from flush()
+
+
+def grub_expand(word, variables):
+    """(text, unknown variable names) for $name and ${name} in a word."""
+    unknown = []
+
+    def value(match):
+        name = match[1] or match[2]
+        if name in variables:
+            if variables[name] is GRUB_UNKNOWN:
+                unknown.append(name)
+                return ''
+            return variables[name]
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name) or name in GRUB_RUNTIME:
+            unknown.append(name)
+        return ''
+    text = re.sub(r'\$\{([^}]*)\}|\$([A-Za-z_][A-Za-z0-9_]*|[0-9?#*@])', value, word)
+    return text, unknown
+
+
+def grub_value(word, variables):
+    text, unknown = grub_expand(word, variables)
+    return GRUB_UNKNOWN if unknown else text
+
+
+def grub_test(words):
+    if words[:1] == ['[']:
+        return words[1:-1] if words[-1:] == [']'] else None
+    return words[1:] if words[:1] == ['test'] else None
+
+
+def grub_condition(words, variables):
+    """True, False or None (not known before boot) for an if or while condition."""
+    test = grub_test(words)
+    if test is None:
+        return None
+
+    def split(tokens, operator):
+        parts, part = [], []
+        for token in tokens:
+            if token == operator:
+                parts.append(part)
+                part = []
+            else:
+                part.append(token)
+        return parts + [part]
+
+    def either(tokens):
+        values = [both(part) for part in split(tokens, '-o')]
+        return True if True in values else False if all(value is False for value in values) else None
+
+    def both(tokens):
+        values = [single(part) for part in split(tokens, '-a')]
+        return False if False in values else True if all(value is True for value in values) else None
+
+    def single(tokens):
+        if tokens[:1] == ['!']:
+            value = single(tokens[1:])
+            return None if value is None else not value
+        values = [grub_value(token, variables) for token in tokens]
+        if len(tokens) == 1 and values[0] is not GRUB_UNKNOWN:
+            return values[0] != ''
+        if len(tokens) == 2 and tokens[0] in ('-n', '-z') and values[1] is not GRUB_UNKNOWN:
+            return (values[1] != '') == (tokens[0] == '-n')
+        if len(tokens) == 3 and tokens[1] in ('=', '==', '!=') and GRUB_UNKNOWN not in (values[0], values[2]):
+            return (values[0] == values[2]) == (tokens[1] != '!=')
+        return None
+    return either(test)
+
+
+def grub_merge(paths):
+    """The variables after one of several paths ran: a value they disagree on is unknown."""
+    merged = {}
+    for name in set().union(*paths):
+        values = [path.get(name, '') for path in paths]
+        merged[name] = values[0] if all(value == values[0] for value in values) else GRUB_UNKNOWN
+    return merged
+
+
+class GrubFiles:
+    """The filesystems GRUB can reach: device -> (UUIDs, exists(path), read(path)).
+    A filesystem this check cannot read has exists None."""
+
+    def __init__(self, filesystems, core_modules=()):
+        self.filesystems = {device: ({uuid.lower() for uuid in uuids}, exists, read)
+                            for device, (uuids, exists, read) in filesystems.items()}
+        self.core = set(core_modules)
+
+    def device(self, uuid):
+        return next((device for device, (uuids, _, _) in self.filesystems.items()
+                     if uuid.lower() in uuids), None)
+
+    def place(self, word, variables):
+        """(device, path) of a GRUB file name, or why it cannot be resolved."""
+        text, unknown = grub_expand(word, variables)
+        if unknown:
+            return f'${unknown[0]} is only known when GRUB runs'
+        match = re.match(r'\(([^)]*)\)(.*)$', text)
+        if match:
+            device, path = match[1], match[2]
+        else:
+            device, path = variables.get('root', ''), text
+            if device is GRUB_UNKNOWN:
+                return '$root is only known when GRUB runs'
+        if device not in self.filesystems:
+            return f'({device}) is not a filesystem of this image'
+        if self.filesystems[device][1] is None:
+            return f'this check cannot read the {device} filesystem'
+        if not path.startswith('/'):
+            return f'{text} is not an absolute path'
+        return device, re.sub('/+', '/', path)
+
+    def exists(self, place):
+        return self.filesystems[place[0]][1](place[1])
+
+    def read(self, place):
+        return self.filesystems[place[0]][2](place[1])
+
+
+def grub_file_name(place):
+    device, path = place
+    return {'boot': f'/boot{path}', 'esp': path.lstrip('/')}.get(device, f'({device}){path}')
+
+
+def grub_variables(root, prefix):
+    variables = dict.fromkeys(GRUB_FEATURES, 'y')
+    variables.update(grub_platform='efi', grub_cpu='arm64', root=root,
+                     prefix=f'({root}){prefix}', config_directory=f'({root}){prefix}')
+    return variables
+
+
+def grub_references(text, name, files, variables, bls_entries=None, depth=0):
+    """Problems with what one configuration names: modules, fonts, files, UUIDs."""
+    problems = []
+
+    def execute(statements, variables, guards):
+        frames = []  # if: [reachable, decided, probes, before, paths]; loops: [True, ...]
+        pending = []
+        index = 0
+
+        def report(line, problem):
+            problems.append(f'{name}:{line}: {problem}')
+
+        def probed():
+            return guards | {path for frame in frames for path in frame[2]}
+
+        def check(line, what, word):
+            if grub_expand(word, variables) == ('', []):
+                return None  # an unquoted word that expands to nothing is no argument
+            place = files.place(word, variables)
+            tested = probed()
+            if isinstance(place, str):
+                if word not in tested:
+                    report(line, f'{what}: cannot resolve {word}: {place}')
+                return None
+            if any(files.place(path, variables) == place for path in tested):
+                return place if files.exists(place) else None
+            if not files.exists(place):
+                report(line, f'{what}: {place[1]} is not on the {place[0]} filesystem')
+                return None
+            return place
+
+        def follow(line, place, scope):
+            if depth + 1 >= GRUB_DEPTH:
+                report(line, f'{place[1]}: sources nest deeper than {GRUB_DEPTH}')
+                return
+            problems.extend(grub_references(files.read(place) or '', grub_file_name(place), files, scope,
+                                            bls_entries, depth + 1))
+
+        def command(line, words):
+            head, args = words[0], words[1:]
+            operands = [arg for arg in args if not arg.startswith('-')]
+            if head == 'set' and args and '=' in args[0]:
+                key, value = args[0].split('=', 1)
+                variables[key] = grub_value(value, variables)
+                if key == 'theme':
+                    check(line, 'theme', value)
+            elif re.match(r'[A-Za-z_][A-Za-z0-9_]*=', head) and not args:
+                key, value = head.split('=', 1)
+                variables[key] = grub_value(value, variables)
+            elif head == 'unset':
+                for key in args:
+                    variables.pop(key, None)
+            elif head.startswith('search'):
+                search(line, head, args)
+            elif head in ('regexp', 'probe'):
+                for position, arg in enumerate(args):
+                    target = arg[6:] if arg.startswith('--set=') else (
+                        args[position + 1] if arg in ('--set', '-s') and position + 1 < len(args) else None)
+                    if target:
+                        variables[target.split(':')[-1]] = GRUB_UNKNOWN
+            elif head == 'insmod':
+                for module in operands:
+                    if module not in files.core:
+                        check(line, f'insmod {module}', f'$prefix/{GRUB_TARGET}/{module}.mod')
+            elif head == 'loadfont':
+                for font in operands:
+                    check(line, f'loadfont {font}', font if font[:1] in '($/' else f'$prefix/fonts/{font}.pf2')
+            elif head in ('load_env', 'save_env'):
+                block = args[args.index('-f') + 1] if '-f' in args[:-1] else '$prefix/grubenv'
+                place = check(line, head, block)
+                if place and head == 'load_env':
+                    wanted = [arg for arg in args if arg != block and not arg.startswith('-')]
+                    for entry in (files.read(place) or '').splitlines():
+                        key, equals, value = entry.partition('=')
+                        if equals and not entry.startswith('#') and (not wanted or key in wanted):
+                            variables[key] = value
+            elif head in ('source', 'configfile') and operands:
+                place = check(line, head, operands[0])
+                if place and head == 'source':
+                    follow(line, place, variables)
+                elif place:
+                    follow(line, place, dict(variables, config_directory=f'({place[0]}){place[1].rsplit("/", 1)[0]}'))
+            elif head in ('linux', 'devicetree', 'chainloader') and operands:
+                check(line, head, operands[0])
+            elif head == 'initrd':
+                for path in operands:
+                    check(line, head, path)
+            elif head == 'background_image':
+                paths = [arg for position, arg in enumerate(args) if not arg.startswith('-')
+                         and args[position - 1:position] not in (['-m'], ['--mode'])]
+                if paths:
+                    check(line, head, paths[-1])
+            elif head == 'blscfg' and bls_entries is not None:
+                for entry, entry_text in bls_entries():
+                    for key, value in (row.split(None, 1) for row in entry_text.splitlines()
+                                       if len(row.split(None, 1)) == 2):
+                        if key in ('linux', 'initrd', 'devicetree'):
+                            for path in value.split():
+                                check(line, f'{entry}: {key}', path)
+
+        def search(line, head, args):
+            mode, target, key, position = {'search.fs_uuid': 'uuid', 'search.fs_label': 'label'}.get(
+                head, 'file'), None, None, 0
+            while position < len(args):
+                arg = args[position]
+                if arg in ('--fs-uuid', '-u'):
+                    mode = 'uuid'
+                elif arg in ('--label', '-l'):
+                    mode = 'label'
+                elif arg in ('--file', '-f'):
+                    mode = 'file'
+                elif arg.startswith('--set='):
+                    target = arg[6:]
+                elif arg in ('--set', '-s', '--hint', '-h'):
+                    if arg in ('--set', '-s'):
+                        target = args[position + 1] if position + 1 < len(args) else None
+                    position += 1
+                elif not arg.startswith('-'):
+                    if key is None or head == 'search':
+                        key = arg
+                    elif target is None:
+                        target = arg  # search.fs_uuid UUID VARIABLE
+                position += 1
+            target = target or 'root'
+            uuid = grub_value(key or '', variables)
+            if mode == 'uuid' and uuid:
+                device = files.device(uuid)
+                if device is None:
+                    report(line, f'no filesystem in the image has the UUID {uuid}')
+                variables[target] = device if device else GRUB_UNKNOWN
+            else:
+                variables[target] = GRUB_UNKNOWN  # by label or file: GRUB decides at boot
+
+        def branch_end(frame):
+            if frame[0]:
+                frame[4].append(dict(variables))
+            variables.clear()
+            variables.update(frame[3])
+
+        while index < len(statements):
+            line, words = statements[index]
+            index += 1
+            while words and words[0] in ('then', 'do', 'else'):
+                if words[0] == 'else' and frames and frames[-1][3] is not None:
+                    frame = frames[-1]
+                    branch_end(frame)
+                    frame[0], frame[2] = not frame[1] and all(outer[0] for outer in frames[:-1]), set()
+                    frame[1] = frame[1] or frame[0]
+                words = words[1:]
+            if not words:
+                continue
+            head = words[0]
+            if head == '{' or (index < len(statements) and statements[index][1] == ['{']):
+                if head != '{':
+                    index += 1
+                body, level = [], 1
+                while index < len(statements):
+                    item = statements[index]
+                    index += 1
+                    level += {'{': 1, '}': -1}.get(item[1][0], 0) if len(item[1]) == 1 else 0
+                    if level == 0:
+                        break
+                    body.append(item)
+                if level:
+                    report(line, '{ is never closed')
+                if all(frame[0] for frame in frames):
+                    pending.append((body, probed()))
+            elif head == '}':
+                report(line, '} closes nothing')
+            elif head in ('if', 'elif'):
+                if head == 'if':
+                    frames.append([True, False, set(), dict(variables), []])
+                elif not frames or frames[-1][3] is None:
+                    report(line, 'elif outside an if')
+                    continue
+                else:
+                    branch_end(frames[-1])
+                frame, condition = frames[-1], words[1:]
+                frame[0] = False
+                if not frame[1] and all(outer[0] for outer in frames[:-1]):
+                    if condition and grub_test(condition) is None:
+                        command(line, condition)
+                    decided = grub_condition(condition, variables)
+                    frame[0], frame[1] = decided is not False, decided is True
+                test = grub_test(condition) or []
+                frame[2] = {path for flag, path in zip(test, test[1:]) if flag in GRUB_PROBES}
+            elif head == 'fi':
+                if not frames or frames[-1][3] is None:
+                    report(line, 'fi closes nothing')
+                    continue
+                frame = frames.pop()
+                branch_end(frame)
+                paths = frame[4] if frame[1] else frame[4] + [frame[3]]
+                variables.clear()
+                variables.update(grub_merge(paths) if paths else frame[3])
+            elif head in ('for', 'while', 'until'):
+                if head != 'for' and all(frame[0] for frame in frames):
+                    command(line, words[1:])
+                if head == 'for' and len(words) > 1:
+                    variables[words[1]] = GRUB_UNKNOWN
+                frames.append([all(frame[0] for frame in frames), False, set(), None, dict(variables)])
+            elif head == 'done':
+                if not frames or frames[-1][3] is not None:
+                    report(line, 'done closes nothing')
+                    continue
+                before = frames.pop()[4]
+                merged = grub_merge([before, dict(variables)])
+                variables.clear()
+                variables.update(merged)
+            elif all(frame[0] for frame in frames):
+                command(line, words)
+        if frames:
+            report(statements[-1][0] if statements else 0, 'an if or loop is never closed')
+        # Menu entries and functions run after the configuration, each in a copy.
+        for body, body_guards in pending:
+            execute(body, dict(variables), body_guards)
+
+    execute(list(grub_statements(text)), variables, set())
+    return problems
+
+
+def grub_configuration_problems(files, stubs, grub_dir, main, bls_entries=None):
+    """The ESP stubs [(name, text, their directory)] and the configurations
+    they hand over to, then /boot's grub.cfg as GRUB reads it from /boot."""
+    problems = []
+    for name, text, directory in stubs:
+        problems += grub_references(text, name, files, grub_variables('esp', directory), bls_entries)
+    problems += grub_references(main, grub_file_name(('boot', f'{grub_dir}/grub.cfg')), files,
+                                grub_variables('boot', grub_dir), bls_entries)
+    return list(dict.fromkeys(problems))
+
+
+def tree_files(base):
+    """exists(path) and read(path) for a filesystem copied to a directory."""
+    root = Root(base)
+    return (lambda name: root.path(name).is_file(),
+            lambda name: root.path(name).read_text(errors='replace') if root.path(name).is_file() else None)
+
+
 def unhinted_searches(text):
     return [line.strip() for line in text.splitlines()
             if re.match(r'\s*search\b', line) and ('--hint' not in line or '--no-floppy' not in line)]
@@ -450,10 +945,19 @@ def check_boot(args):
     main = boot / 'grub/grub.cfg'
     if not main.is_file():
         return '/boot/grub/grub.cfg is missing'
-    searches = unhinted_searches(main.read_text(errors='replace'))
+    main = main.read_text(errors='replace')
+    searches = unhinted_searches(main)
     if searches:
         return f'/boot/grub/grub.cfg has a lookup without a hint: {searches[0]}'
-    return None
+    filesystems = {'boot': ({uuid}, *tree_files(boot)),
+                   'esp': ({args.efi_uuid} if args.efi_uuid else set(), *tree_files(esp))}
+    if args.root_uuid:
+        # GRUB would read the root filesystem through its subvolume layout;
+        # this check does not, so anything it names there fails closed.
+        filesystems['root'] = ({args.root_uuid}, None, None)
+    problems = grub_configuration_problems(GrubFiles(filesystems, grub_core_modules(data)),
+                                           [('EFI/BOOT/grub.cfg', text, '/EFI/BOOT')], '/grub', main)
+    return '; '.join(problems) or None
 
 
 def check_logos(root):
@@ -478,6 +982,8 @@ def main():
     parser.add_argument('--esp', help='the EFI partition contents')
     parser.add_argument('--boot-dir', help='the /boot filesystem contents')
     parser.add_argument('--boot-uuid', help='the /boot filesystem UUID')
+    parser.add_argument('--efi-uuid', help='the EFI partition\'s filesystem UUID (XXXX-XXXX)')
+    parser.add_argument('--root-uuid', help='the root filesystem UUID')
     args = parser.parse_args()
     if not args.root and not args.esp:
         parser.error('nothing to check: give --root, --esp or both')

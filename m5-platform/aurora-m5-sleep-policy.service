@@ -1,0 +1,18 @@
+# Deep sleep and lid policy for the MacBook Pro (M5 Pro, J714s), from
+# aurora-m5-platform-config. Every other Mac skips this unit. It writes two
+# drop-ins under /run: a file of the same name in /etc/systemd/sleep.conf.d
+# or /etc/systemd/logind.conf.d replaces it. To keep systemd's defaults:
+#   systemctl mask aurora-m5-sleep-policy.service
+[Unit]
+Description=MacBook Pro (M5 Pro) deep sleep and lid policy
+Documentation=file:///usr/share/doc/aurora-m5-platform-config/README.md
+ConditionFirmware=device-tree-compatible(apple,j714s)
+DefaultDependencies=no
+Before=sysinit.target systemd-logind.service shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/install -D -m 0644 /usr/share/aurora-m5-platform-config/90-aurora-m5-deep.conf /run/systemd/sleep.conf.d/90-aurora-m5-deep.conf
+ExecStart=/usr/bin/install -D -m 0644 /usr/share/aurora-m5-platform-config/90-aurora-m5-lid.conf /run/systemd/logind.conf.d/90-aurora-m5-lid.conf

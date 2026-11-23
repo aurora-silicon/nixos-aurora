@@ -1,10 +1,29 @@
-{ lib, pkgs, ... }:
-{
+{ config, lib, pkgs, ... }:
+let
+  avdFirmware = pkgs.aurora-avd-firmware;
+  # The oldest avd-fw the booted kernel's device trees work with (pkgs/kernel.nix).
+  minAvdFirmware = config.boot.kernelPackages.kernel.auroraMinAvdFirmware or null;
+  # /dev/accel (the Neural Engine) for the accel group and the local
+  # session user, instead of systemd's mode 0666; with or without
+  # aurora.ane. Same rule as Fedora's aurora-platform-core and ALARM's
+  # aurora-system-fixes.
+  accelRules = pkgs.writeTextFile {
+    name = "aurora-accel-rules";
+    destination = "/lib/udev/rules.d/70-aurora-accel.rules";
+    text = builtins.readFile ./70-aurora-accel.rules;
+  };
+  udevadm = "${config.systemd.package}/bin/udevadm";
+in {
   hardware.bluetooth.enable = true;
   # BlueZ 5.87 includes the empty default-parameter transaction fix.
   assertions = [ {
     assertion = lib.versionAtLeast pkgs.bluez.version "5.87";
     message = "Aurora requires BlueZ >= 5.87 (empty default system config fix).";
+  } {
+    assertion = minAvdFirmware == null || lib.versionAtLeast avdFirmware.version minAvdFirmware;
+    message = "This kernel needs aurora-avd-firmware ${toString minAvdFirmware} or later, "
+      + "whose v4 image fits the T8122 CM3 SRAM window at +0x90000 (linux#2586); "
+      + "with ${avdFirmware.version} the M3 video decoder fails to probe.";
   } ];
   # The Touch Bar of the 13-inch M1 and M2 MacBook Pros (J293, J493), as Fedora
   # (aurora-platform requires tiny-dfr) and ALARM (in every image) ship it.
@@ -12,10 +31,16 @@
   # it stays inert on every other Mac.
   hardware.apple.touchBar.enable = lib.mkDefault true;
   hardware.enableRedistributableFirmware = true;
-  hardware.firmware = [ pkgs.aurora-avd-firmware ];
+  hardware.firmware = [ avdFirmware ];
   services.upower.enable = true;
   hardware.wirelessRegulatoryDatabase = true;
   systemd.packages = [ pkgs.speakerguardd ];
+  # Speakers on speakerguardd v2: v2 installs beside the legacy
+  # daemons behind its gate, and aurora-speaker-upgrade switches a Mac at boot
+  # only when its own tuning passes the silent self-check. A refused Mac keeps
+  # speakersafetyd. Both stay user options (set them to false to opt out).
+  aurora.speakerguardd.v2.enable = lib.mkDefault true;
+  aurora.speakerguardd.upgrade.enable = lib.mkDefault true;
   services.udev.packages = [
     pkgs.speakerguardd
     # Keep the firmware's product name unchanged in ID_MODEL (hostnamed's
@@ -46,7 +71,28 @@
       destination = "/lib/udev/rules.d/64-aurora-trackpad-clicks.rules";
       text = builtins.readFile ./64-aurora-trackpad-clicks.rules;
     })
+    accelRules
   ];
+  users.groups.accel = { };
+  # A switch gives an existing /dev/accel node the rule's group and mode, not
+  # only the next boot: NixOS restarts udevd when the rules change but replays
+  # no events, and only an add event reapplies GROUP and MODE (a change event
+  # does not). Fedora (%posttrans) and ALARM (a pacman hook) do the same.
+  systemd.services.aurora-accel-permissions = {
+    description = "Apply the /dev/accel permissions to existing nodes";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "systemd-udevd.service" "systemd-udev-trigger.service" ];
+    restartTriggers = [ accelRules ];
+    unitConfig.ConditionPathExists = "/run/udev/control";
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = [
+        "-${udevadm} control --reload"
+        "-${udevadm} trigger --action=add --subsystem-match=accel --settle"
+      ];
+    };
+  };
   # The sense-PCM udev rule starts the feed-forward guardian only on J700.
   systemd.services.speakersafetyd.serviceConfig = {
     # Preserve the board-specific legacy daemon selector.
@@ -61,6 +107,42 @@
     # 50-aurora-warm-restart.conf.)
     ExecStartPre = "+${pkgs.runtimeShell} -c 'if [ -e /run/speakersafetyd.started ]; then : > /run/speakersafetyd/speakersafetyd.flag; fi'";
     ExecStopPost = "+${pkgs.coreutils}/bin/touch /run/speakersafetyd.started";
+  };
+  # Power defaults for every Apple silicon Mac, the same unit as Fedora's
+  # aurora-platform-core and ALARM's aurora-system-fixes. Neither setting
+  # depends on the SoC. To keep the kernel's defaults:
+  #   systemd.services.aurora-power-defaults.enable = false;
+  systemd.services.aurora-power-defaults = {
+    description = "Apple silicon power defaults";
+    unitConfig = {
+      ConditionFirmware = "device-tree-compatible(apple,arm-platform)";
+      DefaultDependencies = false;
+    };
+    wantedBy = [ "sysinit.target" ];
+    after = [ "systemd-sysctl.service" ];
+    # aurora-power-modes records the values it finds at start as the boot
+    # baseline and puts them back outside Power Saver, so they must be these.
+    before = [ "sysinit.target" "aurora-power-modes.service" "shutdown.target" ];
+    conflicts = [ "shutdown.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = [
+        # PCIe ASPM with the L1.1 and L1.2 substates. The kernel enables them
+        # per link, only where both ends advertise the substates, and keeps
+        # the states a driver or the host bridge took away for hardware
+        # errata off (the BCM4377 Bluetooth link; pcie-apple's tunnel root
+        # ports and T6050 adopted ports). The default policy leaves the
+        # substates off everywhere. A kernel booted with pcie_aspm=off
+        # refuses the write; "-" lets the sysctl below run anyway.
+        "-${pkgs.runtimeShell} -c 'echo powersupersave > /sys/module/pcie_aspm/parameters/policy'"
+        # Realtime threads (threaded IRQs, PipeWire's data loop) get no
+        # utilization floor, so they no longer run their CPU at its top clock
+        # whenever they run; schedutil still raises the clock for the work
+        # they do. The kernel's default is 1024.
+        "${pkgs.procps}/bin/sysctl -q -w kernel.sched_util_clamp_min_rt_default=0"
+      ];
+    };
   };
   environment.etc."NetworkManager/conf.d/80-aurora-neo-mt7932.conf".source =
     "${pkgs.aurora-neo-platform-config}/lib/NetworkManager/conf.d/80-aurora-neo-mt7932.conf";

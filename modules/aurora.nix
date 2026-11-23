@@ -4,7 +4,8 @@
     ./flatpak.nix ./fex-mesa.nix ./parity.nix ./branding.nix ./dbus.nix
     ./firstboot.nix ./plasma-setup.nix ./gnome-initial-setup.nix ./sep.nix ./camera-denoise.nix ./kbd-light.nix ./panel-nits.nix ./btsync.nix ./fido.nix ./awdl.nix ./sep-luks.nix
     ./userpages.nix ./boot-splash.nix ./speakerguardd-v2.nix ./speaker-upgrade.nix ./wifi-firmware.nix ./steam.nix
-    ./power-budget.nix ./gamemode.nix ./diag.nix ./secure-boot.nix ./video.nix ];
+    ./power-budget.nix ./gamemode.nix ./diag.nix ./secure-boot.nix ./m5-platform.nix
+    ./nixpkgs-grub.nix ./video.nix ];
   options.aurora.desktop = lib.mkOption {
     type = lib.types.enum [ "kde" "gnome" "minimal" ];
     default = "kde";
@@ -39,10 +40,12 @@
     boot.loader.grub.efiSupport = true;
     boot.loader.grub.efiInstallAsRemovable = true;
     boot.loader.grub.device = "nodev";
-    # MTE stays off on chips whose tag storage no boot loader reserves yet.
+    # MTE stays off on the M5 (T8142) until it is qualified there. The M5 Pro
+    # and Max (T6050) run with MTE: aura reserves the tag storage, and without
+    # that reservation the kernel keeps MTE off by itself.
     boot.loader.grub.extraInstallCommands = ''
       if ${pkgs.coreutils}/bin/tr '\0' '\n' < /proc/device-tree/compatible 2>/dev/null \
-          | ${pkgs.gnugrep}/bin/grep -qxE 'apple,(t6050|t8142)'; then
+          | ${pkgs.gnugrep}/bin/grep -qx 'apple,t8142'; then
         for cfg in ${lib.concatMapStringsSep " " (b: lib.escapeShellArg "${b.path}/grub/grub.cfg") config.boot.loader.grub.mirroredBoots}; do
           ${pkgs.gnused}/bin/sed -i -E '/^[[:space:]]*linux[[:space:]]/{/[[:space:]]arm64\.nomte([[:space:]]|$)/!s/$/ arm64.nomte/}' "$cfg"
         done
@@ -101,6 +104,15 @@
     services.displayManager.plasma-login-manager.enable = config.aurora.desktop == "kde";
     services.desktopManager.gnome.enable = config.aurora.desktop == "gnome";
     services.displayManager.gdm.enable = config.aurora.desktop == "gnome";
+    # The Mission Control key (F3 on every Apple silicon laptop keyboard and the
+    # Magic Keyboards: KEY_SCALE, keysym XF86LaunchA) shows every open window
+    # on macOS. GNOME binds nothing to it; give it the Activities overview, as
+    # Fedora and ALARM do. Super still opens the overview, and a user's own
+    # value for the binding wins.
+    services.desktopManager.gnome.extraGSettingsOverrides = ''
+      [org.gnome.shell.keybindings]
+      toggle-overview=['XF86LaunchA']
+    '';
     # Every Aurora desktop image comes with a web browser, as Fedora and ALARM do.
     programs.firefox.enable = config.aurora.desktop != "minimal";
     # Every image has the OpenSSH server, but nothing starts it: no unit at

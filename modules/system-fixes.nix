@@ -19,6 +19,14 @@ let
       [ "export PATH=${lib.makeBinPath [ pkgs.ethtool pkgs.iw pkgs.coreutils pkgs.gnugrep ]}" ]
       (builtins.readFile ./aurora-wake-for-network.sh));
 in {
+  imports = [
+    (lib.mkRemovedOptionModule [ "aurora" "systemFixes" "nmDispatcherPersist" ]
+      "NetworkManager's dispatcher now always runs with --persist and stops after NetworkManager.")
+    (lib.mkRemovedOptionModule [ "aurora" "systemFixes" "drkonqiOrdering" ]
+      "The drkonqi ordering-cycle fix (KDE bug 528003) is now always applied with Plasma.")
+    (lib.mkRemovedOptionModule [ "aurora" "systemFixes" "nmKeepWakeOnLan" ]
+      "NetworkManager now always keeps a Wake-on-LAN/WLAN device that is still activated after wake.")
+  ];
   options.aurora.systemFixes.wakeForNetwork = lib.mkOption {
     type = lib.types.enum [ "power-adapter" "always" "never" ];
     default = "power-adapter";
@@ -37,30 +45,6 @@ in {
       drop-ins and retains their packaged behavior.
     '';
   };
-  options.aurora.systemFixes.nmDispatcherPersist = lib.mkOption {
-    type = lib.types.bool;
-    default = true;
-    description = ''
-      Run NetworkManager's dispatcher with `--persist` and stop it after
-      NetworkManager, avoiding failed event activation during shutdown. Used
-      only when NetworkManager is enabled; false retains its packaged lifecycle.
-    '';
-  };
-  options.aurora.systemFixes.drkonqiOrdering = lib.mkOption {
-    type = lib.types.bool;
-    default = true;
-    description = ''
-      Break the ordering cycle that drkonqi's coredump cleanup timer and sentry
-      path units create, which makes systemd delete a stop job every time a
-      Plasma session stops (KDE bug 528003). Used only with Plasma; false
-      retains the packaged units unchanged.
-    '';
-  };
-  options.aurora.systemFixes.nmKeepWakeOnLan = lib.mkOption {
-    type = lib.types.bool;
-    default = true;
-    description = "Keep a Wake-on-LAN/WLAN device that is still activated after wake instead of reconnecting it.";
-  };
   config = lib.mkMerge [
     {
       # The Apple SoC watchdog (24 MHz, 32-bit counter) cannot time out later
@@ -76,7 +60,7 @@ in {
       systemd.units = lib.genAttrs (map (name: "${name}.service")
         (daemons ++ [ "malcontent-webd-update" ])) signalFix;
     })
-    (lib.mkIf (config.aurora.systemFixes.drkonqiOrdering && config.services.desktopManager.plasma6.enable) {
+    (lib.mkIf config.services.desktopManager.plasma6.enable {
       # drkonqi orders these user units after the target that their default
       # dependencies order them before: the cleanup timer after timers.target,
       # the sentry path after default.target, which comes after paths.target.
@@ -94,7 +78,7 @@ in {
         '';
       });
     })
-    (lib.mkIf (config.aurora.systemFixes.nmKeepWakeOnLan && config.networking.networkmanager.enable) {
+    (lib.mkIf config.networking.networkmanager.enable {
       # NetworkManager leaves Wake-on-LAN devices up at sleep so they stay
       # armed, but at wake it takes every one of them down and reconnects it,
       # even when its Wi-Fi association or Ethernet carrier survived. The
@@ -104,7 +88,7 @@ in {
         patches = (old.patches or [ ]) ++ [ ../patches/networkmanager-keep-activated-wake-on-lan.patch ];
       }));
     })
-    (lib.mkIf (config.aurora.systemFixes.nmDispatcherPersist && config.networking.networkmanager.enable) {
+    (lib.mkIf config.networking.networkmanager.enable {
       # NetworkManager dispatches dns-change and connectivity-change events
       # while it stops. The dispatcher exits after 10 s idle, and once shutdown
       # is queued systemd refuses to start it, so its D-Bus activation fails on

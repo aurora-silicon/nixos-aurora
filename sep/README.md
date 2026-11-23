@@ -91,9 +91,9 @@ over:
 
     sudo aurora-xart reset-touchid
 
-It refuses on a read-only install, when the driver is not running and when the
-keybag works, asks you to type RESET, and moves the Touch ID state and every
-user's prints for the Apple sensor into
+It refuses when the driver reports xART writes disabled this boot, when the
+driver is not running and when the keybag works, asks you to type RESET, and
+moves the Touch ID state and every user's prints for the Apple sensor into
 `/var/lib/aurora-sep-touchid-reset-<time>/`. It keeps the xART guard's files
 and the calibration. Reboot, then enrol every finger again; kernel trusted keys
 sealed before the reset can no longer be unsealed.

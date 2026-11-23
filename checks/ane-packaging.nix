@@ -14,12 +14,12 @@ let
     } ];
   };
   cfg = probe.config;
-in assert cfg.users.groups ? accel;
-   assert builtins.elem probe.pkgs.omarchy-ane-tools cfg.services.udev.packages;
-   assert builtins.elem probe.pkgs.mil-hwx-compiler cfg.environment.systemPackages;
+in assert builtins.elem probe.pkgs.mil-hwx-compiler cfg.environment.systemPackages;
    pkgs.runCommand "ane-firmware-and-udev-check" { } ''
      test -f ${cfg.hardware.firmware}/lib/firmware/apple/ane/test-marker
      test ! -f ${cfg.hardware.firmware}/lib/firmware/apple/ane/test-marker.zst
-     grep -F 'GROUP="accel", MODE="0660"' ${pkgs.omarchy-ane-tools}/lib/udev/rules.d/70-omarchy-ane.rules
+     # The /dev/accel policy is the platform module's (checks/fedora-parity.nix).
+     test ! -e ${pkgs.omarchy-ane-tools}/lib/udev
+     test ! -e ${pkgs.omarchy-ane-tools}/lib/sysusers.d
      touch $out
    ''

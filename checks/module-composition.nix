@@ -14,8 +14,8 @@ let
   customPortal = installed.extendModules {
     modules = [ { xdg.portal.config.common.default = [ "host-portal" ]; } ];
   };
-  speakerUpgrade = installed.extendModules {
-    modules = [ { aurora.speakerguardd.upgrade.enable = true; } ];
+  noSpeakerUpgrade = installed.extendModules {
+    modules = [ { aurora.speakerguardd.upgrade.enable = false; } ];
   };
   upgradePackage = installed.pkgs.aurora-speaker-upgrade;
   withoutProres = installed.extendModules {
@@ -23,6 +23,15 @@ let
   };
   proresFfmpeg = installed.pkgs.aurora-ffmpeg;
   gstPluginPath = config: config.environment.sessionVariables.GST_PLUGIN_PATH_1_0 or null;
+  # avd-fw 6062e851, whose 0x12000-byte v4 image the T8122 (M3) device tree
+  # of linux#2586 no longer fits.
+  olderAvdFirmware = installed.extendModules {
+    modules = [ { nixpkgs.overlays = lib.mkAfter [ (_: prev: {
+      aurora-avd-firmware = prev.aurora-avd-firmware.overrideAttrs { version = "0.1-unstable-2026-11-01.2"; };
+    }) ]; } ];
+  };
+  refusesAvdFirmware = system: lib.any (entry: !entry.assertion && lib.hasInfix "aurora-avd-firmware" entry.message)
+    system.config.assertions;
   preservesHostFile = config:
     config.boot.loader.grub.extraFiles."host/marker" == marker
     && !(config.boot.loader.grub.extraFiles ? "m1n1/boot.bin");
@@ -40,17 +49,21 @@ assert lib.assertMsg
     && !(lib.hasInfix "aurora-install-stage2" disabled.config.boot.loader.grub.extraInstallCommands))
   "Disabling Aurora Stage 2 updates must leave the ESP Stage 2 unchanged";
 assert lib.assertMsg
-  (!installed.config.aurora.speakerguardd.upgrade.enable
-    && !(lib.elem upgradePackage installed.config.environment.systemPackages)
-    && !(lib.elem upgradePackage installed.config.systemd.packages))
-  "Speaker migration must remain absent by default";
+  (installed.config.aurora.speakerguardd.upgrade.enable
+    && lib.elem upgradePackage installed.config.environment.systemPackages
+    && lib.elem upgradePackage installed.config.systemd.packages
+    && (installed.config.systemd.services.aurora-speaker-upgrade.wantedBy or [ ]) == [ "multi-user.target" ])
+  "Speaker migration must be installed and run at boot by default";
 assert lib.assertMsg
-  (lib.elem upgradePackage speakerUpgrade.config.environment.systemPackages
-    && lib.elem upgradePackage speakerUpgrade.config.systemd.packages
-    && (speakerUpgrade.config.systemd.services.aurora-speaker-upgrade.wantedBy or [ ]) == [ ]
-    && !(lib.elem "aurora-speaker-upgrade.service"
-      (speakerUpgrade.config.systemd.targets.multi-user.wants or [ ])))
-  "Opting into speaker migration must install its tool and units without starting it";
+  (!(lib.elem upgradePackage noSpeakerUpgrade.config.environment.systemPackages)
+    && !(lib.elem upgradePackage noSpeakerUpgrade.config.systemd.packages)
+    && (noSpeakerUpgrade.config.systemd.services.aurora-speaker-upgrade.wantedBy or [ ]) == [ ])
+  "Opting out of speaker migration must remove its tool and units";
+assert lib.assertMsg
+  (installed.config.boot.kernelPackages.kernel.auroraMinAvdFirmware == "0.1-unstable-2026-11-21"
+    && !(refusesAvdFirmware installed) && refusesAvdFirmware olderAvdFirmware
+    && lib.hasInfix "('v4-t0', 0x10000, '" (builtins.readFile ../firmware/check-avd.py))
+  "The kernel must require the avd-fw whose 64 KiB v4 image fits the T8122 SRAM window, and refuse an older one";
 assert lib.assertMsg
   (lib.elem proresFfmpeg installed.config.environment.systemPackages
     && builtins.match "/nix/store/[^/:]+-aurora-gst-video4linux2/lib/gstreamer-1.0" (gstPluginPath installed.config) != null

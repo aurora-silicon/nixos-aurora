@@ -1,0 +1,40 @@
+From dd743b29a518a8b22ef5cd82f0edbe34d2ef101f Mon Sep 17 00:00:00 2001
+From: Diljit Singh <hey@djdev.me>
+Date: Fri, 20 Nov 2026 12:28:39 -0500
+Subject: [PATCH] Config: read a runtime system config over the global one
+
+/run/fex-emu/Config.json, when it exists, is loaded into the global layer
+after the installed global config, so a service can point FEX at
+something it provides only while it runs, such as a RootFS on a mount.
+Without the file nothing changes, and a user's Config.json, app configs
+and FEX_* variables still override it.
+
+Signed-off-by: Diljit Singh <hey@djdev.me>
+---
+ Source/Common/Config.cpp | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/Source/Common/Config.cpp b/Source/Common/Config.cpp
+index 676b2f52a..84e044a5a 100644
+--- a/Source/Common/Config.cpp
++++ b/Source/Common/Config.cpp
+@@ -263,6 +263,16 @@ MainLoader::MainLoader(FEXCore::Config::LayerType Type, std::string_view ConfigF
+ void MainLoader::Load() {
+   SetCurrentConfigFile(Config);
+   JSON::LoadJSonConfig(Config, AppName, [this](const char* Name, const char* ConfigString) { MapNameToOption(Name, ConfigString); });
++#ifndef _WIN32
++  if (GetLayerType() == FEXCore::Config::LayerType::LAYER_GLOBAL_MAIN) {
++    // The system's runtime config, written while a service provides something
++    // such as a RootFS, overrides the installed global config. A user's own
++    // config and the environment still override both.
++    const fextl::string RuntimeConfig {"/run/fex-emu/Config.json"};
++    SetCurrentConfigFile(RuntimeConfig);
++    JSON::LoadJSonConfig(RuntimeConfig, AppName, [this](const char* Name, const char* ConfigString) { MapNameToOption(Name, ConfigString); });
++  }
++#endif
+ }
+ 
+ AppLoader::AppLoader(const fextl::string& AppName, FEXCore::Config::LayerType Type)
+-- 
+2.55.0
+

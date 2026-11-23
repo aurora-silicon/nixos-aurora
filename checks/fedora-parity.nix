@@ -20,6 +20,22 @@ let
         "a stalled reboot or kexec is reset by the hardware watchdog within its 178 s range" =
           config.systemd.settings.Manager.RebootWatchdogSec == "2min"
           && config.systemd.settings.Manager.KExecWatchdogSec == "2min";
+        "power defaults (ASPM powersupersave, no RT utilization floor) on every Apple silicon Mac, as on Fedora and ALARM" =
+          config.systemd.services.aurora-power-defaults.enable
+          && lib.elem "sysinit.target" config.systemd.services.aurora-power-defaults.wantedBy
+          && config.systemd.services.aurora-power-defaults.unitConfig.ConditionFirmware
+            == "device-tree-compatible(apple,arm-platform)";
+        "the Mission Control key opens the GNOME overview, as on Fedora and ALARM" =
+          config.aurora.desktop != "gnome"
+          || lib.hasInfix "[org.gnome.shell.keybindings]\ntoggle-overview=['XF86LaunchA']"
+            config.services.desktopManager.gnome.extraGSettingsOverrides;
+        "/dev/accel is group accel, mode 0660, with the session user's ACL, without aurora.ane, as on Fedora and ALARM" =
+          config.users.groups ? accel
+          && lib.any (package: (package.name or "") == "aurora-accel-rules"
+            && lib.hasInfix ''GROUP="accel", MODE="0660", TAG+="uaccess"'' (package.text or ""))
+            config.services.udev.packages
+          && config.systemd.services.aurora-accel-permissions.enable
+          && lib.elem "multi-user.target" config.systemd.services.aurora-accel-permissions.wantedBy;
         "trackpad clicks come from the host where the MTP trackpad has an actuator, as on Fedora and ALARM" =
           lib.any (package: (package.name or "") == "aurora-trackpad-clicks-rules") config.services.udev.packages;
         "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
