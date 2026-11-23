@@ -173,12 +173,12 @@
   },
   "kbd-light": {
     "repository": "https://github.com/aurora-silicon/kbd-light",
-    "commit": "727076b83eb65b0162317a9e2fa0ba850df1f5ca",
+    "commit": "72c3bb35f28d60fbc2e6db0eb8933a669832f16f",
     "version": "0.1.0",
-    "source_url": "https://codeload.github.com/aurora-silicon/kbd-light/tar.gz/727076b83eb65b0162317a9e2fa0ba850df1f5ca",
-    "archive_root": "kbd-light-727076b83eb65b0162317a9e2fa0ba850df1f5ca",
-    "sha256": "9419eea57c51fd4ccf83fe764bb85c18f9054d684d21415d189fa46fe568e88c",
-    "nix_hash": "sha256-lBnupXxR/UzPg/52S7hcGPkFTWhNIUFdGJ+kb+Vo6Iw="
+    "source_url": "https://codeload.github.com/aurora-silicon/kbd-light/tar.gz/72c3bb35f28d60fbc2e6db0eb8933a669832f16f",
+    "archive_root": "kbd-light-72c3bb35f28d60fbc2e6db0eb8933a669832f16f",
+    "sha256": "cadeba4cd5b11f5897454e75477fc92d583bcbdba0dcdd9f3cb4d949481d8b59",
+    "nix_hash": "sha256-yt66TNWxH1iXRU51R3/JLVg7y9ug3N2fPLTZSUgdi1k="
   },
   "aurora-xart": {
     "repository": "https://github.com/aurora-silicon/aurora-xart",
