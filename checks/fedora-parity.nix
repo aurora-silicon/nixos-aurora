@@ -25,6 +25,11 @@ let
           && lib.elem "sysinit.target" config.systemd.services.aurora-power-defaults.wantedBy
           && config.systemd.services.aurora-power-defaults.unitConfig.ConditionFirmware
             == "device-tree-compatible(apple,arm-platform)";
+        "aurora-power-modes runs beside aurora-power-budget with its commented /etc/aurora/power-modes.conf, as on Fedora and ALARM" =
+          !config.aurora.powerBudget.enable
+          || (config.systemd.services.aurora-power-modes.enable
+            && config.systemd.services.aurora-power-modes.wantedBy == [ "multi-user.target" ]
+            && config.environment.etc ? "aurora/power-modes.conf");
         "the Mission Control key opens the GNOME overview, as on Fedora and ALARM" =
           config.aurora.desktop != "gnome"
           || lib.hasInfix "[org.gnome.shell.keybindings]\ntoggle-overview=['XF86LaunchA']"

@@ -97,8 +97,45 @@ A device tree boot has the profile only as a class device
 `/sys/firmware/acpi/platform_profile`. The overlay patches
 `power-profiles-daemon` (`patches/power-profiles-daemon-platform-profile-class.patch`)
 so that, without the ACPI file, it drives the first class device instead. With
-the kernel handler present, `aurora-power-budget` stands aside instead of capping
-a second time ([aurora-platform#16](https://github.com/aurora-silicon/aurora-platform/pull/16)).
+the kernel handler present, `aurora-power-budget` does not cap a second time: it
+hands the handler each profile by the names its `choices` file lists, finds the
+value PPD already wrote there and writes nothing, and caps the CPU itself only
+while the handler does not hold `low-power`
+([aurora-platform#38](https://github.com/aurora-silicon/aurora-platform/pull/38)).
+`journalctl -u aurora-power-budget` logs each hand-over, and
+`/run/aurora-power-budget/status.json` shows `kernel_profiles`.
+
+## The other legs: `aurora-power-modes`
+
+Wherever `aurora.powerBudget.enable` is on, `modules/power-budget.nix` also
+runs `aurora-power-modes` from the same package, the unit Fedora and ALARM
+enable by preset. It follows the same D-Bus profile and has three legs. In
+Power Saver the realtime threads lose their top-clock floor
+(`kernel.sched_util_clamp_min_rt_default` 0) and the PCIe links use L1.1/L1.2
+(ASPM `powersupersave`); outside Power Saver, and when the service stops, each
+goes back to the value found at start. Here `aurora-power-defaults` sets both
+at boot, before `aurora-power-modes` starts, so these two legs find their Power
+Saver values already in place and every profile keeps them. The third leg makes
+every platform-profile handler other than `apple-clpc` follow the profile; it
+writes nothing while PPD lists its `platform_profile` driver, because PPD then
+writes the class itself.
+
+`/etc/aurora/power-modes.conf` is the package's default, with every line
+commented out. It has macOS's optional "Low Power Mode on battery" setting
+(default `never`) and switches for each leg. To set it:
+
+```nix
+environment.etc."aurora/power-modes.conf".text = ''
+  low_power_mode = battery
+'';
+```
+
+A change restarts the service on the next switch. To keep the CPU budget
+without these legs:
+
+```nix
+systemd.services.aurora-power-modes.enable = false;
+```
 
 ## PWR acceptance plan
 

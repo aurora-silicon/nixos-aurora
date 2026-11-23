@@ -613,7 +613,19 @@ integration without disabling KDE or removing existing accounts.
 Give the Power Saver profile a CPU power budget, as macOS Low Power Mode
 does: every 100 ms the budget is split across the CPU clusters from the
 device tree energy model and each cluster is capped to its share.
-Balanced and Performance are untouched.
+Balanced and Performance are not capped. Where the kernel budgets Power
+Saver itself (an apple-clpc platform profile), the profile is handed to
+it instead.
+
+Also runs aurora-power-modes for the other legs of each profile: in
+Power Saver the realtime threads lose their top-clock floor and the
+PCIe links use L1.1/L1.2, and every kernel platform-profile handler
+follows the profile unless power-profiles-daemon drives the class
+itself. `/etc/aurora/power-modes.conf` has macOS's optional "Low Power
+Mode on battery" setting (default: never); set
+`environment.etc."aurora/power-modes.conf".text` to change it.
+`systemd.services.aurora-power-modes.enable = false` keeps the budget
+without these legs.
 
 **Type:** boolean
 
