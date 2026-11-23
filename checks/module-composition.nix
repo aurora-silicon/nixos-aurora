@@ -22,9 +22,17 @@ let
   # of linux#2586 no longer fits.
   olderAvdFirmware = installed.extendModules {
     modules = [ { nixpkgs.overlays = lib.mkAfter [ (_: prev: {
-      aurora-avd-firmware = prev.aurora-avd-firmware.overrideAttrs { version = "0.1-unstable-2026-11-01.2"; };
+      # Only the version matters here: the platform assertion compares it.
+      aurora-avd-firmware = prev.aurora-avd-firmware.overrideAttrs {
+        version = "0.1-unstable-2026-11-01.2";
+        __intentionallyOverridingVersion = true;
+      };
     }) ]; } ];
   };
+  awdl = installed.extendModules {
+    modules = [ { aurora.awdl.enable = true; } ];
+  };
+  awdlSleepHook = "systemd/system-sleep/omdrop-awdl";
   refusesAvdFirmware = system: lib.any (entry: !entry.assertion && lib.hasInfix "aurora-avd-firmware" entry.message)
     system.config.assertions;
   preservesHostFile = config:
@@ -59,4 +67,9 @@ assert lib.assertMsg
     && !(refusesAvdFirmware installed) && refusesAvdFirmware olderAvdFirmware
     && lib.hasInfix "('v4-t0', 0x10000, '" (builtins.readFile ../firmware/check-avd.py))
   "The kernel must require the avd-fw whose 64 KiB v4 image fits the T8122 SRAM window, and refuse an older one";
+assert lib.assertMsg
+  ((awdl.config.environment.etc.${awdlSleepHook}.source or null)
+      == "${awdl.pkgs.omdrop-awdl}/lib/systemd/system-sleep/omdrop-awdl"
+    && !(installed.config.environment.etc ? ${awdlSleepHook}))
+  "AirDrop over AWDL must install its system-sleep hook where systemd-sleep runs it, and only when enabled";
 pkgs.runCommand "aurora-module-composition" { } "touch $out"

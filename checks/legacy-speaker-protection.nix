@@ -18,7 +18,7 @@ in assert lib.assertMsg (config.aurora.speakerguardd.v2.enable && config.aurora.
      "Keep the board-specific legacy protection selector";
    assert lib.assertMsg (config.boot.kernelPackages.kernel.auroraLegacySpeakerProtection or false)
      "The image kernel must support legacy speaker protection";
-   pkgs.runCommandNoCC "aurora-legacy-speaker-graphs" { } ''
+   pkgs.runCommand "aurora-legacy-speaker-graphs" { } ''
      test -s ${profile.pkgs.speakersafetyd}/lib/systemd/system/speakersafetyd.service
      test -s ${profile.pkgs.speakerguardd}/lib/systemd/system/speakerguardd.service
      for board in j316 j413 j616 j700; do

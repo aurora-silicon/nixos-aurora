@@ -232,6 +232,9 @@ in {
         description = "Move the installer's Stage 2 key off the ESP";
         wantedBy = [ "multi-user.target" ];
         after = [ "local-fs.target" "systemd-tmpfiles-setup.service" ];
+        # As aurora-platform's unit: the key is off the ESP before anyone can
+        # log in, and the service has no network.
+        before = [ "systemd-user-sessions.service" ];
         unitConfig = {
           ConditionPathExists = "${esp}/aurora/secboot/stage2.key";
           RequiresMountsFor = [ esp cfg.keyDir ];
@@ -241,6 +244,7 @@ in {
           Type = "oneshot";
           RemainAfterExit = true;
           UMask = "0077";
+          PrivateNetwork = true;
           ExecStart = "${secboot} keys adopt";
         };
       };

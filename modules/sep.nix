@@ -138,6 +138,9 @@ in {
       };
       systemd.services."aurora-touchid-rearm@" = {
         description = "Touch ID re-arm request";
+        # As the upstream unit: a failed instance is unloaded instead of
+        # staying in the unit list until the next reboot.
+        unitConfig.CollectMode = "inactive-or-failed";
         serviceConfig = {
           ExecStart = "${pkgs.aurora-touchid-rearm}/libexec/aurora-touchid-rearm";
           StandardInput = "socket";
