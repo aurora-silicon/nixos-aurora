@@ -1,6 +1,6 @@
 # Ambient white point
 
-On a Mac whose ambient light sensor reports the colour of the light, the display white point can follow the room. Under a warm lamp the screen gets a little warmer, in daylight it stays neutral. It is off by default and it is your choice to turn it on.
+On a Mac whose ambient light sensor reports the colour of the light, the display white point can follow the room. Under a warm lamp the screen gets a little warmer, in daylight it stays neutral. It is on by default on those Macs, and a switch in Settings turns it off.
 
 ## How it works
 
@@ -9,6 +9,8 @@ Three pieces, each in the standard place for it.
 1. The kernel reports the light's correlated colour temperature as the documented IIO channel `in_colortemp_input`, next to `in_illuminance_input`.
 2. iio-sensor-proxy, which GNOME and KDE already use for automatic brightness, reads it and publishes it on D-Bus as `ColorTemperature` (kelvin, 0 when the sensor has no colour channel). It is updated while a program holds the light sensor with `ClaimLight`, like `LightLevel`.
 3. The desktop picks a white point and applies it through its existing Night Light path. On GNOME that is the colour plugin of gnome-settings-daemon, which publishes the temperature that mutter applies. On KDE it is KWin's Night Light, which sets the screens' channel factors. Nothing writes to the display behind the compositor's back.
+
+The desktop claims the light sensor for this only when an IIO device has the `in_colortemp_input` channel. On a Mac whose light sensor reports lux only, or that has no light sensor, neither gnome-settings-daemon nor KWin claims it, so the default changes nothing there. iio-sensor-proxy reads the colour temperature only while the sensor is claimed, which is why both look at the channel in sysfs instead of waiting for a reading.
 
 ## The model
 
@@ -28,21 +30,21 @@ How much it adapts is a starting value that may be tuned. It follows the colour 
 
 Night Light always wins. The screen gets the warmer of the two temperatures, so the ambient white point can never make the screen bluer than Night Light asks for, and the hand-over at sunset is smooth. That holds during a Night Light preview too, so a preview's fade starts from what is on screen.
 
-## Turning it on
+## Turning it off and on
 
-GNOME:
+GNOME: Settings, Displays, Night Light, **Adapt to Ambient Light**. The switch is there when the Mac has a light sensor that reports colour. From a terminal:
 
 ```
-gsettings set org.gnome.settings-daemon.plugins.color ambient-white-point-enabled true
+gsettings set org.gnome.settings-daemon.plugins.color ambient-white-point-enabled false
 ```
 
 KDE Plasma:
 
 ```
-kwriteconfig6 --notify --file kwinrc --group NightColor --key AmbientWhitePoint true
+kwriteconfig6 --notify --file kwinrc --group NightColor --key AmbientWhitePoint false
 ```
 
-KWin picks the change up right away. Set either back to `false` to turn it off. aurora-diag has a live demo with the sensor reading, the chosen white point and a toggle (`aurora-diag demo whitepoint`).
+KWin picks the change up right away. Set either back to `true` to turn it on again. aurora-diag has a live demo with the sensor reading, the chosen white point and a toggle (`aurora-diag demo whitepoint`).
 
 ## Checking it
 
@@ -71,11 +73,11 @@ busctl --user get-property org.kde.KWin.NightLight /org/kde/KWin/NightLight org.
 
 ## Requirements and limits
 
-* A light sensor with a colour channel. On Apple silicon that is the AOP light sensor on the M1 Pro, M2 and M4 Pro machines with a kernel that reports `in_colortemp_input`. The Neo's sensor reports lux only, so nothing changes there.
+* A light sensor with a colour channel. On Apple silicon that is the AOP light sensor on the M1 Pro, M2 and M4 Pro machines with a kernel that reports `in_colortemp_input`. The Neo's sensor reports lux only, so nothing changes there and nothing claims the sensor for this.
 * A compositor that can apply Night Light to the display. mutter 51 and KWin apply it through the CRTC colour matrix when the display has no gamma table. mutter 50 needs a gamma table, so GNOME on mutter 50 can't shift a display that only has the colour matrix, for Night Light or for this.
 * The white point is applied as Night Light's per-channel scale, a simple approximation of a Bradford chromatic adaptation.
 * One setting covers every display, as with Night Light.
 
 ## Packages
 
-The overlay patches `iio-sensor-proxy` (3.9), `gnome-settings-daemon` (50.1) and `kdePackages.kwin` (6.7.5), so every Aurora NixOS system gets them with no option to set. The GNOME colour plugin tests run in the build (`gcm-self-test`, `ambient-policy`, `ambient-service`). The packages are exposed as `iio-sensor-proxy`, `gnome-settings-daemon` and `kwin` in the flake. Fedora and Arch Linux ARM carry the same patches.
+The overlay patches `iio-sensor-proxy` (3.9), `gnome-settings-daemon` (50.1) and `kdePackages.kwin` (6.8.2), so every Aurora NixOS system gets them with no option to set. The GNOME colour plugin tests run in the build (`gcm-self-test`, `ambient-policy`, `ambient-service`). The packages are exposed as `iio-sensor-proxy`, `gnome-settings-daemon` and `kwin` in the flake. Fedora and Arch Linux ARM carry the same patches. The overlay also patches `gnome-control-center` (50.4) for the Settings switch.
