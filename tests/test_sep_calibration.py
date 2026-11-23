@@ -3,6 +3,8 @@
 import importlib.util
 import contextlib
 import io
+import json
+import subprocess
 from pathlib import Path
 import stat
 import tempfile
@@ -313,6 +315,54 @@ class CalibrationExtractorTests(unittest.TestCase):
             extractor.write_private(output, b"sample")
             self.assertEqual(output.read_bytes(), b"sample")
             self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+
+
+def lsblk_run(*disks):
+    def run(argv, **_):
+        if argv[0] == "lsblk":
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"blockdevices": list(disks)}), "")
+        return subprocess.CompletedProcess(argv, 1, "", "")
+    return run
+
+
+def block(path, kind, label=None, uuid=None, tran=None, hotplug=False, children=()):
+    return {"path": path, "pkname": None, "partlabel": label, "partuuid": uuid, "rm": False,
+            "hotplug": hotplug, "tran": tran, "type": kind, "children": list(children)}
+
+
+class DiscoveryTests(unittest.TestCase):
+    UUID = "6e6c1d9b-35e3-4a51-8e2c-4a7f0d5a1b20"
+    INTERNAL = block("/dev/nvme0n1", "disk", tran="nvme", children=[
+        block("/dev/nvme0n1p1", "part", "iBootSystemContainer"),
+        block("/dev/nvme0n1p4", "part", "EFI", UUID)])
+    PLUGGED = block("/dev/sda", "disk", tran="usb", hotplug=True, children=[
+        block("/dev/sda1", "part", "iBootSystemContainer")])
+
+    def tree(self, directory, uuid=UUID):
+        if uuid:
+            (Path(directory) / "chosen").mkdir()
+            (Path(directory) / "chosen" / "asahi,efi-system-partition").write_bytes(uuid.encode() + b"\0")
+        return Path(directory)
+
+    def test_only_the_container_on_the_esp_disk_is_discovered(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tree = self.tree(directory)
+            for disks in ((self.INTERNAL, self.PLUGGED), (self.PLUGGED, self.INTERNAL)):
+                self.assertEqual(extractor.discover_isc_inputs(lsblk_run(*disks), tree),
+                                 [Path("/dev/nvme0n1p1")])
+
+    def test_discovery_without_a_known_esp_is_refused_cleanly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RuntimeError, "pass the container's block device"):
+                extractor.discover_isc_inputs(lsblk_run(self.INTERNAL, self.PLUGGED), self.tree(directory, None))
+            output = Path(directory) / "calibration.bin"
+            err = io.StringIO()
+            with patch("sys.argv", [str(SCRIPT), "-o", str(output)]), \
+                    patch.object(extractor, "discover_isc_inputs", side_effect=extractor.Refused("the system ESP is not known")), \
+                    contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(extractor.main(), 1)
+            self.assertIn("error: the system ESP is not known", err.getvalue())
+            self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":
