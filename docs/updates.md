@@ -55,21 +55,23 @@ covers that commit's hardware outputs, so installed systems can substitute them.
 ### Stage 2 on rebuild
 
 `nixosModules.installed` (`modules/installed.nix`) refreshes the ESP Stage 2 on every bootloader install
-(`nixos-rebuild switch` or `boot`), exactly as `update-m1n1` does on ALARM and Fedora: aura, every Apple
-device tree of the system's kernel and U-Boot in one `m1n1/boot.bin`, the same layout on every Mac
+(`nixos-rebuild switch` or `boot`), exactly as `update-aura` does on ALARM and Fedora: aura, every Apple
+device tree of the system's kernel and U-Boot in one `aurora/boot.bin`, the same layout on every Mac
 including the MacBook Neo.
 
 - At build time `scripts/check-stage2.py` requires the file to start with the system's aura build, carry
-  only device trees, one gzip U-Boot member and m1n1 option lines, and include the device trees of
+  only device trees, one gzip U-Boot member and aura option lines, and include the device trees of
   `aurora.stage2.requiredBoards` (`j700`, `j616s` and `j614s` by default). The build fails otherwise, so a rebuild stops before
   it switches.
 - At install time `aurora-install-stage2` (`scripts/install-stage2.sh`) checks the input against its
   recorded digest and that the ESP is the mounted FAT partition this Mac booted from
-  (`/proc/device-tree/chosen/asahi,efi-system-partition` when present) with an `m1n1` directory, then
+  (`/proc/device-tree/chosen/aurora,efi-system-partition`, or `asahi,efi-system-partition` from an aura
+  built before the rename, when present) with an `aurora` directory (`m1n1` when only that one holds a
+  Stage 2 file), then
   hands the write to `aurora-stage2 install` (below). An unchanged file is left alone. Any refusal
   leaves the ESP unchanged and fails the bootloader install loudly.
 - With `aurora.secureBoot.enable` and an `aurora-secboot` that has `stage2 hook`, `aurora-stage2` first
-  passes the built file through it (`AURORA_STAGE2_SIGNER`), as `update-m1n1` does on Fedora. The hook signs it
+  passes the built file through it (`AURORA_STAGE2_SIGNER`), as `update-aura` does on Fedora. The hook signs it
   with the owner's Stage 2 key when `STAGE2_SIGN` allows (by default: `stage2.key` in `keyDir` and
   `keyOwner` `owner` or `both`) and returns it unchanged otherwise; receipts and trials name the signed
   bytes. A signing failure keeps the live Stage 2. The module then also writes `/etc/aurora/stage2-sign-hook`,
@@ -87,8 +89,8 @@ including the MacBook Neo.
   `kernel/config` turns it on, so `kernelCtxrExecmem` is true.
 - With the marker, a Mac that boots a Mach-O Stage 1 (`/proc/device-tree/compatible` names one of the chips
   in the installer's `AuraStage1Format.usesMachO`: T8130 and later, T6040 and later) gets
-  `m1n1/boot-ctxr.bin`, from the build's `ctxr/boot-ctxr-<board>.bin`, with only this board's device trees.
-  `m1n1/boot.bin` is never touched, because the padded Stage 1 these Macs enroll chainloads `boot-ctxr.bin`.
+  `aurora/boot-ctxr.bin`, from the build's `ctxr/boot-ctxr-<board>.bin`, with only this board's device trees.
+  `aurora/boot.bin` is never touched, because the padded Stage 1 these Macs enroll chainloads `boot-ctxr.bin`.
   M1 to M3 Macs only ever use `boot.bin`.
 - A problem with one board's file never stops a rebuild. `scripts/build-ctxr-stage2.sh` warns and leaves the
   file out, and a Mach-O Mac whose board has no file gets a warning and an unchanged ESP.
@@ -114,13 +116,13 @@ commit and digests, and a test fails if the copies drift), and `stage2/nixos_sta
 generations. `pkgs.aurora-stage2` packages both.
 
 With aura Stage 1 1.0.0b4 or later (read from `/proc/device-tree/chosen`, not from the aura package),
-`aurora-stage2 install` leaves the working file in place. It writes `m1n1/<name>.next`, reads it back,
+`aurora-stage2 install` leaves the working file in place. It writes `aura/<name>.next`, reads it back,
 checks its DTB headers, that a tree for this Mac's root compatible is there and that it keeps the display
 aliases (`dcp`, `disp0`) the running tree has, records a receipt (`<name>.next.json`) and an attempt under
 `/var/lib/aurora-stage2/attempts`, flushes the ESP, and only then writes the ESP root file `aura-try` as
 `armed\n<ESP-relative .next path>\n` through `aura-try.tmp`. Stage 1 marks it `spent` before it loads the
 candidate, so any failure boots the configured file next time. Older Stage 1 gets the file directly: it is
-written beside the target, verified, the previous file kept as `m1n1/<name>.old` and the new one renamed
+written beside the target, verified, the previous file kept as `aura/<name>.old` and the new one renamed
 into place.
 
 On the trial boot `aurora-stage2-commit.service` runs once, after `multi-user.target`, when the ESP has an
@@ -141,7 +143,7 @@ NixOS generations and rollback:
   configuration's kernel. `nixos-rebuild test` installs no bootloader and changes nothing on the ESP.
 - One attempt per candidate image (its SHA-256, recorded in the receipt's `kernel` field), not per kernel
   version: an image that fell back is never armed again automatically, and any other image (new device
-  trees, aura, U-Boot or m1n1 options) gets its own trial, keeping the failed one as
+  trees, aura, U-Boot or aura options) gets its own trial, keeping the failed one as
   `<name>.failed-<sha256>`.
 - The newest install decides: an armed candidate that never booted is withdrawn, with its attempt record,
   when a later install selects other bytes, so `nixos-rebuild boot` twice before a reboot trials the second
@@ -186,8 +188,8 @@ again automatically, while one that committed may be after a rollback to it; and
 committed stages the next image like an ordinary boot.
 
 Recovery: boot the previous NixOS generation from GRUB if the new kernel misbehaves. If a committed Stage 2
-does not boot, restore `m1n1/<name>.prev` (after a trial) or `m1n1/<name>.old` (after a direct update) over
-`m1n1/<name>` from macOS or the recovery environment, and remove `aura-try`.
+does not boot, restore `aura/<name>.prev` (after a trial) or `aura/<name>.old` (after a direct update) over
+`aura/<name>` from macOS or the recovery environment, and remove `aura-try`.
 
 ### Tests
 

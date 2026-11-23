@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Install the Stage 2 on this Mac's ESP the way update-m1n1 does on ALARM and
+# Install the Stage 2 on this Mac's ESP the way update-aura does on ALARM and
 # Fedora: only when it changes, and as a trial when Stage 1 can run one.
-# Every Mac uses the combined m1n1/boot.bin until aura has no monitor. Then a
-# Mac that boots a Mach-O Stage 1 uses m1n1/boot-ctxr.bin with only its board's
-# device trees, and its m1n1/boot.bin is never touched. Stage 1 is never
+# Every Mac uses the combined aurora/boot.bin until aura has no monitor. Then a
+# Mac that boots a Mach-O Stage 1 uses aurora/boot-ctxr.bin with only its board's
+# device trees, and its aurora/boot.bin is never touched. Stage 1 is never
 # written. This script refuses (leaving the ESP as it was) when the input does
 # not match its recorded digest or the ESP is not the mounted FAT partition this
 # Mac booted from. A Mach-O Mac whose board has no file in this build only gets
@@ -28,7 +28,12 @@ source_dir=${1:-}
 esp=${2:-}
 toplevel=${3:-}
 # Where the booted Stage 2 records the partition UUID of its ESP.
-device_tree_esp=${AURORA_DEVICE_TREE_ESP:-/proc/device-tree/chosen/asahi,efi-system-partition}
+device_tree_esp=${AURORA_DEVICE_TREE_ESP:-/proc/device-tree/chosen/aurora,efi-system-partition}
+# LEGACY-ASAHI(2027-02-28): an aura from before the rename, and a U-Boot that
+# moves the ESP, publish it only as asahi,efi-system-partition.
+if [[ ! -r $device_tree_esp && ${device_tree_esp##*/} == aurora,efi-system-partition ]]; then
+  device_tree_esp=${device_tree_esp%/*}/asahi,efi-system-partition
+fi
 device_tree_compatible=${AURORA_DEVICE_TREE_COMPATIBLE:-/proc/device-tree/compatible}
 
 refuse() {
@@ -61,7 +66,7 @@ if [[ -n $board ]]; then
   source=$source_dir/ctxr/boot-ctxr-$board.bin
   name=boot-ctxr.bin
   if [[ ! -s $source || ! -f $source.sha256 ]]; then
-    echo "aurora-install-stage2: warning: this build has no Stage 2 for $board, so m1n1/boot-ctxr.bin was left unchanged" >&2
+    echo "aurora-install-stage2: warning: this build has no Stage 2 for $board, so aurora/boot-ctxr.bin was left unchanged" >&2
     exit 0
   fi
 else
@@ -82,9 +87,19 @@ if [[ -r $device_tree_esp ]]; then
   mounted=$(lsblk -n -d -o PARTUUID "$device" | tr '[:upper:]' '[:lower:]')
   [[ -n $booted && $booted == "$mounted" ]] || refuse "$esp ($mounted) is not the ESP this Mac booted from ($booted)"
 fi
-[[ -d $esp/m1n1 ]] || refuse "$esp has no m1n1 directory"
+# The one Stage 2 file the enrolled Stage 1 loads lives in aurora/. LEGACY-ASAHI(2027-02-28):
+# a Stage 1 enrolled before the rename chainloads m1n1/boot.bin (or
+# m1n1/boot-ctxr.bin); when aurora/ has no Stage 2 file and m1n1/ has one,
+# that file is the one to update (aurora_stage2_dir in alarm-aurora).
+if [[ ! -e $esp/aurora/boot.bin && ! -e $esp/aurora/boot-ctxr.bin ]] &&
+   [[ -e $esp/m1n1/boot.bin || -e $esp/m1n1/boot-ctxr.bin ]]; then
+  stage2_dir=m1n1
+else
+  stage2_dir=aurora
+fi
+[[ -d $esp/$stage2_dir ]] || refuse "$esp has no $stage2_dir directory"
 
 export AURORA_STAGE2_DIR=$source_dir AURORA_STAGE2_SOURCE=$source AURORA_STAGE2_SHA256=$expected
 export AURORA_TOPLEVEL=$toplevel AURORA_DEVICE_TREE_COMPATIBLE=$device_tree_compatible
-export TARGET=$esp/m1n1/$name ESP_ROOT=$esp ESP_DEVICE=$device ESP_FSTYPE=vfat
+export TARGET=$esp/$stage2_dir/$name ESP_ROOT=$esp ESP_DEVICE=$device ESP_FSTYPE=vfat
 exec "${AURORA_STAGE2_HELPER:-aurora-stage2}" install

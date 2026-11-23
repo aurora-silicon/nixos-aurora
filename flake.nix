@@ -32,7 +32,7 @@
       nixosModules.default = ./modules/aurora.nix;
       # An installed system: the native installer provisioned Stage 1, which
       # rebuilds never touch; every bootloader install refreshes the ESP
-      # Stage 2 as update-m1n1 does on ALARM and Fedora (modules/installed.nix).
+      # Stage 2 as update-aura does on ALARM and Fedora (modules/installed.nix).
       nixosModules.installed = ./modules/installed.nix;
       nixosConfigurations = {
         aurora-kde = makeSystem "kde";
@@ -44,7 +44,7 @@
           plymouth docker libfprint fprintd omarchy-ane-tools mil-hwx-compiler upower
           fex steam mesa speakerguardd mutter speakersafetyd aurora-bless
           plymouth-theme-aurora omdrop-awdl speakerguardd-v2 iio-sensor-proxy
-          gnome-settings-daemon;
+          gnome-settings-daemon aura;
         logos = pkgs.aurora-logos;
         firstboot = pkgs.aurora-firstboot;
         power-budget = pkgs.aurora-power-budget;
@@ -55,9 +55,8 @@
         wifi-firmware = pkgs.aurora-wifi-firmware;
         libva-v4l2-request-avd = pkgs.libvaV4l2RequestAvd;
         bindgen = pkgs.aurora-bindgen;
-        aura = pkgs.m1n1;
-        uboot = pkgs.uboot-asahi;
-        kernel = pkgs.linux-asahi.kernel;
+        uboot = pkgs.uboot-aurora;
+        kernel = pkgs.linux-aurora.kernel;
         userpages = pkgs.aurora-userpages;
         proton = pkgs.aurora-proton;
         rusticl = pkgs.aurora-rusticl;
@@ -74,8 +73,8 @@
         };
         alsa-utils = pkgs.aurora-alsa-utils;
         pipewire = pkgs.aurora-pipewire;
-        audio = pkgs.asahi-audio;
-        ucm = pkgs.alsa-ucm-conf-asahi;
+        audio = pkgs.aurora-audio;
+        ucm = pkgs.alsa-ucm-conf-aurora;
         fex-mesa = pkgs.aurora-fex-mesa;
         flatpak-gl = pkgs.aurora-flatpak-gl;
         kwin = pkgs.kdePackages.kwin;

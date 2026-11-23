@@ -22,8 +22,8 @@ in assert lib.assertMsg (config.aurora.speakerguardd.v2.enable && config.aurora.
      test -s ${profile.pkgs.speakersafetyd}/lib/systemd/system/speakersafetyd.service
      test -s ${profile.pkgs.speakerguardd}/lib/systemd/system/speakerguardd.service
      for board in j316 j413 j616 j700; do
-       test -s ${profile.pkgs.asahi-audio}/share/asahi-audio/$board/graph.json
+       test -s ${profile.pkgs.aurora-audio}/share/aurora-audio/$board/graph.json
      done
-     test -s ${profile.pkgs.asahi-audio}/share/asahi-audio/j700/48.wav
+     test -s ${profile.pkgs.aurora-audio}/share/aurora-audio/j700/48.wav
      touch $out
    ''

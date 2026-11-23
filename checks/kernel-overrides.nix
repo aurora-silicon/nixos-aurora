@@ -1,7 +1,7 @@
 { pkgs }:
 let
   inherit (pkgs) lib;
-  base = pkgs.linux-asahi.kernel;
+  base = pkgs.linux-aurora.kernel;
   revision = "1111111111111111111111111111111111111111";
   sourceOverride = base.override { src = base.src // { rev = revision; }; };
   attrsSourceOverride = base.overrideAttrs { src = base.src // { rev = revision; }; };
@@ -16,14 +16,14 @@ let
       aurora.systemFixes.malcontentSignal = true;
     };
   }).environment.etc."aurora/parity.json".text);
-  withPatch = patch: (pkgs.linux-asahi.override {
+  withPatch = patch: (pkgs.linux-aurora.override {
     _kernelPatches = [ ({ name = "aurora-config-override-test"; patch = null; } // patch) ];
   }).kernel;
   structured = withPatch { structuredExtraConfig.DUMMY = lib.kernel.no; };
   legacy = withPatch { extraConfig = "DUMMY n"; };
   repeated = withPatch { extraConfig = "DUMMY m\nDUMMY n"; };
   commented = withPatch { extraConfig = "# Disable the optional network device\nDUMMY n # owner override"; };
-  forced = (pkgs.linux-asahi.override {
+  forced = (pkgs.linux-aurora.override {
     _kernelPatches = [
       { name = "request-dummy"; patch = null; structuredExtraConfig.DUMMY = lib.kernel.yes; }
       { name = "force-no-dummy"; patch = null; structuredExtraConfig.DUMMY = lib.mkForce lib.kernel.no; }
@@ -59,7 +59,7 @@ let
   sourceFragments = pkgs.runCommand "aurora-kernel-configure-test-source" { } ''
     mkdir -p $out
     tar -xzf ${base.src} -C $out --strip-components=1 --wildcards \
-      '*/scripts/kconfig/merge_config.sh' '*/arch/arm64/configs/asahi.config'
+      '*/scripts/kconfig/merge_config.sh' '*/arch/arm64/configs/aurora.config'
   '';
   # Only Kbuild resolution is simulated. The actual configurePhase must copy
   # the canonical base and merge NixOS and owner fragments with the pinned

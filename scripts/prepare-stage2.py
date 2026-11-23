@@ -39,7 +39,7 @@ def prepare(combined_path, aura_path, output):
         name = f'boot-{board}.bin'
         (output / name).write_bytes(data)
         records[board + 'ap'] = {
-            'member': 'esp/m1n1/' + name,
+            'member': 'esp/aurora/' + name,
             'bytes': len(data),
             'sha256': digest(data),
             'deviceTrees': len(trees),

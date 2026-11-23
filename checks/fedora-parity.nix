@@ -56,9 +56,9 @@ let
           && patched "-1007-alsa-back-off-a-refused-snd_pcm_start-and-rate-limit.patch"
           && patched "-1008-alsa-a-start-on-a-suspended-PCM-is-expected-not-an-error.patch";
         "PipeWire and WirePlumber use the pinned audio and UCM profiles" =
-          lib.elem value.pkgs.asahi-audio config.services.pipewire.configPackages
-          && lib.elem value.pkgs.asahi-audio config.services.pipewire.wireplumber.configPackages
-          && config.environment.variables.ALSA_CONFIG_UCM2 == "${value.pkgs.alsa-ucm-conf-asahi}/share/alsa/ucm2";
+          lib.elem value.pkgs.aurora-audio config.services.pipewire.configPackages
+          && lib.elem value.pkgs.aurora-audio config.services.pipewire.wireplumber.configPackages
+          && config.environment.variables.ALSA_CONFIG_UCM2 == "${value.pkgs.alsa-ucm-conf-aurora}/share/alsa/ucm2";
         "Mesa development and OpenCL interfaces match the native pin" =
           value.pkgs.mesa ? dev
           && value.pkgs.mesa.opencl.outPath == value.pkgs.aurora-rusticl.outPath

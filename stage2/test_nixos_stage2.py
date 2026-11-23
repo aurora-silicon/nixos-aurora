@@ -47,19 +47,19 @@ class NixosTrialTests(unittest.TestCase):
         self.flush = patch.object(nixos_stage2.NixosUpdate, 'flush_esp').start()
         self.env = {
             'AURORA_STAGE2_DIR': '/stage2', 'AURORA_STAGE2_SOURCE': '/stage2/boot.bin',
-            'M1N1': '/stage2/aura.bin', 'AURORA_MONITOR_FREE_MARKER': '/stage2/monitor-free',
-            'TARGET': '/esp/m1n1/boot.bin', 'ESP_ROOT': '/esp', 'ESP_DEVICE': '/dev/test-esp',
+            'AURA': '/stage2/aura.bin', 'AURORA_MONITOR_FREE_MARKER': '/stage2/monitor-free',
+            'TARGET': '/esp/aurora/boot.bin', 'ESP_ROOT': '/esp', 'ESP_DEVICE': '/dev/test-esp',
             'ESP_FSTYPE': 'vfat', 'AURORA_SYSTEM_PROFILES': '/nix/var/nix/profiles',
         }
         self.put('/stage2/aura.bin', b'AURA')
-        self.target = self.put('/esp/m1n1/boot.bin', b'GOOD-STAGE2')
-        self.backup = self.put('/esp/m1n1/boot.bin.old', b'OLDER-STAGE2')
+        self.target = self.put('/esp/aurora/boot.bin', b'GOOD-STAGE2')
+        self.backup = self.put('/esp/aurora/boot.bin.old', b'OLDER-STAGE2')
         self.candidate = self.target.with_name('boot.bin.next')
         self.prev = self.target.with_name('boot.bin.prev')
         self.marker = self.root / 'esp/aura-try'
         self.attempts = self.root / 'var/lib/aurora-stage2/attempts'
         self.put('/proc/device-tree/compatible', b'apple,j413\0apple,t8112\0')
-        self.put('/proc/device-tree/chosen/asahi,m1n1-stage1-version', b'1.0.0b4\0')
+        self.put('/proc/device-tree/chosen/aurora,aura-stage1-version', b'1.0.0b4\0')
         self.payload = self.stage2(image(dtb('j413', cells=5)))
         self.generation(1, 'kernel-7.3', abi=1)
 
@@ -120,7 +120,7 @@ class NixosTrialTests(unittest.TestCase):
     def commit(self):
         self.update().commit()
 
-    def trial_boot(self, relative='m1n1/boot.bin.next'):
+    def trial_boot(self, relative='aurora/boot.bin.next'):
         self.marker.write_bytes(f'spent\n{relative}\n'.encode())
         self.put('/proc/device-tree/chosen/aurora,trial', relative.encode() + b'\0')
 
@@ -146,13 +146,13 @@ class NixosTrialTests(unittest.TestCase):
 
     def test_install_arms_a_trial_and_keeps_the_live_image(self):
         self.install()
-        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+        self.assertEqual(self.marker.read_bytes(), b'armed\naurora/boot.bin.next\n')
         self.assertEqual(self.candidate.read_bytes(), self.payload)
         self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
         self.assertEqual(self.backup.read_bytes(), b'OLDER-STAGE2')
         receipt = json.loads(self.target.with_name('boot.bin.next.json').read_text())
         digest = hashlib.sha256(self.payload).hexdigest()
-        self.assertEqual(receipt, {'kernel': digest, 'path': 'm1n1/boot.bin.next', 'sha256': digest,
+        self.assertEqual(receipt, {'kernel': digest, 'path': 'aurora/boot.bin.next', 'sha256': digest,
                                    'dtb_offset': 4, 'generation': 1})
         self.assertEqual(json.loads((self.attempts / digest).read_text()), receipt)
         self.commit()  # The boot that staged it is not a trial boot.
@@ -173,23 +173,23 @@ class NixosTrialTests(unittest.TestCase):
 
     def test_fallback_keeps_the_live_image_and_never_rearms_that_image(self):
         self.install()
-        self.marker.write_bytes(b'spent\nm1n1/boot.bin.next\n')  # Stage 1 fell back.
+        self.marker.write_bytes(b'spent\naurora/boot.bin.next\n')  # Stage 1 fell back.
         with patch('builtins.print') as log:
             self.commit()
         self.assertIn('fell back', log.call_args[0][0])
         self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
         self.assertEqual(self.candidate.read_bytes(), self.payload)
         self.install()  # A rebuild with the same image does not retry it.
-        self.assertEqual(self.marker.read_bytes(), b'spent\nm1n1/boot.bin.next\n')
+        self.assertEqual(self.marker.read_bytes(), b'spent\naurora/boot.bin.next\n')
         self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
 
     def test_a_new_image_after_a_fallback_gets_its_own_trial_and_keeps_the_evidence(self):
         self.install()
         failed = self.candidate.read_bytes()
-        self.marker.write_bytes(b'spent\nm1n1/boot.bin.next\n')
+        self.marker.write_bytes(b'spent\naurora/boot.bin.next\n')
         self.stage2(self.payload + b'chosen.bootargs=quiet\n')
         self.install()
-        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+        self.assertEqual(self.marker.read_bytes(), b'armed\naurora/boot.bin.next\n')
         saved = list(self.target.parent.glob('boot.bin.failed-*'))
         self.assertTrue(any(p.read_bytes() == failed for p in saved))
 
@@ -224,7 +224,7 @@ class NixosTrialTests(unittest.TestCase):
         self.assertTrue(self.candidate.exists())
 
     def test_old_stage1_replaces_directly_with_a_backup(self):
-        self.put('/proc/device-tree/chosen/asahi,m1n1-stage1-version', b'1.0.0b3\0')
+        self.put('/proc/device-tree/chosen/aurora,aura-stage1-version', b'1.0.0b3\0')
         self.install()
         self.assertEqual(self.target.read_bytes(), self.payload)
         self.assertEqual(self.backup.read_bytes(), b'GOOD-STAGE2')
@@ -246,14 +246,14 @@ class NixosTrialTests(unittest.TestCase):
     def test_ctxr_slot_is_trialled_and_committed_alone(self):
         self.put('/stage2/monitor-free', b'')
         self.put('/proc/device-tree/compatible', b'apple,j700\0apple,t8140\0')
-        ctxr = self.put('/esp/m1n1/boot-ctxr.bin', b'GOOD-CTXR')
-        self.env['TARGET'] = '/esp/m1n1/boot-ctxr.bin'
+        ctxr = self.put('/esp/aurora/boot-ctxr.bin', b'GOOD-CTXR')
+        self.env['TARGET'] = '/esp/aurora/boot-ctxr.bin'
         payload = self.stage2(image(dtb('j700', 't8140')))
         self.install()
-        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot-ctxr.bin.next\n')
-        self.trial_boot('m1n1/boot-ctxr.bin.next')
+        self.assertEqual(self.marker.read_bytes(), b'armed\naurora/boot-ctxr.bin.next\n')
+        self.trial_boot('aurora/boot-ctxr.bin.next')
         self.sane()
-        self.env['TARGET'] = '/esp/m1n1/boot.bin'  # The boot service names boot.bin.
+        self.env['TARGET'] = '/esp/aurora/boot.bin'  # The boot service names boot.bin.
         self.commit()
         self.assertEqual(ctxr.read_bytes(), payload)
         self.assertEqual(self.target.read_bytes(), b'GOOD-STAGE2')
@@ -266,7 +266,7 @@ class NixosTrialTests(unittest.TestCase):
         first = hashlib.sha256(self.payload).hexdigest()
         second = self.stage2(self.payload + b'chosen.bootargs=quiet\n')
         self.install()
-        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+        self.assertEqual(self.marker.read_bytes(), b'armed\naurora/boot.bin.next\n')
         self.assertEqual(self.candidate.read_bytes(), second)
         self.assertFalse((self.attempts / first).exists())
         self.assertFalse(list(self.target.parent.glob('boot.bin.failed-*')))
@@ -287,7 +287,7 @@ class NixosTrialTests(unittest.TestCase):
         self.commit()
         following = self.stage2(self.payload + b'chosen.bootargs=quiet\n')
         self.install()
-        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+        self.assertEqual(self.marker.read_bytes(), b'armed\naurora/boot.bin.next\n')
         self.assertEqual(self.candidate.read_bytes(), following)
 
     def test_a_committed_trial_boot_arms_again_after_withdrawing_an_image(self):
@@ -303,7 +303,7 @@ class NixosTrialTests(unittest.TestCase):
         self.assertFalse(self.marker.exists())
         following = self.stage2(committed + b'chosen.bootargs=splash\n')
         self.install()  # Same trial boot, receipt gone: still an ordinary boot.
-        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+        self.assertEqual(self.marker.read_bytes(), b'armed\naurora/boot.bin.next\n')
         self.assertEqual(self.candidate.read_bytes(), following)
         self.assertEqual(self.target.read_bytes(), committed)
 
@@ -446,7 +446,7 @@ class NixosTrialTests(unittest.TestCase):
         self.assertEqual(receipt['sha256'], hashlib.sha256(signed).hexdigest())
 
     def test_the_signed_image_replaces_directly_on_an_old_stage1(self):
-        self.put('/proc/device-tree/chosen/asahi,m1n1-stage1-version', b'1.0.0b3\0')
+        self.put('/proc/device-tree/chosen/aurora,aura-stage1-version', b'1.0.0b3\0')
         self.signer(self.SIGN)
         self.install()
         self.assertEqual(self.target.read_bytes(), self.payload + b'SIGAURSIGT1')

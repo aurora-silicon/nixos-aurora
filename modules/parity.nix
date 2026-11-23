@@ -12,8 +12,8 @@ in {
     kernel = toString config.boot.kernelPackages.kernel;
     mesa = toString pkgs.mesa;
     alsaUtils = if config.aurora.audio.skipLockedControls then toString pkgs.alsa-utils else null;
-    audio = toString pkgs.asahi-audio;
-    ucm = toString pkgs.alsa-ucm-conf-asahi;
+    audio = toString pkgs.aurora-audio;
+    ucm = toString pkgs.alsa-ucm-conf-aurora;
     fexMesa = if config.aurora.fexMesa.enable then toString config.aurora.fexMesa.package else null;
     flatpakGL = if config.aurora.flatpak.enable then toString config.aurora.flatpak.package else null;
     avdFirmware = toString pkgs.aurora-avd-firmware;

@@ -14,7 +14,7 @@ spec.loader.exec_module(repository)
 REMOTE = 'aurora-gl'
 GL = '/usr/lib/aarch64-linux-gnu/GL'
 ENV = {
-    'VK_DRIVER_FILES': f'{GL}/vulkan/icd.d/asahi_icd.aarch64.json:{GL}/vulkan/icd.d/lvp_icd.aarch64.json',
+    'VK_DRIVER_FILES': f'{GL}/vulkan/icd.d/aurora_icd.aarch64.json:{GL}/vulkan/icd.d/lvp_icd.aarch64.json',
     '__EGL_VENDOR_LIBRARY_FILENAMES': f'{GL}/glvnd/egl_vendor.d/50_mesa.json',
     'LIBGL_DRIVERS_PATH': f'{GL}/lib/dri',
 }

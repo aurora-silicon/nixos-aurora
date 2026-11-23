@@ -8,7 +8,7 @@ let
   layer = name: (pkgs.runCommand "fex-layer-${name}" { passthru = { inherit commit; }; } ''
     mkdir -p $out/usr/lib64
     echo ${name} > $out/usr/aurora-layer
-    printf '\177ELF\002\001\001\000\000\000\000\000\000\000\000\000\003\000\076\000\n${name}\n' > $out/usr/lib64/libvulkan_asahi.so
+    printf '\177ELF\002\001\001\000\000\000\000\000\000\000\000\000\003\000\076\000\n${name}\n' > $out/usr/lib64/libvulkan_aurora.so
     echo ${commit} > $out/.aurora-mesa-commit
   '');
   old = layer "old";

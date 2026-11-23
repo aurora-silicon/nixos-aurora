@@ -709,7 +709,7 @@ def _record_layouts(directory, header, structs, cc, extra=None):
     return layouts
 
 
-def uapi_report(kernel_dir, mesa_dir, header='asahi_drm.h', cc=None, extra_includes=None):
+def uapi_report(kernel_dir, mesa_dir, header='aurora_drm.h', cc=None, extra_includes=None):
     """Compare the GPU UAPI as the kernel defines it and as Mesa uses it.
 
     Only definitions present on both sides can conflict: a different value,
@@ -749,7 +749,7 @@ def uapi_report(kernel_dir, mesa_dir, header='asahi_drm.h', cc=None, extra_inclu
             conflicts.append(f'struct {name}: kernel field {left["fields"][index]} != Mesa {right["fields"][index]}')
             continue
         if left['size'] != right['size']:
-            # Size-versioned commands may grow at the end (drm_asahi_cmd_header
+            # Size-versioned commands may grow at the end (drm_aurora_cmd_header
             # carries the size). The shorter layout must be an exact prefix and
             # must end before the first appended field.
             shorter, longer = (left, right) if left['size'][0] < right['size'][0] else (right, left)
