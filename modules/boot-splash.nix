@@ -19,6 +19,12 @@
 { config, lib, pkgs, ... }:
 let
   udevadm = "${config.boot.initrd.systemd.package}/bin/udevadm";
+  auroraSplashEnabled = config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora";
+  prepareSplashGeometry = ''
+    PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
+      ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
+      ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
+  '';
   readlink = "${pkgs.coreutils}/bin/readlink";
   earlyKms = pkgs.writeShellScript "aurora-early-kms" ''
     set -u
@@ -77,19 +83,14 @@ in {
   # pixel; Plymouth's own 2x scale on Retina panels would double it.
   boot.plymouth.extraConfig = lib.mkIf (config.boot.plymouth.theme == "aurora") "DeviceScale=1";
   # Each boot supplies the live DT geometry, including image builds and
-  # rebuilds done on another machine. Keep the store and /etc immutable.
-  boot.initrd.systemd.services.plymouth-start.preStart = lib.mkIf
-    (config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora") (lib.mkAfter ''
-      PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
-        ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
-        ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
-    '');
-  systemd.services.plymouth-start.preStart = lib.mkIf
-    (config.boot.plymouth.enable && config.boot.plymouth.theme == "aurora") ''
-      PATH=${lib.makeBinPath [ pkgs.coreutils ]} ${pkgs.runtimeShell} \
-        ${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth \
-        ${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora
-    '';
+  # rebuilds done on another machine. Guard the whole unit definition so
+  # disabling Plymouth leaves no empty plymouth-start.service behind.
+  boot.initrd.systemd.services.plymouth-start = lib.mkIf auroraSplashEnabled {
+    preStart = lib.mkAfter prepareSplashGeometry;
+  };
+  systemd.services.plymouth-start = lib.mkIf auroraSplashEnabled {
+    preStart = prepareSplashGeometry;
+  };
 
   # Plasma Login, like GDM, owns the splash until its greeter starts. Its
   # display-manager.service is an alias, not a second service definition.
