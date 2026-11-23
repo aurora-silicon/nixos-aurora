@@ -46,24 +46,19 @@ let
     ${udevadm} trigger --action=add "''${devices[@]}"
     ${udevadm} trigger --action=add --subsystem-match=drm
   '';
-  # Before the pivot: wait, briefly, for appledrm's DRM card and for udev to
-  # initialize it, so Plymouth opens it (DRM master) while the initrd udevd
-  # runs. Pivoting first lets an external display's hotplug make the fbdev
-  # emulation, with no master to defer to, blank the panel before Plymouth
-  # returns. 2 s at most; 1 s if no driver is bound to the display subsystem.
+  # Before the pivot: wait for udev to announce appledrm's DRM card, so
+  # Plymouth opens it (DRM master) while the initrd udevd runs. Pivoting
+  # first lets an external display's hotplug make the fbdev emulation, with
+  # no master to defer to, blank the panel before Plymouth returns. The
+  # script (aurora-early-kms-wait.sh, the text Fedora and Alarm ship) runs
+  # one udevadm wait on the card's by-path link, 2 s at most, unless no
+  # driver is bound to the display subsystem and none can bind.
   kmsHandover = pkgs.writeShellScript "aurora-kms-handover" ''
-    dev=/sys/bus/platform/devices/display-subsystem
-    [ -e "$dev" ] || exit 0
-    for ((tries = 0; tries < 40; tries++)); do
-      for card in "$dev"/drm/card*; do
-        [ -e "$card" ] || continue
-        ${udevadm} wait --timeout=1 "/dev/dri/''${card##*/}" 2>/dev/null
-        exit 0
-      done
-      [ -e "$dev/driver" ] || [ "$tries" -lt 20 ] || exit 0
-      ${pkgs.coreutils}/bin/sleep 0.05
-    done
+    PATH=${lib.makeBinPath kmsHandoverTools}
+    ${builtins.readFile ./aurora-early-kms-wait.sh}
   '';
+  # udevadm, modprobe and tr.
+  kmsHandoverTools = [ config.boot.initrd.systemd.package config.boot.initrd.systemd.package.kmod pkgs.coreutils ];
 in {
   # Desktop images boot to a splash. The Aurora theme draws the logo aura
   # shows, at the same size and place, with the spinner below it and
@@ -117,9 +112,19 @@ in {
   boot.kernelParams = lib.mkIf config.boot.plymouth.enable [ "plymouth.ignore-serial-consoles" ];
 
   # The external DCPs' Type-C chain comes up with the display: appledrm
-  # registers only once every DCP has bound.
+  # registers only once every DCP has bound. The PHYs are every Apple PHY
+  # driver the kernel config builds, not the ones one SoC needs: T6041's
+  # external DCPs also need the USB2 and DPTX PHYs, and an image is built
+  # away from the Mac it boots.
   boot.initrd.availableKernelModules = [ "appledrm" "mux-apple-display-crossbar"
-    "i2c-pasemi-platform" "phy-apple-atc" "phy-ti-cd2e22" "tps6598x" ];
+    "i2c-pasemi-platform" "phy-apple-atc" "phy-apple-t6040-usb2" "phy-apple-dptx"
+    "phy-ti-cd2e22" "tps6598x" ];
+  # The by-path card link aurora-kms-handover waits on, as systemd's
+  # 60-drm.rules makes it on the real root.
+  boot.initrd.services.udev.rules = lib.mkIf config.boot.plymouth.enable ''
+    ACTION!="remove", SUBSYSTEM=="drm", SUBSYSTEMS=="platform", IMPORT{builtin}="path_id"
+    ACTION!="remove", SUBSYSTEM=="drm", KERNEL=="card*", ENV{ID_PATH}=="?*", SYMLINK+="dri/by-path/$env{ID_PATH}-card"
+  '';
   boot.initrd.systemd.services.aurora-early-kms = lib.mkIf config.boot.plymouth.enable {
     description = "Coldplug the Apple display before the other devices";
     unitConfig.DefaultDependencies = false;
@@ -140,7 +145,8 @@ in {
     serviceConfig.ExecStart = kmsHandover;
   };
   boot.initrd.systemd.storePaths = lib.mkIf config.boot.plymouth.enable (
-    [ earlyKms kmsHandover "${pkgs.coreutils}/bin/sleep" ] ++ lib.optionals (config.boot.plymouth.theme == "aurora") [
+    [ earlyKms kmsHandover "${config.boot.initrd.systemd.package.kmod}/bin/modprobe" "${pkgs.coreutils}/bin/tr" ]
+    ++ lib.optionals (config.boot.plymouth.theme == "aurora") [
       # The initrd copier does not follow store references inside shell scripts.
       "${pkgs.plymouth-theme-aurora}/libexec/aurora-plymouth"
       "${pkgs.plymouth-theme-aurora}/share/plymouth/themes/aurora"
