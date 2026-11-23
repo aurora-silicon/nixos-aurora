@@ -27,6 +27,12 @@ assert !(builtins.elem "systemd-udev-settle.service"
    ++ cfg.boot.initrd.systemd.services.aurora-vendor-firmware.wants));
 assert builtins.elem "systemd-udev-trigger.service"
   cfg.boot.initrd.systemd.services.aurora-vendor-firmware.after;
+# The keyboard is admitted before the unlock prompt, and the ESP wait (60 s)
+# ends inside systemd's default start timeout, so a missing ESP cannot get
+# the service killed before admission.
+assert builtins.elem "cryptsetup-pre.target"
+  cfg.boot.initrd.systemd.services.aurora-vendor-firmware.before;
+assert !(cfg.boot.initrd.systemd.services.aurora-vendor-firmware.serviceConfig ? TimeoutStartSec);
 assert cfg.systemd.services.aurora-vendor-firmware.serviceConfig.ExecStart == "${executable} runtime";
 assert builtins.all (tool: builtins.any (entry: toString entry.source == toString tool)
   cfg.boot.initrd.systemd.storePaths)
