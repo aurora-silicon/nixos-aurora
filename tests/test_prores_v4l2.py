@@ -41,6 +41,22 @@ class ProResV4l2Tests(unittest.TestCase):
         checks = (ROOT / 'checks/package-overrides.nix').read_text()
         self.assertIn('pkgs.aurora-ffmpeg.version == "9.0.2"', checks)
 
+    def test_installed_systems_get_both(self):
+        video = (ROOT / 'modules/video.nix').read_text()
+        self.assertRegex(video, re.compile(r'proresV4l2 = lib\.mkOption \{\n\s+type = lib\.types\.bool;\n\s+default = true;'))
+        self.assertIn('environment.systemPackages = [ pkgs.aurora-ffmpeg ];', video)
+        # GStreamer scans GST_PLUGIN_PATH_1_0 before GST_PLUGIN_SYSTEM_PATH_1_0,
+        # which nixpkgs' wrappers prefix with the application's own plugins.
+        self.assertIn('environment.sessionVariables.GST_PLUGIN_PATH_1_0 = [ "${proresGstPlugin}/lib/gstreamer-1.0" ];', video)
+        self.assertNotIn('GST_PLUGIN_SYSTEM_PATH', video.split('config = ')[1])
+        self.assertIn('${pkgs.aurora-gst-plugins-good}/lib/gstreamer-1.0/libgstvideo4linux2.so', video)
+        self.assertIn('./video.nix', (ROOT / 'modules/aurora.nix').read_text())
+        composition = (ROOT / 'checks/module-composition.nix').read_text()
+        self.assertIn('aurora.video.proresV4l2 = false;', composition)
+        self.assertIn('-aurora-gst-video4linux2/lib/gstreamer-1.0', composition)
+        workflow = (ROOT / '.github/workflows/checks.yml').read_text()
+        self.assertIn('.#checks.aarch64-linux.module-composition', workflow)
+
 
 if __name__ == '__main__':
     unittest.main()

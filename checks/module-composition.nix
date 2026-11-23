@@ -18,6 +18,11 @@ let
     modules = [ { aurora.speakerguardd.upgrade.enable = true; } ];
   };
   upgradePackage = installed.pkgs.aurora-speaker-upgrade;
+  withoutProres = installed.extendModules {
+    modules = [ { aurora.video.proresV4l2 = false; } ];
+  };
+  proresFfmpeg = installed.pkgs.aurora-ffmpeg;
+  gstPluginPath = config: config.environment.sessionVariables.GST_PLUGIN_PATH_1_0 or null;
   preservesHostFile = config:
     config.boot.loader.grub.extraFiles."host/marker" == marker
     && !(config.boot.loader.grub.extraFiles ? "m1n1/boot.bin");
@@ -46,4 +51,13 @@ assert lib.assertMsg
     && !(lib.elem "aurora-speaker-upgrade.service"
       (speakerUpgrade.config.systemd.targets.multi-user.wants or [ ])))
   "Opting into speaker migration must install its tool and units without starting it";
+assert lib.assertMsg
+  (lib.elem proresFfmpeg installed.config.environment.systemPackages
+    && builtins.match "/nix/store/[^/:]+-aurora-gst-video4linux2/lib/gstreamer-1.0" (gstPluginPath installed.config) != null
+    && !(installed.config.environment.sessionVariables ? GST_PLUGIN_SYSTEM_PATH_1_0))
+  "Every profile must install aurora-ffmpeg and put only the patched video4linux2 plugin on GST_PLUGIN_PATH_1_0";
+assert lib.assertMsg
+  (!(lib.elem proresFfmpeg withoutProres.config.environment.systemPackages)
+    && gstPluginPath withoutProres.config == null)
+  "Turning aurora.video.proresV4l2 off must leave FFmpeg and the GStreamer plugin path unchanged";
 pkgs.runCommand "aurora-module-composition" { } "touch $out"
