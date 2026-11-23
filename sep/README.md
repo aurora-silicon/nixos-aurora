@@ -121,7 +121,11 @@ Plasma's modules define them. Set `fprintAuth` on a service to change it.
 
 The login screen asks for the password because a session started with a
 fingerprint cannot unlock the keyring or KWallet; GNOME can offer fingerprint
-there as well with `aurora.sep.greeterFingerprint.enable = true;`.
+there as well with `aurora.sep.greeterFingerprint.enable = true;`. The login
+screen does not wait for Touch ID. It asks for the reader once, as it comes
+up, so the one right after boot takes the password and does not offer the
+fingerprint, also with `aurora.sep.requirePasswordAfterBoot = false;`; login
+screens after a log out and the lock screen find the reader.
 
 ## Power button
 

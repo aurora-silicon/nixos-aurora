@@ -13,10 +13,13 @@ in {
     default = false;
     description = ''
       Patch GNOME Shell's greeter to offer fingerprint sign-in as well as
-      lock-screen authentication. The greeter waits for Touch ID readiness,
-      up to 90 seconds after boot; fingerprint sign-in does not unlock the
-      keyring. False leaves the normal password greeter and keeps lock-screen,
-      sudo and polkit fingerprint authentication enabled.
+      lock-screen authentication. The greeter does not wait for Touch ID: it
+      asks for the reader once, as it comes up, so the one right after boot
+      takes the password and does not offer the fingerprint, whatever
+      aurora.sep.requirePasswordAfterBoot says; greeters after a log out
+      find the reader. Fingerprint sign-in does not unlock the keyring.
+      False leaves the normal password greeter and keeps lock-screen, sudo
+      and polkit fingerprint authentication enabled.
     '';
   };
 
@@ -275,11 +278,12 @@ in {
         description = "Offer fingerprint at the GNOME login screen";
         documentation = [ "file://${pkgs.aurora-sep}/share/doc/aurora-sep/README.md" ];
         # Only prepares the login screen's shell, so it does not wait for
-        # Touch ID. The login screen right after boot takes the password
-        # anyway: as on macOS, where Touch ID is offered only after one
-        # password login since the restart, aurora-sep keeps
-        # require_password_after_boot = yes. Later login screens (after a log
-        # out) and the lock screen find the reader once it is up.
+        # Touch ID. The login screen asks fprintd for the reader once, as it
+        # comes up. One that comes up before Touch ID, as the one right after
+        # boot does, takes the password and does not offer the fingerprint,
+        # whatever require_password_after_boot says in /etc/aurora/touchid.conf
+        # (aurora.sep.requirePasswordAfterBoot). Later login screens (after a
+        # log out) and the lock screen find the reader once it is up.
         before = [ "display-manager.service" ];
         wantedBy = [ "display-manager.service" ];
         path = [ pkgs.coreutils pkgs.gnugrep pkgs.gawk pkgs.glib.dev ];
