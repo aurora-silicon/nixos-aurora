@@ -10,12 +10,12 @@
   },
   "aura": {
     "repository": "https://github.com/aurora-silicon/aura",
-    "commit": "56299352d9f4e4569de188700ead26544a2b37b4",
-    "version": "1.0.0b15",
-    "source_url": "https://codeload.github.com/aurora-silicon/aura/tar.gz/56299352d9f4e4569de188700ead26544a2b37b4",
-    "archive_root": "aura-56299352d9f4e4569de188700ead26544a2b37b4",
-    "sha256": "73f56f61fd89e4c4e02ba06bab422442215938c1cf60d54f760fa88579c7bb13",
-    "nix_hash": "sha256-c/VvYf2J5MTgK6Brq0IkQiFZOMHPYNVPdg+ohXnHuxM="
+    "commit": "da8bc83bfe4a67ddfbfe301b0b23bf58f957e36d",
+    "version": "1.0.0b16",
+    "source_url": "https://codeload.github.com/aurora-silicon/aura/tar.gz/da8bc83bfe4a67ddfbfe301b0b23bf58f957e36d",
+    "archive_root": "aura-da8bc83bfe4a67ddfbfe301b0b23bf58f957e36d",
+    "sha256": "946f2de4452b1c5b73c1eea8155eb22ff33819e3616395b3e579956c3fef8ba9",
+    "nix_hash": "sha256-lG8t5EUrHFtzwe6oFV6yL/M4GeNhY5Wz5XmVbD/vi6k="
   },
   "uboot-aurora": {
     "repository": "https://github.com/aurora-silicon/u-boot",
