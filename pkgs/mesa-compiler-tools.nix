@@ -9,13 +9,13 @@
   '';
   buildPhase = ''
     ninja -C tools -j "$NIX_BUILD_CORES" src/compiler/clc/mesa_clc \
-      src/compiler/spirv/vtn_bindgen2 src/asahi/clc/asahi_clc
+      src/compiler/spirv/vtn_bindgen2 src/aurora/clc/aurora_clc
   '';
   doCheck = false;
   installPhase = ''
     mkdir -p $out/bin
     cp tools/src/compiler/clc/mesa_clc tools/src/compiler/spirv/vtn_bindgen2 \
-      tools/src/asahi/clc/asahi_clc $out/bin/
+      tools/src/aurora/clc/aurora_clc $out/bin/
   '';
   postFixup = "";
   postInstall = "";

@@ -409,7 +409,7 @@ in {
     pin = pins.kernel-aurora;
   };
   aurora-bindgen = final.callPackage ./bindgen { llvmPackages = kernelLLVM; };
-  linux-asahi = final.lib.makeOverridable ({ _kernelPatches ? [ ] }:
+  linux-aurora = final.lib.makeOverridable ({ _kernelPatches ? [ ] }:
     final.lib.recurseIntoAttrs (final.linuxPackagesFor (import ./pkgs/kernel.nix {
       # Preserve buildLinux's .override API (features, extraMakeFlags, ...).
       inherit (final) lib callPackage path writeText openssl binutils aurora-bindgen;
@@ -419,18 +419,26 @@ in {
       inherit kernelCtxrExecmem kernelDtbAbi;
       kernelPatches = _kernelPatches;
     }))) { };
-  # Keep m1n1.override { customLogo = ...; } available to installed systems.
-  m1n1 = assert final.lib.assertMsg (auraMonitorFree -> kernelCtxrExecmem)
+  # Keep aura.override { customLogo = ...; } available to installed systems.
+  aura = assert final.lib.assertMsg (auraMonitorFree -> kernelCtxrExecmem)
     "aura without the monitor needs a kernel built with CONFIG_ARM64_CTXR_EXECMEM=y";
     import ./pkgs/aura.nix {
     inherit (final) lib rustPlatform buildPackages;
-    inherit (prev) m1n1;
+    # nixos-apple-silicon's m1n1 derivation, which aura replaces.
+    upstream = prev.m1n1;
     inherit auraMonitorFree;
     src = source "aura";
     pin = pins.aura;
     llvmPackages = kernelLLVM;
   };
-  uboot-asahi = prev.uboot-asahi.overrideAttrs (_old: {
+  # nixos-apple-silicon's modules and nixpkgs' PipeWire defaults look these up
+  # by their upstream names; those names point at Aurora's packages.
+  m1n1 = final.aura;
+  linux-asahi = final.linux-aurora;
+  uboot-asahi = final.uboot-aurora;
+  asahi-audio = final.aurora-audio;
+  alsa-ucm-conf-asahi = final.alsa-ucm-conf-aurora;
+  uboot-aurora = prev.uboot-asahi.overrideAttrs (_old: {
     src = source "uboot-aurora";
     version = pins.uboot-aurora.version;
     patches = [ ];
@@ -488,13 +496,13 @@ in {
       runHook postInstallCheck
     '';
   });
-  asahi-audio = prev.asahi-audio.overrideAttrs (old: {
+  aurora-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
     version = "${pins.aurora-audio.version}-aurora15";
     patches = (old.patches or [ ]) ++ [ (stableFile ./patches/0001-restore-legacy-speaker-graphs.patch) ];
     postInstall = (old.postInstall or "") + ''
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
-      test -e "$out/share/wireplumber/scripts/device/asahi-keep-profile.lua"
+      test -e "$out/share/wireplumber/scripts/device/aurora-keep-profile.lua"
       # MCA speaker PCMs wake on period interrupts: a chrony slew no longer
       # re-prepares the timer-scheduled sink (aurora-audio 4.1-14 on Fedora/ALARM).
       install -Dm644 ${stableFile ./patches/99-aurora-speaker-irq.conf} "$out/share/wireplumber/wireplumber.conf.d/99-aurora-speaker-irq.conf"
@@ -502,10 +510,10 @@ in {
     # nixpkgs' fixup phase rewrites /usr paths to this output first.
     postFixup = (old.postFixup or "") + ''
       for board in j316 j413 j616 j700; do
-        test -s "$out/share/asahi-audio/$board/graph.json"
-        grep -q "$out/share/asahi-audio/$board/graph.json" "$out/share/wireplumber/wireplumber.conf.d/99-asahi.conf"
+        test -s "$out/share/aurora-audio/$board/graph.json"
+        grep -q "$out/share/aurora-audio/$board/graph.json" "$out/share/wireplumber/wireplumber.conf.d/99-aurora.conf"
       done
-      test -s "$out/share/asahi-audio/j700/48.wav"
+      test -s "$out/share/aurora-audio/j700/48.wav"
     '';
     # asahi-audio#24: the built-in card stays on HiFi with nothing in the jack.
     passthru = (old.passthru or { }) // { keepsBuiltinProfile = true; legacySpeakerGraphs = true; };
@@ -554,7 +562,7 @@ in {
   # nixpkgs exposes a symlink join here: overriding its src does not replace
   # the inner model derivation. Build the pinned models explicitly, then merge
   # them ahead of the native common UCM definitions.
-  alsa-ucm-conf-asahi = final.callPackage ./pkgs/ucm.nix {
+  alsa-ucm-conf-aurora = final.callPackage ./pkgs/ucm.nix {
     src = source "alsa-ucm-conf-aurora";
     pin = pins.alsa-ucm-conf-aurora;
   };
@@ -1063,8 +1071,8 @@ in {
   # updater logic with its NixOS adapter.
   aurora-stage2 = final.callPackage ./stage2/package.nix { };
   aurora-bless = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
-    cargoBuildFlags = [ "-p" "asahi-bless" ];
-    cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "aurora-nvram" ];
+    cargoBuildFlags = [ "-p" "aurora-bless" ];
+    cargoTestFlags = [ "-p" "aurora-bless" "-p" "apple-nvram" "-p" "aurora-nvram" ];
   };
   # NVRAM reader/writer from the aurora-bless workspace; parses the NVRAM v3
   # stores of current Macs. asahi-nvram stays as a name for old scripts.

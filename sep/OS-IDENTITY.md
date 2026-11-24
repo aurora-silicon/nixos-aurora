@@ -7,7 +7,7 @@ enrolling in one of them invalidates the other's material. Changing the
 identity of an installed system orphans everything enrolled under the old
 one.
 
-On a normally installed Neo (T8140), m1n1 forwards `/chosen/apfs-preboot-uuid`
+On a normally installed Neo (T8140), aura forwards `/chosen/apfs-preboot-uuid`
 from the Apple device tree. It names the booted volume group, so a Linux
 install that boots from its own volume group already has its own lane. It is
 not macOS's identity unless a boot entry pins macOS's value explicitly, which
@@ -61,7 +61,7 @@ Never test identity changes on a machine with enrolments or SEP-protected
 keys that matter. SEP and xART state is device-wide, so a spare Linux volume
 on the same machine does not isolate it. Do not record identities, SEP
 payloads, MAC addresses or calibration data in test logs, and do not keep raw
-console logs from older kernels or m1n1 builds that print identities.
+console logs from older kernels or aura builds that print identities.
 
 On a disposable machine:
 

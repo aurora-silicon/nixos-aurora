@@ -73,12 +73,12 @@
   },
   "aurora-bless": {
     "repository": "https://github.com/aurora-silicon/aurora-bless",
-    "commit": "9b47a17827854588d458b1dcc8018c66f5c3237f",
+    "commit": "aa89bd076048d2f7b99320434f14dee2d4328f7c",
     "version": "0.4.4",
-    "source_url": "https://codeload.github.com/aurora-silicon/aurora-bless/tar.gz/9b47a17827854588d458b1dcc8018c66f5c3237f",
-    "archive_root": "aurora-bless-9b47a17827854588d458b1dcc8018c66f5c3237f",
-    "sha256": "010dd39c7ece1ad6019e365b87580daaf0eea698912355f10934d1165e362b78",
-    "nix_hash": "sha256-AQ3TnH7OGtYBnjZbh1gNqvDuppiRI1XxCTTRFl42K3g="
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-bless/tar.gz/aa89bd076048d2f7b99320434f14dee2d4328f7c",
+    "archive_root": "aurora-bless-aa89bd076048d2f7b99320434f14dee2d4328f7c",
+    "sha256": "fd5189fcb49b43630d1b33c312d060841c47aecc7d54aa3f861c6edbe4ff67f4",
+    "nix_hash": "sha256-/VGJ/LSbQ2MNGzPDEtBghBxHrsx9VKo/hhxu2+T/Z/Q="
   },
   "aurora-neo-platform-config": {
     "repository": "https://github.com/aurora-silicon/aurora-neo-platform-config",

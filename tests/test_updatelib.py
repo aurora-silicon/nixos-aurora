@@ -206,12 +206,12 @@ class VersionComparisonTests(unittest.TestCase):
 @unittest.skipUnless(shutil.which('clang'), 'clang is required for the UAPI comparison')
 class UapiTests(unittest.TestCase):
     HEADER = '''#include "drm.h"
-#define DRM_ASAHI_GET_PARAMS 0x00
-#define DRM_ASAHI_MAX {max}
-enum drm_asahi_kind {{ DRM_ASAHI_KIND_A = 1, DRM_ASAHI_KIND_B = {kind_b}, }};
-struct drm_asahi_cmd {{ __u32 flags; __u32 {name}; __u64 base;{extra} }};
-struct drm_asahi_get_params {{ __u32 param_group; __u32 pad; __u64 pointer; __u64 size; }};
-#define DRM_IOCTL_ASAHI_GET_PARAMS DRM_IOWR(DRM_COMMAND_BASE + DRM_ASAHI_GET_PARAMS, struct drm_asahi_get_params)
+#define DRM_AURORA_GET_PARAMS 0x00
+#define DRM_AURORA_MAX {max}
+enum drm_aurora_kind {{ DRM_AURORA_KIND_A = 1, DRM_AURORA_KIND_B = {kind_b}, }};
+struct drm_aurora_cmd {{ __u32 flags; __u32 {name}; __u64 base;{extra} }};
+struct drm_aurora_get_params {{ __u32 param_group; __u32 pad; __u64 pointer; __u64 size; }};
+#define DRM_IOCTL_AURORA_GET_PARAMS DRM_IOWR(DRM_COMMAND_BASE + DRM_AURORA_GET_PARAMS, struct drm_aurora_get_params)
 '''
 
     def write(self, directory, **values):
@@ -220,7 +220,7 @@ struct drm_asahi_get_params {{ __u32 param_group; __u32 pad; __u64 pointer; __u6
                                          '#define DRM_COMMAND_BASE 0x40\n#define DRM_IOWR(nr,type) _IOWR(\'d\', nr, type)\n')
         params = {'max': 64, 'kind_b': 2, 'name': 'count', 'extra': ''}
         params.update(values)
-        (directory / 'asahi_drm.h').write_text(self.HEADER.format(**params))
+        (directory / 'aurora_drm.h').write_text(self.HEADER.format(**params))
         return directory
 
     def report(self, kernel, mesa):

@@ -50,8 +50,8 @@ in {
       assertion = cfg.package.passthru.dualInterface or false;
       message = "aurora.speakerguardd.v2 needs speakerguardd-v2 RC8.2 or later (dual-interface kernel, speakerguardd#117/#131/#134); this package predates it.";
     } {
-      assertion = pkgs.asahi-audio.keepsBuiltinProfile or false;
-      message = "aurora.speakerguardd.v2 needs Aurora's asahi-audio (aurora-audio >= 4.1-11, asahi-audio#24) with asahi-keep-profile.lua.";
+      assertion = pkgs.aurora-audio.keepsBuiltinProfile or false;
+      message = "aurora.speakerguardd.v2 needs Aurora's aurora-audio (aurora-audio >= 4.1-11, asahi-audio#24) with aurora-keep-profile.lua.";
     }];
     environment.systemPackages = [ cfg.package ];
     environment.pathsToLink = [ "/lib/lv2" ];

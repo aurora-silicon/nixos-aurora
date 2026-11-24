@@ -89,7 +89,7 @@ let
         grep -E ${lib.escapeShellArg "^(${optionalPattern})=|^# (${optionalPattern}) is not set$"} \
           "$buildRoot/.config" >> "$TMPDIR/aurora-kernel-optional.config" || true
       '' + ''
-        python3 ${stableFile ../kernel/validate-config.py} arch/arm64/configs/asahi.config \
+        python3 ${stableFile ../kernel/validate-config.py} arch/arm64/configs/aurora.config \
           ${stableFile ../kernel/nixos.config}${lib.optionalString (optionalRequests != [ ]) " \"$TMPDIR/aurora-kernel-optional.config\""}${lib.optionalString (requests != [ ]) " ${requiredOverrides}"} "$buildRoot/.config"
         python3 ${stableFile ../kernel/check-required.py} "$buildRoot/.config"
         grep -qx 'CONFIG_RUST=y' "$buildRoot/.config"

@@ -4,7 +4,7 @@
   "pull_requests": [
     {
       "number": 31,
-      "title": "aurora-audio: move to asahi-audio f513878 (4.1-5)",
+      "title": "aurora-audio: move to aurora-audio f513878 (4.1-5)",
       "url": "https://github.com/aurora-silicon/fedora-aurora/pull/31",
       "mergedAt": "2026-10-28T07:20:43Z",
       "mergeCommit": {

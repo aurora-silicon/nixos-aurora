@@ -170,14 +170,13 @@ class InstallStage2Tests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
         self.esp = root / 'esp'
-        (self.esp / 'm1n1').mkdir(parents=True)
-        (self.esp / 'aurora').mkdir()
+        (self.esp / 'aurora').mkdir(parents=True)
         # Both Stage 1 forms belong to the installer.
         self.stage1 = {self.esp / 'aurora' / name: b'stage 1 must never change: ' + name.encode()
                        for name in ('stage1.bin', 'stage1.macho')}
         for path, data in self.stage1.items():
             path.write_bytes(data)
-        self.target = self.esp / 'm1n1/boot.bin'
+        self.target = self.esp / 'aurora/boot.bin'
         self.target.write_bytes(b'installed stage 2')
         os.utime(self.target, (1000000, 1000000))
         self.source = root / 'stage2'
@@ -190,7 +189,7 @@ class InstallStage2Tests(unittest.TestCase):
         self.device_tree.write_bytes(b'ABCD-1234\0')
         self.compatible = root / 'compatible'
         self.compatible.write_bytes(compatible_file('j274', 't8103'))
-        self.ctxr = self.esp / 'm1n1/boot-ctxr.bin'
+        self.ctxr = self.esp / 'aurora/boot-ctxr.bin'
         (self.source / 'aura.bin').write_bytes(b'AURA-STAGE2-BINARY')
         (self.source / 'dtb-abi').write_text('1\n')
         self.profiles = root / 'profiles'
@@ -232,8 +231,8 @@ class InstallStage2Tests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn('left unchanged', result.stderr)
         self.assertEqual(self.target.read_bytes(), b'installed stage 2')
-        self.assertFalse((self.esp / 'm1n1/boot.bin.old').exists())
-        self.assertFalse((self.esp / 'm1n1/boot.bin.new').exists())
+        self.assertFalse((self.esp / 'aurora/boot.bin.old').exists())
+        self.assertFalse((self.esp / 'aurora/boot.bin.new').exists())
 
     def write_ctxr_source(self, board, data):
         (self.source / 'monitor-free').touch()
@@ -245,8 +244,8 @@ class InstallStage2Tests(unittest.TestCase):
     def assert_frozen(self):
         self.assertEqual(self.target.read_bytes(), b'installed stage 2')
         self.assertEqual(self.target.stat().st_mtime, 1000000)
-        self.assertFalse((self.esp / 'm1n1/boot.bin.old').exists())
-        self.assertFalse((self.esp / 'm1n1/boot.bin.new').exists())
+        self.assertFalse((self.esp / 'aurora/boot.bin.old').exists())
+        self.assertFalse((self.esp / 'aurora/boot.bin.new').exists())
 
     def tearDown(self):
         for path, data in self.stage1.items():
@@ -256,12 +255,12 @@ class InstallStage2Tests(unittest.TestCase):
         result = self.run_install()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.target.read_bytes(), stage2())
-        self.assertEqual((self.esp / 'm1n1/boot.bin.old').read_bytes(), b'installed stage 2')
-        self.assertFalse((self.esp / 'm1n1/boot.bin.new').exists())
+        self.assertEqual((self.esp / 'aurora/boot.bin.old').read_bytes(), b'installed stage 2')
+        self.assertFalse((self.esp / 'aurora/boot.bin.new').exists())
 
     def test_unchanged_stage2_writes_nothing(self):
         self.target.write_bytes(stage2())
-        old = self.esp / 'm1n1/boot.bin.old'
+        old = self.esp / 'aurora/boot.bin.old'
         old.write_bytes(b'older generation')
         result = self.run_install()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -272,7 +271,7 @@ class InstallStage2Tests(unittest.TestCase):
         self.target.unlink()
         self.assertEqual(self.run_install().returncode, 0)
         self.assertEqual(self.target.read_bytes(), stage2())
-        self.assertFalse((self.esp / 'm1n1/boot.bin.old').exists())
+        self.assertFalse((self.esp / 'aurora/boot.bin.old').exists())
 
     def test_image_assembly_checks_the_image_partition_not_the_build_hosts_esp(self):
         self.device_tree.write_bytes(b'ffff-0000\0')
@@ -297,12 +296,40 @@ class InstallStage2Tests(unittest.TestCase):
                 self.assert_untouched(self.run_install())
                 self.state = saved
 
-    def test_esp_without_m1n1_directory_is_refused(self):
+    def test_esp_without_aurora_directory_is_refused(self):
         self.target.unlink()
-        (self.esp / 'm1n1').rmdir()
+        for path in self.stage1:
+            path.unlink()
+        self.stage1 = {}
+        (self.esp / 'aurora').rmdir()
         result = self.run_install()
         self.assertNotEqual(result.returncode, 0)
-        self.assertFalse((self.esp / 'm1n1').exists())
+        self.assertFalse((self.esp / 'aurora').exists())
+
+    def recorded_target(self):
+        record = self.stubs / 'record'
+        self.stub('aurora-stage2', f'env > {record}\n')
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return next(line.split('=', 1)[1] for line in record.read_text().splitlines()
+                    if line.startswith('TARGET='))
+
+    def test_stage2_goes_to_the_one_file_the_enrolled_stage1_loads(self):
+        # aurora/ only: the file a Stage 1 enrolled with the Aurora path loads.
+        self.assertEqual(self.recorded_target(), str(self.esp / 'aurora/boot.bin'))
+        # LEGACY-ASAHI(2027-02-28): m1n1/ only, from a Stage 1 enrolled before
+        # the rename; nothing is written to aurora/.
+        self.target.unlink()
+        (self.esp / 'm1n1').mkdir()
+        for name in ('boot.bin', 'boot-ctxr.bin'):
+            with self.subTest(legacy=name):
+                (self.esp / 'm1n1' / name).write_bytes(b'legacy stage 2')
+                self.assertEqual(self.recorded_target(), str(self.esp / 'm1n1/boot.bin'))
+                (self.esp / 'm1n1' / name).unlink()
+        # Both: aurora/ wins.
+        (self.esp / 'm1n1/boot.bin').write_bytes(b'legacy stage 2')
+        self.target.write_bytes(b'installed stage 2')
+        self.assertEqual(self.recorded_target(), str(self.esp / 'aurora/boot.bin'))
 
     def test_the_write_goes_to_the_helper_with_the_checked_esp_and_input(self):
         record = self.stubs / 'record'
@@ -350,16 +377,38 @@ class InstallStage2Tests(unittest.TestCase):
         self.device_tree.unlink()
         self.assertEqual(self.run_install().returncode, 0)
 
+    def test_the_booted_esp_is_read_under_either_property_name(self):
+        # LEGACY-ASAHI(2027-02-28): an aura from before the rename publishes
+        # only asahi,efi-system-partition; the check must still run on it.
+        chosen = self.device_tree.parent / 'chosen'
+        chosen.mkdir()
+        new, old = chosen / 'aurora,efi-system-partition', chosen / 'asahi,efi-system-partition'
+        old.write_bytes(b'ffff-0000\0')
+        self.assert_untouched(self.run_install(device_tree=new))
+        old.write_bytes(b'ABCD-1234\0')
+        self.assertEqual(self.run_install(device_tree=new).returncode, 0)
+        # Both present: the new name is the one read.
+        self.target.write_bytes(b'installed stage 2')
+        (self.esp / 'aurora/boot.bin.old').unlink(missing_ok=True)
+        new.write_bytes(b'ffff-0000\0')
+        self.assert_untouched(self.run_install(device_tree=new))
+        new.write_bytes(b'ABCD-1234\0')
+        old.write_bytes(b'ffff-0000\0')
+        self.assertEqual(self.run_install(device_tree=new).returncode, 0)
+        script = INSTALL.read_text()
+        self.assertIn('chosen/aurora,efi-system-partition}', script)
+        self.assertIn('${device_tree_esp%/*}/asahi,efi-system-partition', script)
+
     def test_macho_without_the_marker_keeps_updating_boot_bin(self):
         for chip in MACHO_CHIPS:
             with self.subTest(chip):
                 self.target.write_bytes(b'installed stage 2')
-                (self.esp / 'm1n1/boot.bin.old').unlink(missing_ok=True)
+                (self.esp / 'aurora/boot.bin.old').unlink(missing_ok=True)
                 self.compatible.write_bytes(compatible_file('j700', chip))
                 result = self.run_install()
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(self.target.read_bytes(), stage2())
-                self.assertEqual((self.esp / 'm1n1/boot.bin.old').read_bytes(), b'installed stage 2')
+                self.assertEqual((self.esp / 'aurora/boot.bin.old').read_bytes(), b'installed stage 2')
                 self.assertFalse(self.ctxr.exists())
                 self.assertEqual(result.stderr, '')
 
@@ -380,27 +429,27 @@ class InstallStage2Tests(unittest.TestCase):
         result = self.run_install()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, '')
-        self.assertIn('m1n1/boot-ctxr.bin', result.stdout)
+        self.assertIn('aurora/boot-ctxr.bin', result.stdout)
         self.assert_frozen()
 
     def test_macho_update_keeps_the_previous_ctxr_stage2(self):
         self.compatible.write_bytes(compatible_file('j700', 't8140'))
         self.write_ctxr_source('j700', stage2(boards=('j700',)))
         self.assertEqual(self.run_install().returncode, 0)
-        self.assertFalse((self.esp / 'm1n1/boot-ctxr.bin.old').exists())
+        self.assertFalse((self.esp / 'aurora/boot-ctxr.bin.old').exists())
         self.write_ctxr_source('j700', stage2(boards=('j700',), options=b'chosen.bootargs=quiet\n'))
         result = self.run_install()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual((self.esp / 'm1n1/boot-ctxr.bin.old').read_bytes(), stage2(boards=('j700',)))
-        self.assertFalse((self.esp / 'm1n1/boot-ctxr.bin.new').exists())
-        self.assertIn('m1n1/boot-ctxr.bin.old', result.stdout)
+        self.assertEqual((self.esp / 'aurora/boot-ctxr.bin.old').read_bytes(), stage2(boards=('j700',)))
+        self.assertFalse((self.esp / 'aurora/boot-ctxr.bin.new').exists())
+        self.assertIn('aurora/boot-ctxr.bin.old', result.stdout)
         self.assert_frozen()
 
     def test_macho_unchanged_stage2_writes_nothing(self):
         self.compatible.write_bytes(compatible_file('j700', 't8140'))
         self.write_ctxr_source('j700', stage2(boards=('j700',)))
         self.ctxr.write_bytes(stage2(boards=('j700',)))
-        old = self.esp / 'm1n1/boot-ctxr.bin.old'
+        old = self.esp / 'aurora/boot-ctxr.bin.old'
         old.write_bytes(b'older generation')
         result = self.run_install()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -443,12 +492,12 @@ class InstallStage2Tests(unittest.TestCase):
             for chip in EARLIER_CHIPS:
                 with self.subTest(chip=chip, marked=marked):
                     self.target.write_bytes(b'installed stage 2')
-                    (self.esp / 'm1n1/boot.bin.old').unlink(missing_ok=True)
+                    (self.esp / 'aurora/boot.bin.old').unlink(missing_ok=True)
                     self.compatible.write_bytes(compatible_file('j274', chip))
                     result = self.run_install()
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(self.target.read_bytes(), stage2())
-                    self.assertEqual((self.esp / 'm1n1/boot.bin.old').read_bytes(), b'installed stage 2')
+                    self.assertEqual((self.esp / 'aurora/boot.bin.old').read_bytes(), b'installed stage 2')
                     self.assertFalse(self.ctxr.exists())
                     self.assertEqual(result.stderr, '')
 
@@ -511,7 +560,7 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
         self.assertEqual(manifest['deviceTrees'], 1)
 
     def test_image_esp_carries_both_files_and_each_macho_boards_own(self):
-        esp = self.root / 'esp/m1n1'
+        esp = self.root / 'esp/aurora'
         self.split(esp)
         (esp / 'boot.bin').write_bytes(self.combined.read_bytes())
         written = prepare_ctxr.prepare(esp, esp)
@@ -521,7 +570,7 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
         self.assertFalse((esp / 'boot-ctxr-j274.bin').exists())
 
     def test_prepare_stage2_output_must_precede_the_ctxr_files(self):
-        esp = self.root / 'esp/m1n1'
+        esp = self.root / 'esp/aurora'
         self.split(esp)
         (esp / 'boot.bin').write_bytes(self.combined.read_bytes())
         prepare_ctxr.prepare(esp, esp)
@@ -529,7 +578,7 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
             self.split(esp)
 
     def test_a_second_run_replaces_what_the_first_wrote(self):
-        esp = self.root / 'esp/m1n1'
+        esp = self.root / 'esp/aurora'
         self.split(esp)
         (esp / 'boot.bin').write_bytes(self.combined.read_bytes())
         prepare_ctxr.prepare(esp, esp)
@@ -538,7 +587,7 @@ class PrepareCtxrStage2Tests(unittest.TestCase):
         self.assertEqual((esp / 'boot-ctxr.bin').read_bytes(), b'rebuilt combined')
 
     def test_an_oversized_shared_file_is_refused(self):
-        esp = self.root / 'esp/m1n1'
+        esp = self.root / 'esp/aurora'
         self.split(esp)
         (esp / 'boot.bin').write_bytes(b'\0' * (prepare_ctxr.MAX_STAGE2_BYTES + 1))
         with self.assertRaises(ValueError):

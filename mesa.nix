@@ -18,12 +18,12 @@ import json,sys
 assert json.load(sys.stdin)["host"]["c"]["id"] == "clang", "Mesa must use the selected Clang toolchain"
 '
     ninja -C tools -j "$NIX_BUILD_CORES" src/compiler/clc/mesa_clc \
-      src/compiler/spirv/vtn_bindgen2 src/asahi/clc/asahi_clc
-    printf "[binaries]\nmesa_clc = '%s'\nvtn_bindgen2 = '%s'\nasahi_clc = '%s'\n" \
+      src/compiler/spirv/vtn_bindgen2 src/aurora/clc/aurora_clc
+    printf "[binaries]\nmesa_clc = '%s'\nvtn_bindgen2 = '%s'\naurora_clc = '%s'\n" \
       "$PWD/tools/src/compiler/clc/mesa_clc" "$PWD/tools/src/compiler/spirv/vtn_bindgen2" \
-      "$PWD/tools/src/asahi/clc/asahi_clc" > tools.ini
+      "$PWD/tools/src/aurora/clc/aurora_clc" > tools.ini
   '' + lib.optionalString (compilerTools != null) ''
-    printf "[binaries]\nmesa_clc = '%s/bin/mesa_clc'\nvtn_bindgen2 = '%s/bin/vtn_bindgen2'\nasahi_clc = '%s/bin/asahi_clc'\n" \
+    printf "[binaries]\nmesa_clc = '%s/bin/mesa_clc'\nvtn_bindgen2 = '%s/bin/vtn_bindgen2'\naurora_clc = '%s/bin/aurora_clc'\n" \
       ${compilerTools} ${compilerTools} ${compilerTools} > tools.ini
   '' + ''
     meson setup build --prefix=${if guest then "/usr" else "\"$out\""} \
@@ -36,7 +36,7 @@ assert json.load(sys.stdin)["host"]["c"]["id"] == "clang", "Mesa must use the se
   '';
   postInstall = ''
     # Assert the installed artifact, including after Meson test regeneration.
-    strings "$out/${if guest then "usr/${if llvmPackages.stdenv.hostPlatform.is64bit then "lib64" else "lib"}" else "lib"}/libvulkan_asahi.so" | \
+    strings "$out/${if guest then "usr/${if llvmPackages.stdenv.hostPlatform.is64bit then "lib64" else "lib"}" else "lib"}/libvulkan_aurora.so" | \
       grep -F '(git-${builtins.substring 0 10 commit}), Borealis'
     echo ${commit} > "$out/.aurora-mesa-commit"
   '';
@@ -73,7 +73,7 @@ root = pathlib.Path(sys.argv[1])
 for path in (root / "share/vulkan/icd.d").glob("*.json"):
     data = json.loads(path.read_text())
     name = pathlib.Path(data["ICD"]["library_path"]).name
-    assert name == "libvulkan_asahi.so", name
+    assert name == "libvulkan_aurora.so", name
     library = root / "lib" / name
     assert library.is_file(), library
     data["ICD"]["library_path"] = str(library)

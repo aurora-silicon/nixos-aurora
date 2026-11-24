@@ -64,9 +64,10 @@ class PeripheralAdmissionTests(unittest.TestCase):
                 self.assertEqual(calls.read_text().splitlines(), ["dockchannel-hid", "aop"])
                 self.assertNotIn(b"trackpad firmware missing", result.stderr)
 
-    def extract(self, root, esp, cpio_body=None):
+    def extract(self, root, esp, cpio_body=None, property_name="property"):
         """Runs the module's extraction script with the ESP mounted at esp."""
-        (root / "property").write_bytes(b"5A1E0001-0000-4000-8000-00000000E5B0\0")
+        if property_name is not None:
+            (root / property_name).write_bytes(b"5A1E0001-0000-4000-8000-00000000E5B0\0")
         tools = root / "bin"
         tools.mkdir(exist_ok=True)
         cpio_body = cpio_body or ('echo "cpio $*" >> "$AURORA_TEST_CALLS"; mkdir -p vendorfw; '
@@ -79,7 +80,8 @@ class PeripheralAdmissionTests(unittest.TestCase):
         calls = root / "calls"
         calls.touch()
         env = dict(os.environ, PATH=f'{tools}:{os.environ["PATH"]}', AURORA_TEST_CALLS=str(calls),
-                   AURORA_EFI_PROPERTY=str(root / "property"),
+                   AURORA_EFI_PROPERTY=str(root / (
+                       "property" if property_name == "property" else "aurora,efi-system-partition")),
                    AURORA_FIRMWARE_DESTINATION=str(root / "destination"),
                    AURORA_PARTUUID_ROOT=str(root / "devices"),
                    AURORA_ESP_MOUNT=str(root / "mount"))
@@ -98,6 +100,21 @@ class PeripheralAdmissionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(calls, ["cpio --quiet --extract --unconditional --no-absolute-filenames"])
             self.assertEqual((root / "destination/vendorfw/.vendorfw.manifest").read_bytes(), b"fixture")
+
+    def test_esp_is_found_under_either_property_name(self):
+        # LEGACY-ASAHI(2027-02-28): an aura from before the rename publishes
+        # only asahi,efi-system-partition; without the fallback nothing is
+        # extracted and the script still exits 0.
+        for name, extracted in (("aurora,efi-system-partition", True),
+                                ("asahi,efi-system-partition", True), (None, False)):
+            with self.subTest(name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "esp/vendorfw").mkdir(parents=True)
+                (root / "esp/vendorfw/firmware.cpio").write_bytes(b"fixture")
+                result, calls = self.extract(root, root / "esp", property_name=name)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(calls), 1 if extracted else 0)
+                self.assertEqual((root / "destination/vendorfw/.vendorfw.manifest").exists(), extracted)
 
     def test_esp_without_vendor_firmware_is_not_a_failure(self):
         with tempfile.TemporaryDirectory() as temporary:

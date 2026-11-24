@@ -2,11 +2,11 @@
 # An installed Aurora NixOS system (the image's /etc/nixos flake imports this).
 #
 # - Every bootloader install (nixos-rebuild switch or boot) refreshes the ESP
-#   Stage 2 as update-m1n1 does on ALARM and Fedora: aura, the new kernel's
+#   Stage 2 as update-aura does on ALARM and Fedora: aura, the new kernel's
 #   Apple device trees and U-Boot, written only when it changes. Every Mac gets
-#   m1n1/boot.bin with every tree until aura has no monitor. Then a Mac that
-#   boots a Mach-O Stage 1 gets m1n1/boot-ctxr.bin with its own board's trees,
-#   and its m1n1/boot.bin stays as it is. Stage 1 is never written.
+#   aurora/boot.bin with every tree until aura has no monitor. Then a Mac that
+#   boots a Mach-O Stage 1 gets aurora/boot-ctxr.bin with its own board's trees,
+#   and its aurora/boot.bin stays as it is. Stage 1 is never written.
 # - With aura Stage 1 1.0.0b4 or later the new file is a trial: it is staged as
 #   <name>.next and armed as aura's one-shot aura-try, and
 #   aurora-stage2-commit.service makes it live only after a trial boot passes
@@ -21,7 +21,7 @@ let
   cfg = config.aurora.stage2;
   esp = config.boot.loader.efi.efiSysMountPoint;
   # The aura build the Apple Silicon module puts at the front of Stage 2.
-  aura = pkgs.m1n1.override (lib.optionalAttrs (config.boot.m1n1CustomLogo != null) {
+  aura = pkgs.aura.override (lib.optionalAttrs (config.boot.m1n1CustomLogo != null) {
     customLogo = config.boot.m1n1CustomLogo;
   });
   # The DT ABI generation of this system's kernel (kernel/dtb-abi). A kernel
@@ -34,23 +34,23 @@ let
   signerEnv = lib.optionalString (signer != null) "AURORA_STAGE2_SIGNER=${signer} ";
   stage2Parser = pkgs.writeTextDir "stage2.py" (builtins.readFile ../scripts/stage2.py);
   # The Apple Silicon module's combined Stage 2: the same bytes the image ships
-  # in m1n1/boot.bin, so an unchanged system never rewrites the ESP.
+  # in aurora/boot.bin, so an unchanged system never rewrites the ESP.
   stage2 = pkgs.runCommand "aurora-stage2" { nativeBuildInputs = [ pkgs.python3 ]; } ''
     export PYTHONPATH=${stage2Parser}
     mkdir $out
     cp ${config.system.build.m1n1} $out/boot.bin
     # The trial checks the device trees that follow aura.
-    ln -s ${aura}/lib/m1n1/m1n1.bin $out/aura.bin
+    ln -s ${aura}/lib/aura/aura.bin $out/aura.bin
     echo ${toString dtbAbi} > $out/dtb-abi
     python3 ${../scripts/check-stage2.py} --stage2 $out/boot.bin \
-      --aura ${aura}/lib/m1n1/m1n1.bin ${lib.concatMapStringsSep " " (board: "--require-board ${lib.escapeShellArg board}") cfg.requiredBoards} \
+      --aura ${aura}/lib/aura/aura.bin ${lib.concatMapStringsSep " " (board: "--require-board ${lib.escapeShellArg board}") cfg.requiredBoards} \
       > $out/manifest.json
     sha256sum $out/boot.bin | cut -d' ' -f1 > $out/boot.bin.sha256
     if [[ -e ${aura}/share/aura/monitor-free ]]; then
       touch $out/monitor-free
       ${pkgs.runtimeShell} ${../scripts/build-ctxr-stage2.sh} ${../scripts/check-stage2.py} \
         ${../scripts/prepare-stage2.py} ${../scripts/prepare-ctxr-stage2.py} \
-        $out/boot.bin ${aura}/lib/m1n1/m1n1.bin $out/ctxr
+        $out/boot.bin ${aura}/lib/aura/aura.bin $out/ctxr
     fi
   '';
   installStage2 = pkgs.writeShellApplication {
@@ -73,8 +73,14 @@ let
       ESP_ROOT=$esp
       ESP_DEVICE=$(findmnt -n -o SOURCE --mountpoint "$esp" | tail -n 1)
       ESP_FSTYPE=$(findmnt -n -o FSTYPE --mountpoint "$esp" | tail -n 1)
-      # bootchain.py takes m1n1/boot-ctxr.bin instead on a Mac that boots it.
-      TARGET=$esp/m1n1/boot.bin
+      # bootchain.py takes boot-ctxr.bin instead on a Mac that boots it.
+      # LEGACY-ASAHI(2027-02-28): m1n1/ when only a pre-rename Stage 1's file is there.
+      if [[ ! -e $esp/aurora/boot.bin && ! -e $esp/aurora/boot-ctxr.bin ]] &&
+         [[ -e $esp/m1n1/boot.bin || -e $esp/m1n1/boot-ctxr.bin ]]; then
+        TARGET=$esp/m1n1/boot.bin
+      else
+        TARGET=$esp/aurora/boot.bin
+      fi
       AURORA_MONITOR_FREE_MARKER=${aura}/share/aura/monitor-free
       AURORA_CONFIGURATION_LIMIT=${configurationLimit}
       export ESP_ROOT ESP_DEVICE ESP_FSTYPE TARGET AURORA_MONITOR_FREE_MARKER AURORA_CONFIGURATION_LIMIT

@@ -45,7 +45,7 @@ usable() {
 	mountpoint -q "$provider" && [ -e "$provider/.aurora-mesa-commit" ] || return 1
 	for lib in usr/lib64 usr/lib; do
 		[ -e "$provider/$lib/ld-linux-x86-64.so.2" ] || continue
-		x86_64 "$provider/$lib/libvulkan_asahi.so"
+		x86_64 "$provider/$lib/libvulkan_aurora.so"
 		return
 	done
 	return 1

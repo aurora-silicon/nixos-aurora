@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 set -euo pipefail
-property=${AURORA_EFI_PROPERTY:-/sys/firmware/devicetree/base/chosen/asahi,efi-system-partition}
+property=${AURORA_EFI_PROPERTY:-/sys/firmware/devicetree/base/chosen/aurora,efi-system-partition}
+# LEGACY-ASAHI(2027-02-28): an aura from before the rename, and a U-Boot that
+# moves the ESP, publish it only as asahi,efi-system-partition.
+if [ ! -r "$property" ] && [ "${property##*/}" = aurora,efi-system-partition ]; then
+  property=${property%/*}/asahi,efi-system-partition
+fi
 if [ ! -r "$property" ]; then exit 0; fi
 uuid=$(tr -d '\000' < "$property")
 [[ "$uuid" =~ ^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$ ]] || {

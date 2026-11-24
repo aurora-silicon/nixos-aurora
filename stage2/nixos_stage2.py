@@ -67,6 +67,20 @@ class Entry:
     number: int = None
 
 
+def stage2_directory(esp):
+    """The ESP directory of the one Stage 2 file the enrolled Stage 1 loads: aurora/.
+
+    LEGACY-ASAHI(2027-02-28): a Stage 1 enrolled before the rename chainloads m1n1/boot.bin (or
+    m1n1/boot-ctxr.bin). When aurora/ has no Stage 2 file and m1n1/ has one, that
+    is the file to update (aurora_stage2_dir in alarm-aurora's functions.sh).
+    """
+    def has_stage2(directory):
+        return (directory / 'boot.bin').exists() or (directory / 'boot-ctxr.bin').exists()
+    if not has_stage2(esp / 'aurora') and has_stage2(esp / 'm1n1'):
+        return esp / 'm1n1'
+    return esp / 'aurora'
+
+
 class NixosUpdate(bootchain.Update):
     def __init__(self, root=Path('/'), env=None):
         super().__init__(root, env)
@@ -212,7 +226,7 @@ class NixosUpdate(bootchain.Update):
             bootchain.sync_dir(target.parent)
         finally:
             staged.unlink(missing_ok=True)
-        print(f'Stage 2 updated at {target}; the previous one is m1n1/{target.name}.old')
+        print(f'Stage 2 updated at {target}; the previous one is {target.parent.name}/{target.name}.old')
 
     # Entry points.
 
@@ -229,7 +243,7 @@ class NixosUpdate(bootchain.Update):
         source, name = self.selected_source()
         if not source.is_file():
             return  # The installer only warns; nothing is written.
-        target = self.path(self.env.get('ESP_ROOT', '/boot/efi')) / 'm1n1' / name
+        target = stage2_directory(self.path(self.env.get('ESP_ROOT', '/boot/efi'))) / name
         payload = source.read_bytes()
         try:
             # The bytes install would write; a signing failure is install's to report.
@@ -274,7 +288,7 @@ def main(argv=None):
     env = dict(os.environ)
     if env.get('AURORA_STAGE2_DIR'):
         env.setdefault('AURORA_MONITOR_FREE_MARKER', env['AURORA_STAGE2_DIR'] + '/monitor-free')
-        env.setdefault('M1N1', env['AURORA_STAGE2_DIR'] + '/aura.bin')
+        env.setdefault('AURA', env['AURORA_STAGE2_DIR'] + '/aura.bin')
     kept = {
         'install': 'the ESP Stage 2 was left unchanged',
         'check': 'the boot menu and Stage 2 were left unchanged',

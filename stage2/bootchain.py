@@ -127,8 +127,8 @@ class Update:
                 if version not in images and self.entry_image_gone(fields):
                     # GRUB cannot load this entry's kernel, so no tree has to
                     # suit it. Such entries outlive a kernel removed without
-                    # kernel-install, as Asahi kernels were on migration.
-                    print(f'update-m1n1: ignoring boot entry {p.name}: its kernel '
+                    # kernel-install, as Fedora Asahi Remix kernels were on migration.
+                    print(f'update-aura: ignoring boot entry {p.name}: its kernel '
                           f'{fields["linux"].strip()} does not exist', file=sys.stderr)
                     continue
                 images.setdefault(version, self.path('/boot/vmlinuz-' + version))
@@ -260,7 +260,7 @@ class Update:
         matches = [v for v in images if entry == v or entry.endswith('-' + v)]
         if matches:
             return max(matches, key=len)
-        print(f'update-m1n1: GRUB default {entry!r} ({origin}) is not an installed kernel; '
+        print(f'update-aura: GRUB default {entry!r} ({origin}) is not an installed kernel; '
               'using the newest kernel, as GRUB does', file=sys.stderr)
         return None
 
@@ -280,7 +280,7 @@ class Update:
         else:
             selected = default or newest
         if selected != newest:
-            print(f'update-m1n1: composing Stage 2 from the default kernel {selected}, '
+            print(f'update-aura: composing Stage 2 from the default kernel {selected}, '
                   f'not the newer non-default {newest}', file=sys.stderr)
         return selected
 
@@ -337,18 +337,18 @@ class Update:
             raise Refused(f'selected DTBs use DT ABI generation {generation}, but retained kernels '
                           f'{kernels} require an older generation. Stage 2 and /boot/dtb are kept. '
                           f'After verifying a working compatible fallback, remove the listed kernels '
-                          f'with `{command}` and run `sudo update-m1n1` again. '
+                          f'with `{command}` and run `sudo update-aura` again. '
                           'No fallback kernel is removed automatically.')
         # An administrator-owned real /boot/dtb must never be replaced.
         link = self.path('/boot/dtb')
         if link.exists() and not link.is_symlink():
             raise Refused('/boot/dtb is not a symlink')
-        m1n1 = self.path(self.env.get('M1N1', '/usr/lib64/m1n1/m1n1.bin')).read_bytes()
+        aura = self.path(self.env.get('AURA', '/usr/lib64/aura/aura.bin')).read_bytes()
         uboot = self.path(self.env.get('U_BOOT', '/usr/share/uboot/apple_m1/u-boot-nodtb.bin')).read_bytes()
-        if not m1n1 or not uboot:
+        if not aura or not uboot:
             raise Refused('empty aura or U-Boot input')
         options = []
-        config = self.path(self.env.get('CONFIG', '/etc/m1n1.conf'))
+        config = self.path(self.env.get('CONFIG', '/etc/aura.conf'))
         if config.exists():
             for line in config.read_bytes().splitlines():
                 if re.match(rb'^(chosen\.[^=]+|display|mitigations)=', line):
@@ -357,7 +357,7 @@ class Update:
         ctxr = self.ctxr_board()
         blobs = list(dict.fromkeys(candidate[key] for key in sorted(candidate)
                                    if not ctxr or ctxr in candidate.boards[key]))
-        payload = m1n1 + b''.join(blobs) + gzip.compress(uboot, mtime=0) + b''.join(options)
+        payload = aura + b''.join(blobs) + gzip.compress(uboot, mtime=0) + b''.join(options)
         if ctxr and len(payload) > 16 * 1024 * 1024:
             raise Refused('CTXR Stage 2 exceeds the 16 MiB slot; keeping the working images')
         return selected, source, trees[selected], payload
@@ -367,12 +367,15 @@ class Update:
         return path.read_bytes().rstrip(b'\0').decode('ascii') if path.exists() else ''
 
     def supports_trial(self):
-        # The aura property is authoritative when present. A stock m1n1
+        # The aura property is authoritative when present. A stock aura
         # version (such as 1.6.1) does not imply aura-try support.
         if self.board() is None:
             return False
         aura_version = self.chosen('aura,stage1-version')
-        version = aura_version or self.chosen('asahi,m1n1-stage1-version')
+        # LEGACY-ASAHI(2027-02-28): a Stage 1 from before the rename publishes the
+        # version under the asahi name only.
+        version = (aura_version or self.chosen('aurora,aura-stage1-version') or
+                   self.chosen('asahi,m1n1-stage1-version'))
         match = re.fullmatch(r'(?:aura[- v]?)?v?(\d+)\.(\d+)\.(\d+)(?:b(\d+))?(?:-(?:[0-9]+-)?g[0-9a-f]+)?(?:-dirty)?', version)
         if not match or (match[4] is None and not aura_version and
                          not version.startswith(('aura', '1.0.0', 'v1.0.0'))):
@@ -426,7 +429,7 @@ class Update:
         """Return the path and record of this candidate's automatic attempt.
 
         Attempts are keyed by the candidate's SHA-256, so an aura, U-Boot,
-        m1n1.conf or DTB change gets its own trial even for the same kernel.
+        aura.conf or DTB change gets its own trial even for the same kernel.
         Records from 20261107-1 are named after the kernel version; they still
         count for the candidate whose hash they contain.
         """
@@ -517,7 +520,7 @@ class Update:
         attempt = self.attempts() / digest
         if current and current[0] == 'armed':
             raise Refused('a Stage 2 trial is already armed')
-        offset = len(self.path(self.env.get('M1N1', '/usr/lib64/m1n1/m1n1.bin')).read_bytes())
+        offset = len(self.path(self.env.get('AURA', '/usr/lib64/aura/aura.bin')).read_bytes())
         self.verify_stage2(payload, offset)
         if candidate.exists():
             # Keep the previous trial evidence when a newer kernel is staged.
@@ -776,7 +779,7 @@ def main():
         else:
             update.apply()
     except (Refused, OSError, ValueError, subprocess.SubprocessError) as error:
-        print(f'update-m1n1: {error}; keeping the last complete Stage 2 and trial evidence', file=sys.stderr)
+        print(f'update-aura: {error}; keeping the last complete Stage 2 and trial evidence', file=sys.stderr)
         return 1
     return 0
 

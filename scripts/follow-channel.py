@@ -55,7 +55,7 @@ def follow(directory, revision, channel):
         'stays available when the hostname changes. machine.nix preserves its filesystem identities; owner.nix '
         'is written by firstboot. The password hash remains outside the Nix store.\n\n'
         f'flake.lock pins the commit this system was installed from ({revision}). {follows} Every rebuild '
-        'refreshes the Stage 2 boot file in m1n1/ on the EFI partition: a new one is tried once and kept '
+        'refreshes the Stage 2 boot file in aura/ on the EFI partition: a new one is tried once and kept '
         'only after a good boot, and the previous one stays beside it. Nothing updates unattended.\n')
 
 
