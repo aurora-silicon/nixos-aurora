@@ -19,11 +19,12 @@ mkdir -p "$out" "$root/out/$profile-build"
 image=$root/out/$profile-build/aurora.raw
 size=8G;[[ $desktop == minimal ]] || size=24G
 truncate -s "$size" "$image"
-loop='';target=$(mktemp -d /tmp/aurora-nixos-image.XXXXXX);chmod 0755 "$target"
+loop='';loop_lock='';target=$(mktemp -d /tmp/aurora-nixos-image.XXXXXX);chmod 0755 "$target"
 cleanup() {
   local status=$? clean=1
   trap - EXIT
   if mountpoint -q "$target"; then umount -R "$target" || clean=0; fi
+  [[ -z $loop_lock ]] || exec {loop_lock}<&-
   if (( clean )); then [[ -z $loop ]] || losetup -d "$loop"; rmdir "$target"; else echo "Image mounts remain at $target" >&2;status=1;fi
   exit "$status"
 }
@@ -35,8 +36,25 @@ print(p['rootUUID'],p['bootUUID'],p['efiUUID'])
 PY
 )
 loop=$(losetup --find --show --partscan --sector-size 4096 "$image")
+# When a writer closes the whole loop device (losetup, then sfdisk), udev's
+# watch has the kernel re-read its partition table, which removes and re-adds
+# the partition nodes, possibly under mkfs. udev skips that re-read while
+# another process holds a BSD lock on the whole disk
+# (https://systemd.io/BLOCK_DEVICE_LOCKING/), so hold one from the table write
+# until the new filesystems are mounted; a mounted partition makes the kernel
+# refuse a re-read.
+exec {loop_lock}<"$loop"
+flock -x -w 60 "$loop_lock"
+# The table is written through the 4096-byte-sector loop device: the runner's
+# sfdisk (util-linux 2.39) has no --sector-size to write the file directly.
 printf 'label: gpt\n\nstart=2048,size=131072,type=U\nsize=262144,type=BC13C2FF-59E6-4262-A352-B275FD6F7172\ntype=B921B045-1DF0-41C3-AF44-4C6F280D3FAE\n' | sfdisk "$loop"
-udevadm settle
+# sfdisk makes the kernel re-read the table (BLKRRPART) before it exits, and
+# the kernel creates each partition's node in devtmpfs as it adds the
+# partition. Nothing here reads udev's database or /dev/disk links, so there
+# is no udev event to wait for; only check that the partitions are there.
+for partition in "${loop}p"{1..3}; do
+  [[ -b $partition ]] || { echo "the new partition table left no $partition" >&2; exit 1; }
+done
 mkfs.vfat -F32 -i "${efi_uuid//-/}" -n AURORA_EFI "${loop}p1"
 mkfs.ext4 -F -U "$boot_uuid" -L AURORA_BOOT "${loop}p2"
 mkfs.btrfs -f -U "$root_uuid" -L AURORA_ROOT -s 4096 -n 16384 "${loop}p3"
@@ -45,6 +63,7 @@ btrfs subvolume create "$target/root";btrfs subvolume create "$target/home";umou
 mount -o subvol=root,compress=zstd:1 "${loop}p3" "$target"
 mkdir -p "$target/boot/efi"
 mount "${loop}p2" "$target/boot";mkdir -p "$target/boot/efi";mount "${loop}p1" "$target/boot/efi"
+exec {loop_lock}<&-;loop_lock=''
 # The factory system already contains installed-system update tooling and its
 # checked Stage 2 hook. Give that hook the image ESP's identity, rather than
 # the physical Mac building the image; nixos-enter preserves this environment.
