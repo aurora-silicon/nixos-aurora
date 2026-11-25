@@ -1065,8 +1065,8 @@ in {
   # updater logic with its NixOS adapter.
   aurora-stage2 = final.callPackage ./stage2/package.nix { };
   aurora-bless = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
-    cargoBuildFlags = [ "-p" "asahi-bless" ];
-    cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "aurora-nvram" ];
+    cargoBuildFlags = [ "-p" "aurora-bless" ];
+    cargoTestFlags = [ "-p" "aurora-bless" "-p" "apple-nvram" "-p" "aurora-nvram" ];
   };
   # NVRAM reader/writer from the aurora-bless workspace; parses the NVRAM v3
   # stores of current Macs. asahi-nvram stays as a name for old scripts.
@@ -1104,6 +1104,9 @@ in {
       resolve=$out/lib/systemd/system/aurora-btsync-resolve.service
       install -Dm644 aurora-btsync/etc/systemd/system/aurora-btsync-resolve.service $resolve
       substituteInPlace $resolve --replace-fail /usr/bin/aurora-btsync $out/bin/aurora-btsync
+      connect=$out/lib/systemd/system/aurora-btsync-connect.service
+      install -Dm644 aurora-btsync/etc/systemd/system/aurora-btsync-connect.service $connect
+      substituteInPlace $connect --replace-fail /usr/bin/aurora-btsync $out/bin/aurora-btsync
       ln -s aurora-btsync.service $out/lib/systemd/system/asahi-btsync.service
       install -Dm644 aurora-btsync/etc/udev/rules.d/96-aurora-btsync.rules $out/lib/udev/rules.d/96-aurora-btsync.rules
       install -Dm644 aurora-btsync/README.md -t $out/share/doc/aurora-btsync
@@ -1115,6 +1118,31 @@ in {
       homepage = "https://github.com/aurora-silicon/aurora-bless";
       license = final.lib.licenses.mit;
       mainProgram = "aurora-btsync";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
+  # Wi-Fi networks saved in macOS, added to NetworkManager
+  # (modules/wifisync.nix), from the aurora-bless workspace.
+  aurora-wifisync = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
+    pname = "aurora-wifisync";
+    nativeBuildInputs = [ final.pkg-config ];
+    buildInputs = [ final.dbus ];
+    cargoBuildFlags = [ "-p" "aurora-wifisync" ];
+    cargoTestFlags = [ "-p" "aurora-wifisync" ];
+    postInstall = ''
+      unit=$out/lib/systemd/system/aurora-wifisync.service
+      install -Dm644 aurora-wifisync/etc/systemd/system/aurora-wifisync.service $unit
+      substituteInPlace $unit --replace-fail /usr/bin/aurora-wifisync $out/bin/aurora-wifisync
+      install -Dm644 aurora-wifisync/etc/udev/rules.d/96-aurora-wifisync.rules $out/lib/udev/rules.d/96-aurora-wifisync.rules
+      install -Dm644 aurora-wifisync/README.md -t $out/share/doc/aurora-wifisync
+      install -Dm644 LICENSE $out/share/licenses/aurora-wifisync/LICENSE
+    '';
+    passthru.commit = pins.aurora-bless.commit;
+    meta = {
+      description = "Join the Wi-Fi networks saved in macOS on Linux";
+      homepage = "https://github.com/aurora-silicon/aurora-bless";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-wifisync";
       platforms = [ "aarch64-linux" ];
     };
   };

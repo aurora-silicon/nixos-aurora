@@ -86,6 +86,7 @@
         panel-nits = pkgs.aurora-panel-nits;
         nvram = pkgs.aurora-nvram;
         btsync = pkgs.aurora-btsync;
+        wifisync = pkgs.aurora-wifisync;
         diag = pkgs.aurora-diag;
         fido = pkgs.aurora-fido;
         sep-sk = pkgs.aurora-sep-sk;
