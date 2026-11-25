@@ -1,0 +1,241 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Wed, 25 Nov 2026 13:15:00 +1100
+Subject: [PATCH] backends/backlight-sysfs: Map linear backlights perceptually with CIE 1931 L*
+
+Backlight devices whose sysfs `scale` attribute is `linear` (such as
+apple-panel-bl, where each unit is 1 physical nit) have a linear luminance
+response. Exposing their raw integer range directly to the desktop makes
+the low half of the slider far too bright (e.g. 250-300 nits at 50% and
+130-150 nits at 25%) and clips the minimum to max/100 (5-6 nits instead
+of 1-2 nits).
+
+When a sysfs backlight reports `scale=linear` and `max_brightness >= 100`,
+keep the hardware floor at 1 and expose a 0..10000 perceptual CIE 1931 L*
+range (0.01% lightness steps) on MetaBacklight, converting cleanly to and
+from linear hardware levels with exact integer round-trip stability.
+
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+diff --git a/src/backends/meta-backlight-sysfs.c b/src/backends/meta-backlight-sysfs.c
+index 22050e4..9d36882 100644
+--- a/src/backends/meta-backlight-sysfs.c
++++ b/src/backends/meta-backlight-sysfs.c
+@@ -20,6 +20,7 @@
+ #include "backends/meta-backlight-sysfs-private.h"
+ 
+ #include <glib.h>
++#include <math.h>
+ 
+ #include "backends/meta-backend-private.h"
+ #include "backends/meta-launcher.h"
+@@ -28,6 +29,10 @@
+ 
+ #include "meta-dbus-login1.h"
+ 
++/* Perceptual CIE 1931 L* scale (0.00..100.00 in 0.01% steps) used when a
++ * sysfs backlight reports scale=linear (physical luminance, e.g. nits). */
++#define META_BACKLIGHT_LINEAR_STEPS 10000
++
+ struct _MetaBacklightSysfs
+ {
+   MetaBacklight parent;
+@@ -37,12 +42,52 @@ struct _MetaBacklightSysfs
+   char *device_name;
+   char *device_path;
+   char *brightness_path;
++
++  gboolean is_linear;
++  gboolean initialized;
++  int hw_min;
++  int hw_max;
+ };
+ 
+ G_DEFINE_FINAL_TYPE (MetaBacklightSysfs,
+                      meta_backlight_sysfs,
+                      META_TYPE_BACKLIGHT)
+ 
++static int
++linear_perceptual_to_hw (MetaBacklightSysfs *backlight,
++                         int                 perceptual)
++{
++  double lstar = CLAMP (perceptual, 0, META_BACKLIGHT_LINEAR_STEPS) / 100.0;
++  double y;
++  int hw;
++
++  if (lstar <= 8.0)
++    y = lstar / 903.3;
++  else
++    y = pow ((lstar + 16.0) / 116.0, 3.0);
++
++  hw = (int) lround (backlight->hw_min +
++                     (backlight->hw_max - backlight->hw_min) * y);
++  return CLAMP (hw, backlight->hw_min, backlight->hw_max);
++}
++
++static int
++linear_hw_to_perceptual (MetaBacklightSysfs *backlight,
++                         int                 hw)
++{
++  int clamped = CLAMP (hw, backlight->hw_min, backlight->hw_max);
++  double y = (double) (clamped - backlight->hw_min) /
++             (double) (backlight->hw_max - backlight->hw_min);
++  double lstar;
++
++  if (y <= 8.0 / 903.3)
++    lstar = y * 903.3;
++  else
++    lstar = 116.0 * cbrt (y) - 16.0;
++
++  return CLAMP ((int) lround (lstar * 100.0), 0, META_BACKLIGHT_LINEAR_STEPS);
++}
++
+ static void
+ meta_backlight_sysfs_update (MetaBacklightSysfs *backlight)
+ {
+@@ -60,16 +105,37 @@ meta_backlight_sysfs_update (MetaBacklightSysfs *backlight)
+ 
+   brightness_raw = g_ascii_strtoll (contents, NULL, 0);
+ 
+-  meta_backlight_get_brightness_info (META_BACKLIGHT (backlight),
+-                                      &brightness_min, &brightness_max);
++  if (backlight->is_linear)
++    {
++      int hw = CLAMP (brightness_raw, backlight->hw_min, backlight->hw_max);
++
++      if (hw != brightness_raw)
++        {
++          g_warning ("Backlight %s: Value read from sysfs is out of range",
++                     meta_backlight_get_name (META_BACKLIGHT (backlight)));
++        }
+ 
+-  /* e.g. brightness lower than our minimum. */
+-  brightness = CLAMP (brightness_raw, brightness_min, brightness_max);
++      if (backlight->initialized &&
++          linear_perceptual_to_hw (backlight,
++                                   meta_backlight_get_brightness (META_BACKLIGHT (backlight))) == hw)
++        return;
+ 
+-  if (brightness != brightness_raw)
++      brightness = linear_hw_to_perceptual (backlight, hw);
++      backlight->initialized = TRUE;
++    }
++  else
+     {
+-      g_warning ("Backlight %s: Value read from sysfs is out of range",
+-                 meta_backlight_get_name (META_BACKLIGHT (backlight)));
++      meta_backlight_get_brightness_info (META_BACKLIGHT (backlight),
++                                          &brightness_min, &brightness_max);
++
++      /* e.g. brightness lower than our minimum. */
++      brightness = CLAMP (brightness_raw, brightness_min, brightness_max);
++
++      if (brightness != brightness_raw)
++        {
++          g_warning ("Backlight %s: Value read from sysfs is out of range",
++                     meta_backlight_get_name (META_BACKLIGHT (backlight)));
++        }
+     }
+ 
+   meta_backlight_update_brightness_target (META_BACKLIGHT (backlight),
+@@ -158,16 +224,21 @@ meta_backlight_sysfs_set_brightness (MetaBacklight       *backlight,
+ {
+   MetaBacklightSysfs *backlight_sysfs = META_BACKLIGHT_SYSFS (backlight);
+   g_autoptr (GTask) task = NULL;
++  int hw_target;
+ 
+   task = g_task_new (backlight_sysfs, cancellable, callback, user_data);
+   g_task_set_task_data (task, GINT_TO_POINTER (brightness_target), NULL);
+ 
++  hw_target = backlight_sysfs->is_linear
++    ? linear_perceptual_to_hw (backlight_sysfs, brightness_target)
++    : brightness_target;
++
+   if (backlight_sysfs->session_proxy)
+     {
+       meta_dbus_login1_session_call_set_brightness (backlight_sysfs->session_proxy,
+                                                     "backlight",
+                                                     backlight_sysfs->device_name,
+-                                                    brightness_target,
++                                                    hw_target,
+                                                     cancellable,
+                                                     on_login1_brightness_set,
+                                                     g_steal_pointer (&task));
+@@ -175,7 +246,7 @@ meta_backlight_sysfs_set_brightness (MetaBacklight       *backlight,
+   else
+     {
+       meta_backlight_sysfs_set_brightness_helper (backlight_sysfs,
+-                                                  brightness_target,
++                                                  hw_target,
+                                                   g_steal_pointer (&task));
+     }
+ }
+@@ -240,13 +311,18 @@ static gboolean
+ get_backlight_info (GUdevDevice  *device,
+                     int          *brightness_min_out,
+                     int          *brightness_max_out,
++                    gboolean     *is_linear_out,
+                     GError      **error)
+ {
+   int min, max;
+   const char *device_type;
++  const char *scale;
++  gboolean is_linear;
+ 
+   max = g_udev_device_get_sysfs_attr_as_int (device, "max_brightness");
+-  min = MAX (1, max / 100);
++  scale = g_udev_device_get_sysfs_attr (device, "scale");
++  is_linear = (g_strcmp0 (scale, "linear") == 0 && max >= 100);
++  min = is_linear ? 1 : MAX (1, max / 100);
+ 
+   device_type = g_udev_device_get_sysfs_attr (device, "type");
+ 
+@@ -269,6 +345,8 @@ get_backlight_info (GUdevDevice  *device,
+     *brightness_min_out = min;
+   if (brightness_max_out)
+     *brightness_max_out = max;
++  if (is_linear_out)
++    *is_linear_out = is_linear;
+ 
+   return TRUE;
+ }
+@@ -310,8 +388,8 @@ meta_backlight_sysfs_new (MetaBackend           *backend,
+   g_autofree char *brightness_path = NULL;
+   g_autofree char *device_name = NULL;
+   g_autofree char *device_path = NULL;
+-  gboolean is_internal;
+-  int min, max;
++  gboolean is_internal, is_linear;
++  int hw_min, hw_max;
+ 
+   is_internal = meta_output_info_is_builtin (output_info);
+ 
+@@ -325,7 +403,7 @@ meta_backlight_sysfs_new (MetaBackend           *backend,
+       return NULL;
+     }
+ 
+-  if (!get_backlight_info (backlight_device, &min, &max, error))
++  if (!get_backlight_info (backlight_device, &hw_min, &hw_max, &is_linear, error))
+     return NULL;
+ 
+   device_name = g_strdup (g_udev_device_get_name (backlight_device));
+@@ -348,14 +426,17 @@ meta_backlight_sysfs_new (MetaBackend           *backend,
+   backlight = g_object_new (META_TYPE_BACKLIGHT_SYSFS,
+                             "backend", backend,
+                             "name", output_info->name,
+-                            "brightness-min", min,
+-                            "brightness-max", max,
++                            "brightness-min", is_linear ? 0 : hw_min,
++                            "brightness-max", is_linear ? META_BACKLIGHT_LINEAR_STEPS : hw_max,
+                             NULL);
+   backlight->device = g_steal_pointer (&backlight_device);
+   backlight->session_proxy = session_proxy;
+   backlight->device_name = g_steal_pointer (&device_name);
+   backlight->device_path = g_steal_pointer (&device_path);
+   backlight->brightness_path = g_steal_pointer (&brightness_path);
++  backlight->is_linear = is_linear;
++  backlight->hw_min = hw_min;
++  backlight->hw_max = hw_max;
+ 
+   g_signal_connect_object (udev, "backlight-changed",
+                            G_CALLBACK (on_backlight_changed), backlight, 0);

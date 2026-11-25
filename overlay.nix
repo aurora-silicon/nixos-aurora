@@ -197,6 +197,7 @@ in {
   gnome-settings-daemon = prev.gnome-settings-daemon.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       (stableFile ./patches/gnome-settings-daemon-ambient-white-point.patch)
+      (stableFile ./patches/gnome-settings-daemon-ambient-brightness-neutral.patch)
     ];
     nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.dbus ];
     doCheck = true;
@@ -530,6 +531,7 @@ in {
       ./patches/mutter-pq-reference-luminance.patch
       ./patches/mutter-builtin-desktop-vrr.patch
       ./patches/mutter-power-save-onscreens-dispose.patch
+      ./patches/mutter-linear-backlight-perceptual-scale.patch
     ];
   });
   # Firefox's RDD sandbox admits the media controller node of an allowed M2M
