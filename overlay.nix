@@ -1099,6 +1099,9 @@ in {
       unit=$out/lib/systemd/system/aurora-btsync.service
       install -Dm644 aurora-btsync/etc/systemd/system/aurora-btsync.service $unit
       substituteInPlace $unit --replace-fail /usr/bin/aurora-btsync $out/bin/aurora-btsync
+      resolve=$out/lib/systemd/system/aurora-btsync-resolve.service
+      install -Dm644 aurora-btsync/etc/systemd/system/aurora-btsync-resolve.service $resolve
+      substituteInPlace $resolve --replace-fail /usr/bin/aurora-btsync $out/bin/aurora-btsync
       ln -s aurora-btsync.service $out/lib/systemd/system/asahi-btsync.service
       install -Dm644 aurora-btsync/etc/udev/rules.d/96-aurora-btsync.rules $out/lib/udev/rules.d/96-aurora-btsync.rules
       install -Dm644 aurora-btsync/README.md -t $out/share/doc/aurora-btsync
