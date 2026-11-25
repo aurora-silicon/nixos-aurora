@@ -1,8 +1,8 @@
 diff --git a/Makefile b/Makefile
-index 303007a..f147b70 100644
+index 81b7d56..a9e34d5 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -59,15 +59,7 @@ j%: core
+@@ -69,15 +69,7 @@ j%: core
  	install -pm0644 -t $(DESTDIR)/$(DATA_DIR)/asahi-audio/$@/ $(wildcard firs/$@/*)
  
  
@@ -12,17 +12,17 @@ index 303007a..f147b70 100644
 -# (j316 for j416/j516/j616, j413 for j613); the microphone graphs stay.
 -V2_SPEAKER_BOARDS = j316 j413 j616 j700
 -
- install: aliases core j274 j293 j313 j314 j316 j413 j415 j375 j614 j616 j700
+ install: aliases core j274 j293 j313 j314 j316 j413 j415 j375 j604 j614 j616 j700 j714
 -	for b in $(V2_SPEAKER_BOARDS); do rm -f $(DESTDIR)/$(DATA_DIR)/asahi-audio/$$b/graph.json; done
 -	rm -f $(DESTDIR)/$(DATA_DIR)/asahi-audio/j700/48.wav
  
  uninstall:
  	rm -rf $(DESTDIR)/$(DATA_DIR)/asahi-audio/
 diff --git a/conf/wireplumber.conf b/conf/wireplumber.conf
-index 2e5f86a..a6940fb 100644
+index 27fb126..86a712b 100644
 --- a/conf/wireplumber.conf
 +++ b/conf/wireplumber.conf
-@@ -243,8 +243,17 @@ node.software-dsp.rules = [
+@@ -261,8 +261,17 @@ node.software-dsp.rules = [
      }
  
      # J413 (MacBook Air 15", M2, 2023)
@@ -42,7 +42,7 @@ index 2e5f86a..a6940fb 100644
      {
          matches = [
              { api.alsa.path = "hw:AppleJ413HPAI,0" }
-@@ -330,8 +339,17 @@ node.software-dsp.rules = [
+@@ -348,8 +357,17 @@ node.software-dsp.rules = [
      }
  
      # J316 (MacBook Pro 16", M1 Pro/Max, 2021)
@@ -62,7 +62,7 @@ index 2e5f86a..a6940fb 100644
      {
          matches = [
              { api.alsa.path = "hw:AppleJ316HPAI,0" }
-@@ -593,12 +611,30 @@ node.software-dsp.rules = [
+@@ -649,8 +667,17 @@ node.software-dsp.rules = [
              }
          }
      }
@@ -79,6 +79,11 @@ index 2e5f86a..a6940fb 100644
 +            }
 +        }
 +    }
+ 
+     # J714 (MacBook Pro 14", M5 Pro/Max)
+     {
+@@ -677,8 +704,17 @@ node.software-dsp.rules = [
+     }
  
      # J700 (MacBook Neo, A18 Pro, 2026)
 -    # J700 speakers: speakerguardd v2 builds the speaker graph from this Mac's
