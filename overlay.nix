@@ -490,7 +490,7 @@ in {
   });
   asahi-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
-    version = "${pins.aurora-audio.version}-aurora15";
+    version = "${pins.aurora-audio.version}-aurora16";
     patches = (old.patches or [ ]) ++ [ (stableFile ./patches/0001-restore-legacy-speaker-graphs.patch) ];
     postInstall = (old.postInstall or "") + ''
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
