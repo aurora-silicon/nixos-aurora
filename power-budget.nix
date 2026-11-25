@@ -10,8 +10,12 @@ in stdenvNoCC.mkDerivation {
   dontBuild = true;
   installPhase = ''
     runHook preInstall
-    make install-power PREFIX=$out
-    # NixOS declares the unit in modules/power-budget.nix.
+    # The commented default configuration stays in the package;
+    # modules/power-budget.nix links it as /etc/aurora/power-modes.conf.
+    make install-power PREFIX=$out SYSCONFDIR=$out/etc
+    substituteInPlace $out/etc/aurora/power-modes.conf \
+      --replace-fail /usr/share/doc/aurora-power-budget/README.md $out/share/doc/aurora-power-budget/README.md
+    # NixOS declares the units in modules/power-budget.nix.
     rm -r $out/lib/systemd
     patchShebangs $out/libexec/aurora
     runHook postInstall

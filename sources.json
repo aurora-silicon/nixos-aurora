@@ -100,21 +100,21 @@
   },
   "aurora-firstboot": {
     "repository": "https://github.com/aurora-silicon/aurora-platform",
-    "commit": "8fc36c44f7353c7c1c0ffa3aff3ae0aa69f9ce54",
+    "commit": "e3bc82ab399a70897088d003de9bb016d9740b28",
     "version": "0.1.13",
-    "source_url": "https://codeload.github.com/aurora-silicon/aurora-platform/tar.gz/8fc36c44f7353c7c1c0ffa3aff3ae0aa69f9ce54",
-    "archive_root": "aurora-platform-8fc36c44f7353c7c1c0ffa3aff3ae0aa69f9ce54",
-    "sha256": "e259efa1cd0673480b1c429f3e1c4da6521bc9b6edb6ae85c806e7c7092d70e9",
-    "nix_hash": "sha256-4lnvoc0Gc0gLHEKfPhxNplIbybbttq6FyAbnxwktcOk="
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-platform/tar.gz/e3bc82ab399a70897088d003de9bb016d9740b28",
+    "archive_root": "aurora-platform-e3bc82ab399a70897088d003de9bb016d9740b28",
+    "sha256": "390ca29e765cd35968526cd02111b2fecb6b105a5e9b41efdffa1081f6e51eb0",
+    "nix_hash": "sha256-OQyinnZc01loUmzQIRGy/strEFpem0Hv3/oQgfblHrA="
   },
   "aurora-secboot": {
     "repository": "https://github.com/aurora-silicon/aurora-platform",
-    "commit": "ad0411c90f50b743bca3f1c8083279f86a34f2f8",
+    "commit": "e3bc82ab399a70897088d003de9bb016d9740b28",
     "version": "0.1.13",
-    "source_url": "https://codeload.github.com/aurora-silicon/aurora-platform/tar.gz/ad0411c90f50b743bca3f1c8083279f86a34f2f8",
-    "archive_root": "aurora-platform-ad0411c90f50b743bca3f1c8083279f86a34f2f8",
-    "sha256": "17b7a084909462f0b6a32a355aee78f8ecfc2f26828b25b9509a36add8faab24",
-    "nix_hash": "sha256-F7eghJCUYvC2oyo1Wu54+Oz8LyaCiyW5UJo2rdj6qyQ="
+    "source_url": "https://codeload.github.com/aurora-silicon/aurora-platform/tar.gz/e3bc82ab399a70897088d003de9bb016d9740b28",
+    "archive_root": "aurora-platform-e3bc82ab399a70897088d003de9bb016d9740b28",
+    "sha256": "390ca29e765cd35968526cd02111b2fecb6b105a5e9b41efdffa1081f6e51eb0",
+    "nix_hash": "sha256-OQyinnZc01loUmzQIRGy/strEFpem0Hv3/oQgfblHrA="
   },
   "libva-v4l2-request-avd": {
     "repository": "https://github.com/omacom/libva-v4l2_request",
