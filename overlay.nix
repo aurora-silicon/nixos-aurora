@@ -490,8 +490,7 @@ in {
   });
   asahi-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
-    version = "${pins.aurora-audio.version}-aurora15";
-    patches = (old.patches or [ ]) ++ [ (stableFile ./patches/0001-restore-legacy-speaker-graphs.patch) ];
+    version = "${pins.aurora-audio.version}-aurora16";
     postInstall = (old.postInstall or "") + ''
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
       test -e "$out/share/wireplumber/scripts/device/asahi-keep-profile.lua"
@@ -501,7 +500,9 @@ in {
     '';
     # nixpkgs' fixup phase rewrites /usr paths to this output first.
     postFixup = (old.postFixup or "") + ''
-      for board in j316 j413 j616 j700; do
+      # Every board's speaker graph in the source is installed and has a rule.
+      for graph in firs/*/graph.json; do
+        board=''${graph%/graph.json}; board=''${board##*/}
         test -s "$out/share/asahi-audio/$board/graph.json"
         grep -q "$out/share/asahi-audio/$board/graph.json" "$out/share/wireplumber/wireplumber.conf.d/99-asahi.conf"
       done
