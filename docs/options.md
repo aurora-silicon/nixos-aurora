@@ -1063,3 +1063,27 @@ Keep the ESP's Wi-Fi firmware on the installed macOS's, as macOS does (aurora-wi
 **Default:** `true`
 
 **Declared in:** [wifi-firmware.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/wifi-firmware.nix)
+
+## `aurora.wifisync.enable`
+
+Use the Wi-Fi networks saved in macOS: when the NVRAM device appears,
+aurora-wifisync adds them to NetworkManager as keyfiles before
+NetworkManager starts, so a first boot joins a network macOS knows.
+Profiles made on Linux are left alone and no key is printed. False
+leaves NetworkManager's profiles alone.
+
+**Type:** boolean
+
+**Default:** `config.networking.networkmanager.enable`
+
+**Declared in:** [wifisync.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/wifisync.nix)
+
+## `aurora.wifisync.package`
+
+The aurora-wifisync package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-wifisync`
+
+**Declared in:** [wifisync.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/wifisync.nix)
