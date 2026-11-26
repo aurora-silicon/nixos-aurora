@@ -63,8 +63,9 @@ in {
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
+        # Read-only, nosuid and nodev, whatever the rootfs below it holds.
         ExecStart = utils.escapeSystemdExecArgs [ "${pkgs.util-linux}/bin/mount" "-t" "overlay" "overlay"
-          "-o" "ro,lowerdir=${cfg.package}:${cfg.rootfs}" provider ];
+          "-o" "ro,nosuid,nodev,lowerdir=${cfg.package}:${cfg.rootfs}" provider ];
         ExecStop = "${pkgs.util-linux}/bin/umount ${provider}";
         # FEX's global RootFS follows the provider; a failure leaves it unset.
         ExecStartPost = "-${selectRootfs}";

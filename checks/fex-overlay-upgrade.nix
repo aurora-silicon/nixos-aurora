@@ -47,12 +47,19 @@ in pkgs.testers.runNixOSTest {
     config = "/run/fex-emu/Config.json"
     original = machine.succeed("readlink -f /run/current-system").strip()
 
+    # The newest mount at a path is read-only, nosuid and nodev.
+    def ro_nosuid_nodev(path):
+        options = machine.succeed(f"findmnt -n -o OPTIONS -M {path} | tail -n1").strip().split(",")
+        assert {"ro", "nosuid", "nodev"} <= set(options), (path, options)
+
     # FEX's global RootFS is the provider, through a read-only bind.
     def selected(name):
         assert json.loads(machine.succeed(f"cat {config}")) == {"Config": {"RootFS": bind}}
         machine.succeed(f"mountpoint -q {bind}")
         machine.succeed(f"test \"$(stat -c %d {bind})\" = \"$(stat -c %d {provider})\"")
         machine.fail(f"touch {bind}/should-be-read-only")
+        ro_nosuid_nodev(provider)
+        ro_nosuid_nodev(bind)
         machine.succeed(f"grep -x {name} {bind}/usr/aurora-layer")
         machine.succeed(f"grep -x stock {bind}/usr/lib64/ld-linux-x86-64.so.2")
 
