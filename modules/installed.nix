@@ -16,7 +16,9 @@
 # - Device trees whose DT ABI generation a configuration GRUB lists cannot boot
 #   are refused before the switch, and again at install and commit time.
 # - aurora-update updates the declared consumer flake's Aurora input, in one
-#   command. Nothing upgrades unattended.
+#   command. A channel update is taken only from nixos-aurora's reviewed main
+#   history, and never backwards without --allow-downgrade. Nothing upgrades
+#   unattended.
 let
   cfg = config.aurora.stage2;
   esp = config.boot.loader.efi.efiSysMountPoint;
@@ -83,7 +85,8 @@ let
   };
   update = pkgs.writeShellApplication {
     name = "aurora-update";
-    runtimeInputs = [ config.nix.package pkgs.nixos-rebuild ];
+    # git reads nixos-aurora's main history to check channel updates.
+    runtimeInputs = [ config.nix.package pkgs.nixos-rebuild pkgs.git ];
     text = ''
       exec ${pkgs.python3}/bin/python3 ${../scripts/aurora-update.py} \
         --configured-input ${lib.escapeShellArg config.aurora.update.inputName} \

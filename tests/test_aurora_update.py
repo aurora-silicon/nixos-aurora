@@ -5,9 +5,11 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.parse
 from unittest import mock
 
 
@@ -247,3 +249,149 @@ else:
         self.assertEqual(status, 1)
         self.assertIn("sudo", error)
         self.assertEqual(self.calls(), [])
+
+
+def git(*arguments, cwd):
+    return subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                           "-c", "init.defaultBranch=main", *arguments], cwd=cwd, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+class ChannelHistoryTests(unittest.TestCase):
+    """A channel update is taken only from main's history and only forwards."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="aurora channel ")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        upstream = self.root / "upstream"
+        upstream.mkdir()
+        git("init", "--quiet", cwd=upstream)
+        self.commits = []
+        for index in range(3):
+            (upstream / "file").write_text(str(index))
+            git("add", "file", cwd=upstream)
+            git("commit", "--quiet", "-m", f"reviewed {index}", cwd=upstream)
+            self.commits.append(git("rev-parse", "HEAD", cwd=upstream))
+        git("checkout", "--quiet", "-b", "channel-testing", self.commits[1], cwd=upstream)
+        (upstream / "file").write_text("unreviewed")
+        git("commit", "--quiet", "-am", "unreviewed", cwd=upstream)
+        self.unreviewed = git("rev-parse", "HEAD", cwd=upstream)
+        git("checkout", "--quiet", "main", cwd=upstream)
+        self.history = str(upstream)
+        self.consumer = self.root / "consumer flake"
+        self.consumer.mkdir()
+        self.lock = self.consumer / "flake.lock"
+        self.lock.write_text(json.dumps(self.lock_for(self.commits[1]), indent=2) + "\n")
+        self.lock.chmod(0o640)
+        self.saved = self.lock.read_bytes()
+        self.log = self.root / "commands.jsonl"
+        self.settings = self.root / "settings.json"
+        self.system = self.root / "system"
+        self.system.mkdir()
+        self.current = self.root / "current-system"
+        program = f'''#!{sys.executable}
+import json, pathlib, sys
+root = pathlib.Path({str(self.root)!r})
+settings = json.loads((root / "settings.json").read_text())
+with (root / "commands.jsonl").open("a") as log:
+    log.write(json.dumps([pathlib.Path(sys.argv[0]).name, *sys.argv[1:]]) + "\\n")
+if pathlib.Path(sys.argv[0]).name == "fake nix":
+    action = sys.argv[2] if sys.argv[1] == "flake" else sys.argv[1]
+    if action == "metadata":
+        print(json.dumps({{"resolvedUrl": settings["reference"]}}))
+    elif action == "update":
+        (root / "consumer flake" / "flake.lock").write_text(json.dumps(settings["lock"]))
+    elif action == "eval":
+        print(settings["system"])
+'''
+        self.nix = self.root / "fake nix"
+        self.rebuild = self.root / "fake rebuild"
+        for command in (self.nix, self.rebuild):
+            command.write_text(program)
+            command.chmod(0o755)
+
+    def lock_for(self, revision, ref="channel-testing", owner="aurora-silicon"):
+        return {"version": 7, "root": "root", "nodes": {
+            "root": {"inputs": {"aurora": "aurora"}},
+            "aurora": {"locked": {"type": "github", "owner": owner, "repo": "nixos-aurora", "rev": revision},
+                       "original": {"type": "github", "owner": "aurora-silicon", "repo": "nixos-aurora",
+                                    "ref": ref}}}}
+
+    def update(self, lock, *arguments, history=None):
+        self.settings.write_text(json.dumps({
+            "reference": "path:" + urllib.parse.quote(str(self.consumer)), "lock": lock,
+            "system": str(self.system)}))
+        error = io.StringIO()
+        with mock.patch.object(updater.os, "geteuid", return_value=0), contextlib.redirect_stderr(error):
+            status = updater.main(["--flake", "./consumer#host", *arguments], state_dir=self.root / "state",
+                                  current_system=self.current, nix=str(self.nix), rebuild=str(self.rebuild),
+                                  owner_uid=os.getuid(), history_url=history or self.history)
+        return status, error.getvalue()
+
+    def actions(self):
+        return [entry[0] if entry[0] == "fake rebuild" else entry[1] if entry[1] != "flake" else entry[2]
+                for entry in map(json.loads, self.log.read_text().splitlines())]
+
+    def assert_refused(self, status, error, reason):
+        self.assertEqual(status, 1)
+        self.assertIn(reason, error)
+        self.assertIn("nothing was updated", error)
+        self.assertEqual(self.lock.read_bytes(), self.saved)
+        self.assertEqual(stat.S_IMODE(self.lock.stat().st_mode), 0o640)
+        self.assertEqual(self.actions(), ["metadata", "update"])
+
+    def test_newer_reviewed_commit_is_taken(self):
+        status, error = self.update(self.lock_for(self.commits[2]))
+        self.assertEqual(status, 0, error)
+        self.assertEqual(self.actions(), ["metadata", "update", "eval", "fake rebuild"])
+        self.assertEqual(json.loads(self.lock.read_text())["nodes"]["aurora"]["locked"]["rev"], self.commits[2])
+
+    def test_commit_outside_reviewed_history_is_refused(self):
+        status, error = self.update(self.lock_for(self.unreviewed))
+        self.assert_refused(status, error, "not in the reviewed history")
+
+    def test_older_commit_needs_an_explicit_downgrade(self):
+        status, error = self.update(self.lock_for(self.commits[0]))
+        self.assert_refused(status, error, "does not include the installed")
+        self.log.unlink()
+        status, error = self.update(self.lock_for(self.commits[0]), "--allow-downgrade")
+        self.assertEqual(status, 0, error)
+        self.assertEqual(self.actions(), ["metadata", "update", "eval", "fake rebuild"])
+
+    def test_downgrade_still_needs_reviewed_history(self):
+        status, error = self.update(self.lock_for(self.unreviewed), "--allow-downgrade")
+        self.assert_refused(status, error, "not in the reviewed history")
+
+    def test_unreachable_history_refuses_the_update(self):
+        status, error = self.update(self.lock_for(self.commits[2]), history=str(self.root / "missing"))
+        self.assert_refused(status, error, "could not fetch the history")
+
+    def test_channel_locked_to_another_repository_is_refused(self):
+        status, error = self.update(self.lock_for(self.commits[2], owner="someone-else"))
+        self.assertEqual(status, 1)
+        self.assertIn("is not locked to a aurora-silicon/nixos-aurora commit", error)
+        self.assertEqual(self.lock.read_bytes(), self.saved)
+
+    def test_unchanged_channel_needs_no_history(self):
+        status, error = self.update(self.lock_for(self.commits[1]), history=str(self.root / "missing"))
+        self.assertEqual(status, 0, error)
+
+    def test_inputs_that_follow_no_channel_are_not_checked(self):
+        self.lock.write_text(json.dumps(self.lock_for(self.commits[1], ref=self.commits[1])))
+        status, error = self.update(self.lock_for(self.unreviewed, ref=self.commits[1]),
+                                    history=str(self.root / "missing"))
+        self.assertEqual(status, 0, error)
+
+    def test_remote_consumer_following_a_channel_is_refused_before_update(self):
+        self.settings.write_text("{}")
+        with mock.patch.object(updater.subprocess, "check_output", return_value=json.dumps({
+                "resolvedUrl": "github:someone/consumer", "locks": self.lock_for(self.commits[1])})), \
+                mock.patch.object(updater.subprocess, "run") as run, \
+                mock.patch.object(updater.os, "geteuid", return_value=0), \
+                contextlib.redirect_stderr(io.StringIO()) as error:
+            status = updater.main(["--flake", "github:someone/consumer#host"], state_dir=self.root / "state",
+                                  current_system=self.current, owner_uid=os.getuid())
+        self.assertEqual(status, 1)
+        self.assertIn("must be local", error.getvalue())
+        run.assert_not_called()
