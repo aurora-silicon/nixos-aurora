@@ -35,9 +35,10 @@ When the Aurora input follows `channel-testing` or `channel-stable`, the
 channel ref is only a pointer. `aurora-update` takes the commit it names only if
 that commit is in the history of nixos-aurora's `main` branch, which changes
 only through reviewed pull requests, and only if it includes the commit
-installed now. It fetches `main`'s commit graph (no files) from GitHub to check.
-If the check fails, or GitHub cannot be reached, it puts the lockfile back
-exactly as it was and changes nothing. To take an announced rollback, pass
+installed now. It fetches `main`'s commit graph (no files) from GitHub to check,
+on every update, also when the channel has not moved. If the check fails, is
+interrupted, or GitHub cannot be reached, it puts the lockfile back exactly as
+it was and changes nothing. To take an announced rollback, pass
 `--allow-downgrade`; the commit must still be on `main`. Inputs that follow
 anything else (a fork, a local path, an exact commit) are not checked.
 

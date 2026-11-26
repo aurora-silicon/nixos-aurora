@@ -106,8 +106,8 @@ def read_lock(path):
         return None
 
 
-def restore_lock(path, saved):
-    """Put back the consumer lock exactly as it was before the update."""
+def restore_lock(path, saved, metadata):
+    """Put back the consumer lock exactly as it was before the update: bytes, mode and owner."""
     if saved is None:
         path.unlink(missing_ok=True)
         return
@@ -117,14 +117,19 @@ def restore_lock(path, saved):
             output.write(saved)
             output.flush()
             os.fsync(output.fileno())
-        os.chmod(temporary, stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644)
+        os.chmod(temporary, stat.S_IMODE(metadata.st_mode))
+        if os.geteuid() == 0:
+            try:
+                os.chown(temporary, metadata.st_uid, metadata.st_gid)
+            except OSError:
+                pass
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
 
 def check_channel(channel, previous, revision, allow_downgrade, git="git", url=HISTORY_URL):
-    """Refuse a channel commit outside reviewed history, or older than the installed one.
+    """Refuse a channel commit outside reviewed history, or older than `previous` (None: no check).
 
     Every commit a channel serves comes from nixos-aurora's main branch, which
     changes only through reviewed pull requests. Only main's commit graph is
@@ -224,9 +229,10 @@ def main(argv=None, *, state_dir=Path("/var/lib/aurora/update"),
         if not isinstance(reference, str) or not reference or "#" in reference:
             raise ValueError("Nix metadata did not provide a canonical flake reference")
         lock = lock_path(reference)
-        saved = None
+        saved = saved_metadata = None
         if lock is not None:
             try:
+                saved_metadata = lock.stat()
                 saved = lock.read_bytes()
             except FileNotFoundError:
                 pass
@@ -234,21 +240,27 @@ def main(argv=None, *, state_dir=Path("/var/lib/aurora/update"),
                                             input_name)
         if following is not None and lock is None:
             raise ValueError(f"the {input_name} input follows {following}, so its consumer flake must be local")
-        subprocess.run([nix, "flake", "update", input_name, "--flake", reference, *flags], check=True)
-        if lock is not None:
-            # The channel ref is only a pointer: accept what it names only from
-            # reviewed history, and never older than what is installed.
-            channel, revision = aurora_input(read_lock(lock), input_name)
-            if channel is not None and revision is None:
-                restore_lock(lock, saved)
-                raise ValueError(f"the {input_name} input follows {channel} but is not locked to a "
-                                 f"{OWNER}/{REPO} commit; the lock was left unchanged")
-            if channel is not None and revision != installed:
-                try:
-                    check_channel(channel, installed, revision, options.allow_downgrade, git, history_url)
-                except ValueError as error:
-                    restore_lock(lock, saved)
-                    raise ValueError(f"{error}; nothing was updated") from error
+        try:
+            subprocess.run([nix, "flake", "update", input_name, "--flake", reference, *flags], check=True)
+            if lock is not None:
+                # The channel ref is only a pointer: build what it names only from
+                # reviewed history, and never older than what was installed. The
+                # history check runs every time, also for a commit already in the
+                # lock, which a hand-run `nix flake update` may have put there.
+                channel, revision = aurora_input(read_lock(lock), input_name)
+                if channel is not None and revision is None:
+                    raise ValueError(f"the {input_name} input follows {channel} but is not locked to a "
+                                     f"{OWNER}/{REPO} commit")
+                if channel is not None:
+                    check_channel(channel, installed if revision != installed else None, revision,
+                                  options.allow_downgrade, git, history_url)
+        except BaseException as error:
+            # Whatever stops the check, including Ctrl-C, leaves the lock as it was.
+            if lock is not None:
+                restore_lock(lock, saved, saved_metadata)
+            if isinstance(error, ValueError):
+                raise ValueError(f"{error}; nothing was updated") from error
+            raise
         target = f"{reference}#nixosConfigurations.{json.dumps(selector, ensure_ascii=False)}.config.system.build.toplevel"
         expected = subprocess.check_output([nix, "eval", "--raw", target, *flags], text=True).strip()
         if not expected.startswith("/"):

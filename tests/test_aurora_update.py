@@ -318,7 +318,7 @@ if pathlib.Path(sys.argv[0]).name == "fake nix":
                        "original": {"type": "github", "owner": "aurora-silicon", "repo": "nixos-aurora",
                                     "ref": ref}}}}
 
-    def update(self, lock, *arguments, history=None):
+    def update(self, lock, *arguments, history=None, git="git"):
         self.settings.write_text(json.dumps({
             "reference": "path:" + urllib.parse.quote(str(self.consumer)), "lock": lock,
             "system": str(self.system)}))
@@ -326,7 +326,7 @@ if pathlib.Path(sys.argv[0]).name == "fake nix":
         with mock.patch.object(updater.os, "geteuid", return_value=0), contextlib.redirect_stderr(error):
             status = updater.main(["--flake", "./consumer#host", *arguments], state_dir=self.root / "state",
                                   current_system=self.current, nix=str(self.nix), rebuild=str(self.rebuild),
-                                  owner_uid=os.getuid(), history_url=history or self.history)
+                                  owner_uid=os.getuid(), git=git, history_url=history or self.history)
         return status, error.getvalue()
 
     def actions(self):
@@ -373,9 +373,46 @@ if pathlib.Path(sys.argv[0]).name == "fake nix":
         self.assertIn("is not locked to a aurora-silicon/nixos-aurora commit", error)
         self.assertEqual(self.lock.read_bytes(), self.saved)
 
-    def test_unchanged_channel_needs_no_history(self):
+    def test_unchanged_channel_is_still_checked_against_history(self):
         status, error = self.update(self.lock_for(self.commits[1]), history=str(self.root / "missing"))
+        self.assert_refused(status, error, "could not fetch the history")
+        self.log.unlink()
+        status, error = self.update(self.lock_for(self.commits[1]))
         self.assertEqual(status, 0, error)
+
+    def test_unreviewed_commit_already_in_the_lock_is_refused(self):
+        # A hand-run `nix flake update` put the channel's commit in the lock first.
+        self.lock.write_text(json.dumps(self.lock_for(self.unreviewed)))
+        self.saved = self.lock.read_bytes()
+        status, error = self.update(self.lock_for(self.unreviewed))
+        self.assert_refused(status, error, "not in the reviewed history")
+
+    def test_interrupted_check_restores_the_lock_and_the_next_run_still_refuses(self):
+        self.settings.write_text("{}")
+        with mock.patch.object(updater, "check_channel", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                self.update(self.lock_for(self.unreviewed))
+        self.assertEqual(self.lock.read_bytes(), self.saved)
+        self.log.unlink()
+        status, error = self.update(self.lock_for(self.unreviewed))
+        self.assert_refused(status, error, "not in the reviewed history")
+
+    def test_missing_git_restores_the_lock_and_the_next_run_still_refuses(self):
+        status, error = self.update(self.lock_for(self.unreviewed), git=str(self.root / "no-git"))
+        self.assertEqual(status, 1)
+        self.assertEqual(self.lock.read_bytes(), self.saved)
+        self.assertEqual(self.actions(), ["metadata", "update"])
+        self.log.unlink()
+        status, error = self.update(self.lock_for(self.unreviewed))
+        self.assert_refused(status, error, "not in the reviewed history")
+
+    def test_restored_lock_keeps_its_owner(self):
+        metadata = self.lock.stat()
+        with mock.patch.object(updater.os, "chown") as chown:
+            status, error = self.update(self.lock_for(self.unreviewed))
+        self.assert_refused(status, error, "not in the reviewed history")
+        chown.assert_called_once()
+        self.assertEqual(chown.call_args.args[1:], (metadata.st_uid, metadata.st_gid))
 
     def test_inputs_that_follow_no_channel_are_not_checked(self):
         self.lock.write_text(json.dumps(self.lock_for(self.commits[1], ref=self.commits[1])))
