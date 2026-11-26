@@ -113,6 +113,7 @@ class PeripheralAdmissionTests(unittest.TestCase):
             "other digest": (f"aurora.vendorfw={other}", 1),
             "no archive trusted": ("aurora.vendorfw=none", 1),
             "malformed digest": ("aurora.vendorfw=sha256:XYZ", 1),
+            "empty value": ("quiet aurora.vendorfw= splash", 1),
             "unsigned boot": ("root=fstab", 0),
         }
         for name, (cmdline, status) in cases.items():

@@ -81,10 +81,10 @@ let
 
         # This Mac's vendor firmware archive stays on the ESP, outside the
         # signature, so the signed command line binds it: the archive's digest,
-        # pinned in keyDir by the first UKI built with it. The initrd uses
-        # only an archive with that digest (firmware/extract-vendor-firmware.sh),
-        # and a later change on the ESP is refused until the pin is removed.
-        # Without an archive or a pin, none is trusted.
+        # or none without one, pinned in keyDir by the first build. The initrd
+        # uses only an archive with that digest (firmware/extract-vendor-firmware.sh),
+        # and an archive that is changed, or appears where none was pinned, is
+        # refused until the pin is removed: the pin alone decides the binding.
         archive=$esp/vendorfw/firmware.cpio
         pin=$keys/vendorfw.sha256
         current=none
@@ -94,15 +94,15 @@ let
         vendorfw=$current
         if [[ -s $pin ]]; then
           vendorfw=$(< "$pin")
-          if [[ ! $vendorfw =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          if [[ ! $vendorfw =~ ^(none|sha256:[0-9a-f]{64})$ ]]; then
             echo "aurora-secboot: $pin holds no vendor firmware digest; boots will refuse the archive" >&2
             vendorfw=none
           elif [[ $current != none && $current != "$vendorfw" ]]; then
             echo "aurora-secboot: the vendor firmware on the ESP is not the one pinned in $pin;" \
               "boots refuse it until that file is removed and the boot loader is installed again" >&2
           fi
-        elif [[ $current != none && -d $keys ]]; then
-          printf '%s\n' "$current" > "$pin"
+        elif [[ -d $keys ]]; then
+          (umask 077; printf '%s\n' "$current" > "$pin")
         fi
         for g in "''${generations[@]}"; do
           out=$linux/$(name "$g")
@@ -173,10 +173,11 @@ in {
         ESP/EFI/Linux/aurora-nixos-<hash>.efi and are signed with the db key in
         keyDir. The keys stay in keyDir and never enter the Nix store. The
         command line also binds this Mac's vendor firmware archive on the ESP
-        (aurora.vendorfw=): its digest is pinned in keyDir/vendorfw.sha256 by
-        the first UKI built with it, and the initrd refuses any other archive.
-        After the installer replaces the archive, remove that file and install
-        the boot loader again (nixos-rebuild boot). GRUB
+        (aurora.vendorfw=): its digest, or none without one, is pinned in
+        keyDir/vendorfw.sha256 by the first UKI built, and the initrd refuses
+        any other archive, also one that appears later. After the installer
+        replaces or adds the archive, remove that file and install the boot
+        loader again (nixos-rebuild boot). GRUB
         stays the boot loader unless securePath is set. Writes
         /etc/aurora/secboot.conf; `aurora-secboot status` reports the chain.
       '';

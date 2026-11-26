@@ -161,18 +161,24 @@ in pkgs.runCommand "aurora-secure-boot-module" { } ''
   check "! grep -q ' enable\| disable' log" "no secure path changes when it is off"
   check "[[ -z \"$(find tmp -mindepth 1)\" ]]" "temporary initrds removed"
 
-  # The vendor firmware binding: none without an archive, then the archive's
-  # digest, pinned in keyDir by the first build; a changed archive keeps the
+  # The vendor firmware binding, pinned in keyDir by the first build, none
+  # included: an archive that appears after none, or a changed one, keeps the
   # pin and the UKIs until the pin is removed.
-  check "grep -q 'loglevel=4 aurora.vendorfw=none' $(uki 5) && [[ ! -e keys/vendorfw.sha256 ]]" \
-    "without an archive the UKIs trust none"
+  check "grep -q 'loglevel=4 aurora.vendorfw=none' $(uki 5) && [[ $(cat keys/vendorfw.sha256) == none ]]" \
+    "without an archive the UKIs trust none, and none is pinned"
   mkdir -p esp/vendorfw
   echo archive-one > esp/vendorfw/firmware.cpio
   one=sha256:$(sha256sum < esp/vendorfw/firmware.cpio | cut -d' ' -f1)
   : > log
+  ${run on} $default 2> warnings
+  check "[[ $(grep -c ' uki build ' log) == 0 && $(cat keys/vendorfw.sha256) == none ]]" \
+    "an archive that appears after none keeps the pin and the UKIs"
+  check "grep -q 'not the one pinned' warnings" "and is reported"
+  rm keys/vendorfw.sha256
+  : > log
   ${run on} $default
   check "[[ $(grep -c ' uki build ' log) == 3 && $(cat keys/vendorfw.sha256) == $one ]]" \
-    "a new archive is pinned and the UKIs rebuilt"
+    "removing the pin pins the archive and rebuilds the UKIs"
   check "grep -q 'aurora.vendorfw=$one' $(uki 5) && grep -q 'aurora.vendorfw=$one' $(uki 3)" \
     "every UKI binds the pinned digest"
   echo archive-two > esp/vendorfw/firmware.cpio

@@ -16,12 +16,14 @@ complete=$destination/.vendorfw-extracted
 # aurora.vendorfw=none when no archive was trusted (modules/secure-boot.nix).
 # The ESP is outside that signature, so an archive that does not match is
 # never used. A boot without the parameter is not signed (GRUB, image boots)
-# and takes the archive as it is.
+# and takes the archive as it is. A parameter with an empty value is a
+# malformed one, not a missing one.
+bound=
 expected=
 words=()
 read -r -a words < "${AURORA_KERNEL_CMDLINE:-/proc/cmdline}" || true
 for word in "${words[@]}"; do
-  case $word in aurora.vendorfw=*) expected=${word#aurora.vendorfw=} ;; esac
+  case $word in aurora.vendorfw=*) bound=1; expected=${word#aurora.vendorfw=} ;; esac
 done
 mkdir -p "$destination"
 if [ ! -s "$destination/vendorfw/.vendorfw.manifest" ] || [ ! -f "$complete" ]; then
@@ -45,7 +47,7 @@ if [ ! -s "$destination/vendorfw/.vendorfw.manifest" ] || [ ! -f "$complete" ]; 
     echo '<4>Aurora: the ESP has no vendor firmware; admitting peripherals without it' >&2
     exit 0
   fi
-  if [ -n "$expected" ]; then
+  if [ -n "$bound" ]; then
     if [[ ! "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]; then
       echo "<3>Aurora: this signed boot trusts no vendor firmware archive (aurora.vendorfw=$expected); not using the one on the ESP" >&2
       exit 1
