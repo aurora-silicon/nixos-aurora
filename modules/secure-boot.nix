@@ -50,7 +50,7 @@ let
   # install-grub.sh passes the configuration it makes the default as $1.
   install = pkgs.writeShellApplication {
     name = "aurora-secboot-install";
-    runtimeInputs = [ pkgs.coreutils pkgs.gnused pkgs.findutils ];
+    runtimeInputs = [ pkgs.coreutils pkgs.gnused pkgs.findutils pkgs.gnugrep ];
     text = ''
       default=''${1:-}
       # The environment overrides are for checks/secure-boot.nix.
@@ -78,12 +78,40 @@ let
         mkdir -p "$linux"
         work=$(mktemp -d -p "$tmp" aurora-secboot.XXXXXX)
         trap 'rm -rf "$work"' EXIT
+
+        # This Mac's vendor firmware archive stays on the ESP, outside the
+        # signature, so the signed command line binds it: the archive's digest,
+        # pinned in keyDir by the first UKI built with it. The initrd uses
+        # only an archive with that digest (firmware/extract-vendor-firmware.sh),
+        # and a later change on the ESP is refused until the pin is removed.
+        # Without an archive or a pin, none is trusted.
+        archive=$esp/vendorfw/firmware.cpio
+        pin=$keys/vendorfw.sha256
+        current=none
+        if [[ -s $archive ]]; then
+          current=sha256:$(sha256sum < "$archive" | cut -d' ' -f1)
+        fi
+        vendorfw=$current
+        if [[ -s $pin ]]; then
+          vendorfw=$(< "$pin")
+          if [[ ! $vendorfw =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "aurora-secboot: $pin holds no vendor firmware digest; boots will refuse the archive" >&2
+            vendorfw=none
+          elif [[ $current != none && $current != "$vendorfw" ]]; then
+            echo "aurora-secboot: the vendor firmware on the ESP is not the one pinned in $pin;" \
+              "boots refuse it until that file is removed and the boot loader is installed again" >&2
+          fi
+        elif [[ $current != none && -d $keys ]]; then
+          printf '%s\n' "$current" > "$pin"
+        fi
         for g in "''${generations[@]}"; do
           out=$linux/$(name "$g")
           [[ -n ''${keep[$out]:-} ]] && continue
           keep[$out]=1
-          # Unchanged and still signed with the current key: nothing to do.
-          if [[ -e $out ]] && { [[ ! -e $keys/db.crt ]] || ${secboot} uki verify "$out" >/dev/null 2>&1; }; then
+          # Unchanged, binding the same vendor firmware and still signed with
+          # the current key: nothing to do.
+          if [[ -e $out ]] && grep -qaF -- "aurora.vendorfw=$vendorfw" "$out" &&
+            { [[ ! -e $keys/db.crt ]] || ${secboot} uki verify "$out" >/dev/null 2>&1; }; then
             continue
           fi
           kver=
@@ -93,7 +121,7 @@ let
           if [[ -x $g/append-initrd-secrets ]]; then
             "$g/append-initrd-secrets" "$work/initrd"
           fi
-          cp "$g/kernel-params" "$work/cmdline"
+          printf '%s aurora.vendorfw=%s' "$(< "$g/kernel-params")" "$vendorfw" > "$work/cmdline"
           # The generation's own os-release: /etc is still the running one's.
           osrel=()
           if [[ -e $g/etc/os-release ]]; then
@@ -143,7 +171,12 @@ in {
         its initrd (boot.initrd.secrets included) and its kernel parameters
         plus init= and lockdown=, minus debug and shell parameters. UKIs go to
         ESP/EFI/Linux/aurora-nixos-<hash>.efi and are signed with the db key in
-        keyDir. The keys stay in keyDir and never enter the Nix store. GRUB
+        keyDir. The keys stay in keyDir and never enter the Nix store. The
+        command line also binds this Mac's vendor firmware archive on the ESP
+        (aurora.vendorfw=): its digest is pinned in keyDir/vendorfw.sha256 by
+        the first UKI built with it, and the initrd refuses any other archive.
+        After the installer replaces the archive, remove that file and install
+        the boot loader again (nixos-rebuild boot). GRUB
         stays the boot loader unless securePath is set. Writes
         /etc/aurora/secboot.conf; `aurora-secboot status` reports the chain.
       '';

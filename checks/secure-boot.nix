@@ -161,6 +161,34 @@ in pkgs.runCommand "aurora-secure-boot-module" { } ''
   check "! grep -q ' enable\| disable' log" "no secure path changes when it is off"
   check "[[ -z \"$(find tmp -mindepth 1)\" ]]" "temporary initrds removed"
 
+  # The vendor firmware binding: none without an archive, then the archive's
+  # digest, pinned in keyDir by the first build; a changed archive keeps the
+  # pin and the UKIs until the pin is removed.
+  check "grep -q 'loglevel=4 aurora.vendorfw=none' $(uki 5) && [[ ! -e keys/vendorfw.sha256 ]]" \
+    "without an archive the UKIs trust none"
+  mkdir -p esp/vendorfw
+  echo archive-one > esp/vendorfw/firmware.cpio
+  one=sha256:$(sha256sum < esp/vendorfw/firmware.cpio | cut -d' ' -f1)
+  : > log
+  ${run on} $default
+  check "[[ $(grep -c ' uki build ' log) == 3 && $(cat keys/vendorfw.sha256) == $one ]]" \
+    "a new archive is pinned and the UKIs rebuilt"
+  check "grep -q 'aurora.vendorfw=$one' $(uki 5) && grep -q 'aurora.vendorfw=$one' $(uki 3)" \
+    "every UKI binds the pinned digest"
+  echo archive-two > esp/vendorfw/firmware.cpio
+  : > log
+  ${run on} $default 2> warnings
+  check "[[ $(grep -c ' uki build ' log) == 0 && $(cat keys/vendorfw.sha256) == $one ]]" \
+    "a changed archive keeps the pin and the UKIs"
+  check "grep -q 'not the one pinned' warnings" "and is reported"
+  rm keys/vendorfw.sha256
+  two=sha256:$(sha256sum < esp/vendorfw/firmware.cpio | cut -d' ' -f1)
+  : > log
+  ${run on} $default
+  check "[[ $(grep -c ' uki build ' log) == 3 && $(cat keys/vendorfw.sha256) == $two ]]" \
+    "removing the pin binds the archive now on the ESP"
+  check "grep -q 'aurora.vendorfw=$two' $(uki 5)" "the rebuilt UKIs bind it"
+
   # Unchanged and verified: no rebuild. Not verified (key changed): rebuilt.
   touch keys/db.crt
   : > log
@@ -211,6 +239,7 @@ in pkgs.runCommand "aurora-secure-boot-module" { } ''
   check "grep -aq 'init=$g/init lockdown=integrity' $realUki && ! grep -aq systemd.debug_shell $realUki && ! grep -aq panic= $realUki" \
     "signed command line: init= and lockdown=integrity, no shell or lab settings"
   check "grep -aq 'Aurora NixOS round trip' $realUki" "the UKI carries the generation's os-release"
+  check "grep -aq 'aurora.vendorfw=none' $realUki" "the signed command line keeps the vendor firmware binding"
   sha256sum $realUki
   env AURORA_SECBOOT_ESP=$r/esp AURORA_SECBOOT_PROFILES=$r/profiles AURORA_SECBOOT_TMP=$r/tmp \
     AURORA_SECBOOT_KEY_DIR= ${run realOff} $r/profiles/system-1-link
