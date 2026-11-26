@@ -46,12 +46,12 @@
   },
   "speakerguardd-v2": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "4136af409161d8aa44e12b6aa2d0502bb5ea2490",
+    "commit": "7a1f538ca7947ce988eeaaf3c095d40d0f560590",
     "version": "1.0.0-alpha.2",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/4136af409161d8aa44e12b6aa2d0502bb5ea2490",
-    "archive_root": "speakerguardd-4136af409161d8aa44e12b6aa2d0502bb5ea2490",
-    "sha256": "270abb58cdc7181322cea41ce9619bcd956f3615df829c8b6a9fd1f720a7178f",
-    "nix_hash": "sha256-Jwq7WM3HGBMizqQc6WGbzZVvNhXfgpyLap/R9yCnF48="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/7a1f538ca7947ce988eeaaf3c095d40d0f560590",
+    "archive_root": "speakerguardd-7a1f538ca7947ce988eeaaf3c095d40d0f560590",
+    "sha256": "f43d9f39653e19df17cd5cc50942ad628cb7e214b479d9d457da90f5323e0113",
+    "nix_hash": "sha256-9D2fOWU+Gd8XzVzFCUKtYoy34hS0ednUV9qQ9TI+ARM="
   },
   "alsa-ucm-conf-aurora": {
     "repository": "https://github.com/aurora-silicon/alsa-ucm-conf-asahi",
@@ -359,12 +359,12 @@
   },
   "aurora-speaker-upgrade": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "4136af409161d8aa44e12b6aa2d0502bb5ea2490",
+    "commit": "7a1f538ca7947ce988eeaaf3c095d40d0f560590",
     "version": "0.1",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/4136af409161d8aa44e12b6aa2d0502bb5ea2490",
-    "archive_root": "speakerguardd-4136af409161d8aa44e12b6aa2d0502bb5ea2490",
-    "sha256": "270abb58cdc7181322cea41ce9619bcd956f3615df829c8b6a9fd1f720a7178f",
-    "nix_hash": "sha256-Jwq7WM3HGBMizqQc6WGbzZVvNhXfgpyLap/R9yCnF48="
+    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/7a1f538ca7947ce988eeaaf3c095d40d0f560590",
+    "archive_root": "speakerguardd-7a1f538ca7947ce988eeaaf3c095d40d0f560590",
+    "sha256": "f43d9f39653e19df17cd5cc50942ad628cb7e214b479d9d457da90f5323e0113",
+    "nix_hash": "sha256-9D2fOWU+Gd8XzVzFCUKtYoy34hS0ednUV9qQ9TI+ARM="
   },
   "aurora-sep-luks": {
     "repository": "https://github.com/aurora-silicon/aurora-sep-userspace",
