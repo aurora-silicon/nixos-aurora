@@ -59,6 +59,7 @@ PROVISION_PATHS = (
 INTERFACE_CTL = "Speaker Protection Interface"
 IF_V2 = "Speaker Protection"
 IF_LEGACY = "Speaker Volume Unlock"
+NO_SUCH_CONTROL = "Cannot find the given element"
 
 
 def say(msg: str) -> None:
@@ -191,8 +192,39 @@ def systemd_running(run_dir: Path = Path("/run/systemd/system")) -> bool:
     return run_dir.is_dir()
 
 
-def run_cmd(cmd: list[str], *, check: bool = False) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, text=True, capture_output=True, check=check)
+def run_cmd(
+    cmd: list[str],
+    *,
+    check: bool = False,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    kwargs: dict[str, object] = {"text": True, "capture_output": True, "check": check}
+    if env is not None:
+        kwargs["env"] = env
+    return subprocess.run(cmd, **kwargs)
+
+
+def parse_enum(text: str) -> str | None:
+    """Extract the active enum item name from `amixer cget` output."""
+    items = dict(re.findall(r"Item #(\d+) '([^']*)'", text))
+    m = re.search(r"(?m)^\s*: values=(\d+)", text)
+    return items.get(m.group(1)) if m else None
+
+
+def _probe_alsa_control(card_num: str, name: str, *, strict: bool = False) -> tuple[bool, str]:
+    """Probe an ALSA control via `amixer cget` (lists INACTIVE controls too)."""
+    res = run_cmd(
+        ["amixer", "-c", card_num, "cget", f"name={name}"],
+        env={**os.environ, "LC_ALL": "C"},
+    )
+    if res.returncode == 0:
+        return True, res.stdout
+    if NO_SUCH_CONTROL in (res.stderr or ""):
+        return False, ""
+    if strict:
+        detail = (res.stderr or res.stdout or f"exit {res.returncode}").strip()
+        raise RuntimeError(f"amixer failed probing {name!r} on card {card_num}: {detail}")
+    return False, ""
 
 
 def unit_state(unit: str) -> dict[str, str]:
@@ -208,23 +240,41 @@ def unit_state(unit: str) -> dict[str, str]:
     return {"enabled": enabled, "active": active}
 
 
-def find_speaker_cards(sys_sound: Path = Path("/sys/class/sound")) -> list[dict[str, str]]:
-    """Inspect ALSA cards for speaker protection controls without board tables."""
-    if not sys_sound.is_dir() or not shutil.which("amixer"):
+def find_speaker_cards(
+    sys_sound: Path = Path("/sys/class/sound"),
+    *,
+    strict: bool = False,
+) -> list[dict[str, str]]:
+    """Inspect ALSA cards for speaker protection controls without board tables.
+
+    Uses `amixer cget` rather than `amixer controls` because macaudio marks
+    "Speaker Protection Interface" and "Speaker Protection" with
+    SNDRV_CTL_ELEM_ACCESS_INACTIVE, which `amixer controls` omits.
+    """
+    if not sys_sound.is_dir():
+        return []
+    card_entries = [
+        (entry, m.group(1))
+        for entry in sorted(sys_sound.glob("card[0-9]*"))
+        if (m := re.fullmatch(r"card(\d+)", entry.name))
+    ]
+    if not card_entries:
+        return []
+    if not shutil.which("amixer"):
+        if strict:
+            raise RuntimeError(
+                "amixer not found; cannot inspect or switch the speaker protection interlock"
+            )
         return []
     cards: list[dict[str, str]] = []
-    for entry in sorted(sys_sound.glob("card[0-9]*")):
-        m = re.fullmatch(r"card(\d+)", entry.name)
-        if not m:
-            continue
-        card_num = m.group(1)
-        res = run_cmd(["amixer", "-c", card_num, "controls"])
-        if res.returncode != 0:
-            continue
-        controls = res.stdout
-        has_if = INTERFACE_CTL in controls
-        has_v2 = f"name='{IF_V2}'" in controls
-        has_legacy = f"name='{IF_LEGACY}'" in controls
+    for entry, card_num in card_entries:
+        has_if, if_out = _probe_alsa_control(card_num, INTERFACE_CTL, strict=strict)
+        has_v2 = False
+        has_legacy = False
+        if not has_if:
+            has_v2, _ = _probe_alsa_control(card_num, IF_V2, strict=strict)
+        if not has_if and not has_v2:
+            has_legacy, _ = _probe_alsa_control(card_num, IF_LEGACY, strict=strict)
         if not (has_if or has_v2 or has_legacy):
             continue
         info: dict[str, str] = {"card": card_num}
@@ -232,12 +282,15 @@ def find_speaker_cards(sys_sound: Path = Path("/sys/class/sound")) -> list[dict[
         if id_file.is_file():
             info["id"] = id_file.read_text(encoding="utf-8", errors="replace").strip()
         if has_if:
-            cget = run_cmd(["amixer", "-c", card_num, "cget", f"name='{INTERFACE_CTL}'"])
             info["interface_control"] = "dual"
-            for line in cget.stdout.splitlines():
-                if ": values=" in line:
-                    info["interface_value"] = line.strip()
-                    break
+            val = parse_enum(if_out)
+            if val is not None:
+                info["interface_value"] = val
+            else:
+                for line in if_out.splitlines():
+                    if ": values=" in line:
+                        info["interface_value"] = line.strip()
+                        break
         elif has_v2:
             info["interface_control"] = "sgv2-only"
         else:
@@ -249,7 +302,7 @@ def find_speaker_cards(sys_sound: Path = Path("/sys/class/sound")) -> list[dict[
 def kernel_supports_stack(target: str, sys_sound: Path = Path("/sys/class/sound")) -> bool:
     """Return False if any detected speaker card cannot support the requested stack."""
     ok = True
-    for card in find_speaker_cards(sys_sound):
+    for card in find_speaker_cards(sys_sound, strict=True):
         mode = card.get("interface_control")
         card_num = card["card"]
         if mode == "sgv2-only" and target == "speakersafetyd":
@@ -275,7 +328,7 @@ def switch_kernel_interlock(target: str, sys_sound: Path = Path("/sys/class/soun
     False if the running kernel does not expose the requested interface or the
     ALSA control write failed.
     """
-    cards = find_speaker_cards(sys_sound)
+    cards = find_speaker_cards(sys_sound, strict=True)
     if not cards:
         return True
     desired = IF_V2 if target == "sgv2" else IF_LEGACY
@@ -285,7 +338,8 @@ def switch_kernel_interlock(target: str, sys_sound: Path = Path("/sys/class/soun
         card_num = card["card"]
         if mode == "dual":
             res = run_cmd(
-                ["amixer", "-c", card_num, "cset", f"name='{INTERFACE_CTL}'", desired]
+                ["amixer", "-c", card_num, "-q", "cset", f"name={INTERFACE_CTL}", desired],
+                env={**os.environ, "LC_ALL": "C"},
             )
             if res.returncode != 0:
                 say(
@@ -373,7 +427,7 @@ def install_speakersafetyd(distro: str) -> None:
         if not dnf:
             raise RuntimeError("dnf not found; install speakersafetyd manually")
         say("installing speakersafetyd from Fedora repositories")
-        res = subprocess.run([dnf, "install", "-y", "--setopt=obsoletes=0", "speakersafetyd"])
+        res = subprocess.run([dnf, "install", "-y", "speakersafetyd"])
         if res.returncode != 0:
             raise RuntimeError(f"{dnf} install speakersafetyd failed (exit {res.returncode})")
     elif distro == "alarm":
@@ -422,6 +476,9 @@ def cmd_interlock_apply(args: argparse.Namespace) -> int:
     if not (explicit and stack == "speakersafetyd"):
         say(f"refusing legacy interlock: {config_path} does not select speakersafetyd")
         return 1
+    if not shutil.which("amixer"):
+        say("error: amixer not found; cannot arm Speaker Protection Interface")
+        return 1
     if not switch_kernel_interlock("speakersafetyd"):
         return 1
     return 0
@@ -432,6 +489,7 @@ def _rollback_speakersafetyd_selection(
     config_path: Path,
     prior_config: bytes | None,
     root: Path | None,
+    helper: str | None = None,
 ) -> None:
     """Restore previous config and v2 units after a failed speakersafetyd switch."""
     remove_speakersafetyd_dropin(root=root)
@@ -445,6 +503,8 @@ def _rollback_speakersafetyd_selection(
     if root is None and systemd_running() and shutil.which("systemctl"):
         run_cmd(["systemctl", "daemon-reload"])
         switch_kernel_interlock("sgv2")
+        if helper:
+            run_cmd([helper, "activate", "--graph-unit", "speakerguardd-v2-graph.service"])
         run_cmd(["systemctl", "restart", "speakerguardd-v2.service"])
 
 
@@ -468,13 +528,18 @@ def cmd_select(args: argparse.Namespace) -> int:
             if not kernel_supports_stack("speakersafetyd"):
                 return 1
         dropin = (root / "etc/nixos/aurora-speaker-stack.nix") if root else NIXOS_DROPIN
+        prior_dropin = dropin.read_bytes() if dropin.is_file() else None
         write_nixos_dropin(stack, dropin)
         say(f'wrote {dropin} (aurora.speakers.stack = "{stack}")')
         if not args.no_switch and root is None:
             if Path("/etc/nixos/configuration.nix").is_file() and shutil.which("nixos-rebuild"):
                 res = subprocess.run(["nixos-rebuild", "switch"])
                 if res.returncode != 0:
-                    say("nixos-rebuild switch failed; check your NixOS configuration")
+                    restore_file(dropin, prior_dropin)
+                    say(
+                        f"nixos-rebuild switch failed; restored previous {dropin} "
+                        "(check your NixOS configuration)"
+                    )
                     return res.returncode
             else:
                 say(
@@ -508,12 +573,17 @@ def cmd_select(args: argparse.Namespace) -> int:
                         config_path=config_path,
                         prior_config=prior_config,
                         root=root,
+                        helper=helper,
                     )
                     return 1
             write_selection(stack, config_path)
             install_speakersafetyd_dropin(root=root)
             unmask_and_preset_units(("speakersafetyd.service",), (), root=root)
             if not args.no_switch and root is None:
+                if helper and systemd_running():
+                    run_cmd(
+                        [helper, "deactivate", "--graph-unit", "speakerguardd-v2-graph.service"]
+                    )
                 if systemd_running() and shutil.which("systemctl"):
                     run_cmd(["systemctl", "daemon-reload"])
                     run_cmd(["systemctl", "enable", "speakersafetyd.service"])
@@ -529,6 +599,7 @@ def cmd_select(args: argparse.Namespace) -> int:
                             config_path=config_path,
                             prior_config=prior_config,
                             root=root,
+                            helper=helper,
                         )
                         return 1
                 if shutil.which("udevadm") and systemd_running():

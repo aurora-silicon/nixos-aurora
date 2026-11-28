@@ -236,21 +236,88 @@ class SpeakerStackTests(unittest.TestCase):
         # Explicit sgv2 -> refuse.
         self.mod.write_selection("sgv2", self.cfg)
         self.assertEqual(self.mod.main(["--config", str(self.cfg), "interlock-apply"]), 1)
-        # Explicit speakersafetyd -> writes Speaker Volume Unlock.
+        # Explicit speakersafetyd -> fails closed when amixer is missing.
         self.mod.write_selection("speakersafetyd", self.cfg)
-        with mock.patch.object(
-            self.mod,
-            "find_speaker_cards",
-            return_value=[{"card": "0", "id": "AppleJ413", "interface_control": "dual"}],
-        ), mock.patch.object(
-            self.mod,
-            "run_cmd",
-            return_value=mock.Mock(returncode=0, stdout="", stderr=""),
-        ) as run_mock:
+        with mock.patch("shutil.which", return_value=None):
+            self.assertEqual(self.mod.main(["--config", str(self.cfg), "interlock-apply"]), 1)
+        # Explicit speakersafetyd -> writes Speaker Volume Unlock via cset name=....
+        with mock.patch("shutil.which", return_value="/usr/bin/amixer"), \
+             mock.patch.object(
+                 self.mod,
+                 "find_speaker_cards",
+                 return_value=[{"card": "0", "id": "AppleJ413", "interface_control": "dual"}],
+             ), mock.patch.object(
+                 self.mod,
+                 "run_cmd",
+                 return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+             ) as run_mock:
             self.assertEqual(self.mod.main(["--config", str(self.cfg), "interlock-apply"]), 0)
-            run_mock.assert_called_once_with(
-                ["amixer", "-c", "0", "cset", "name='Speaker Protection Interface'", "Speaker Volume Unlock"]
+            run_mock.assert_called_once()
+            self.assertEqual(
+                run_mock.call_args.args[0],
+                ["amixer", "-c", "0", "-q", "cset", "name=Speaker Protection Interface", "Speaker Volume Unlock"],
             )
+
+    def test_find_speaker_cards_uses_cget_for_inactive_controls(self):
+        sys_sound = self.root / "sys/class/sound"
+        card0 = sys_sound / "card0"
+        card0.mkdir(parents=True)
+        (card0 / "id").write_text("AppleJ413\n", encoding="utf-8")
+
+        cget_out = (
+            "numid=40,iface=MIXER,name='Speaker Protection Interface'\n"
+            "  ; type=ENUMERATED,access=rw-----I,values=1,items=2\n"
+            "  ; Item #0 'Speaker Volume Unlock'\n"
+            "  ; Item #1 'Speaker Protection'\n"
+            "  : values=1\n"
+        )
+
+        def fake_run(cmd, check=False, env=None):
+            self.assertNotIn("controls", cmd)
+            if cmd == ["amixer", "-c", "0", "cget", "name=Speaker Protection Interface"]:
+                return mock.Mock(returncode=0, stdout=cget_out, stderr="")
+            return mock.Mock(returncode=1, stdout="", stderr="amixer: Cannot find the given element from control hw:0\n")
+
+        with mock.patch("shutil.which", return_value="/usr/bin/amixer"), \
+             mock.patch.object(self.mod, "run_cmd", side_effect=fake_run):
+            cards = self.mod.find_speaker_cards(sys_sound, strict=True)
+        self.assertEqual(
+            cards,
+            [{"card": "0", "id": "AppleJ413", "interface_control": "dual", "interface_value": "Speaker Protection"}],
+        )
+
+    def test_select_speakersafetyd_deactivates_v2_graph(self):
+        calls = []
+
+        def fake_run(cmd, check=False, env=None):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("os.geteuid", return_value=0), \
+             mock.patch.object(
+                 self.mod,
+                 "find_speaker_cards",
+                 return_value=[{"card": "0", "id": "AppleJ413", "interface_control": "dual"}],
+             ), \
+             mock.patch.object(self.mod, "install_speakersafetyd"), \
+             mock.patch.object(self.mod, "find_provision_helper", return_value="/usr/libexec/speakerguardd-v2/speakerguardd-provision"), \
+             mock.patch.object(self.mod, "switch_kernel_interlock", return_value=True), \
+             mock.patch.object(self.mod, "systemd_running", return_value=True), \
+             mock.patch("shutil.which", return_value="/usr/bin/systemctl"), \
+             mock.patch.object(self.mod, "run_cmd", side_effect=fake_run), \
+             mock.patch.object(self.mod, "mask_units"), \
+             mock.patch.object(self.mod, "unmask_and_preset_units"), \
+             mock.patch.object(self.mod, "install_speakersafetyd_dropin"):
+            rc = self.mod.main([
+                "--config", str(self.cfg),
+                "--distro", "fedora",
+                "select", "speakersafetyd",
+            ])
+        self.assertEqual(rc, 0)
+        self.assertIn(
+            ["/usr/libexec/speakerguardd-v2/speakerguardd-provision", "deactivate", "--graph-unit", "speakerguardd-v2-graph.service"],
+            calls,
+        )
 
     def test_nixos_select_writes_only_declarative_dropin_not_etc_conf(self):
         rc = self.mod.main([
@@ -264,6 +331,33 @@ class SpeakerStackTests(unittest.TestCase):
         self.assertIn('aurora.speakers.stack = "speakersafetyd";', dropin.read_text())
         # NixOS owns /etc/aurora/speaker-stack.conf via environment.etc.
         self.assertFalse(self.cfg.exists())
+
+    def test_nixos_select_rolls_back_dropin_on_rebuild_failure(self):
+        dropin = self.root / "etc/nixos/aurora-speaker-stack.nix"
+        dropin.parent.mkdir(parents=True, exist_ok=True)
+        prior = '{ ... }: {\n  aurora.speakers.stack = "sgv2";\n}\n'
+        dropin.write_text(prior, encoding="utf-8")
+
+        orig_is_file = Path.is_file
+
+        def fake_is_file(path_obj):
+            if str(path_obj) == "/etc/nixos/configuration.nix":
+                return True
+            return orig_is_file(path_obj)
+
+        with mock.patch("os.geteuid", return_value=0), \
+             mock.patch.object(self.mod, "NIXOS_DROPIN", dropin), \
+             mock.patch.object(self.mod, "kernel_supports_stack", return_value=True), \
+             mock.patch.object(Path, "is_file", fake_is_file), \
+             mock.patch("shutil.which", return_value="/run/current-system/sw/bin/nixos-rebuild"), \
+             mock.patch("subprocess.run", return_value=mock.Mock(returncode=1)):
+            rc = self.mod.main([
+                "--config", str(self.cfg),
+                "--distro", "nixos",
+                "select", "speakersafetyd",
+            ])
+        self.assertEqual(rc, 1)
+        self.assertEqual(dropin.read_text(encoding="utf-8"), prior)
 
     def test_status_json_output(self):
         self.mod.write_selection("speakersafetyd", self.cfg)
