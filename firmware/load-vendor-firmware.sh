@@ -15,13 +15,15 @@ fi
 export AURORA_FIRMWARE_ROOT="$destination/vendorfw"
 export AURORA_ADMIT_BLUETOOTH=0
 export AURORA_RUNTIME_FIRMWARE_READY=0
+# The kernel searches firmware_class.path first, then /lib/firmware. Point it
+# at the per-device tree before admission loads any driver: in the initrd for
+# the keyboard, and again on the real root, where NixOS activation has
+# replaced it with the Nix store firmware tree. No kernel parameter is needed.
+parameter=${AURORA_FIRMWARE_PARAMETER:-/sys/module/firmware_class/parameters/path}
 if [[ "${1:-initrd}" == runtime ]]; then
-  # Activation replaces the initrd's firmware_class.path with the Nix
-  # store firmware tree. Restore the per-device path while retaining the
-  # store tree through the kernel's standard /lib/firmware fallback.
+  # Keep the store tree reachable through the kernel's /lib/firmware fallback.
   fallback=${AURORA_FIRMWARE_FALLBACK:-/lib/firmware}
   system_firmware=${AURORA_SYSTEM_FIRMWARE:-/run/current-system/firmware}
-  parameter=${AURORA_FIRMWARE_PARAMETER:-/sys/module/firmware_class/parameters/path}
   if [[ ! -e "$fallback" && ! -L "$fallback" ]]; then
     ln -s "$system_firmware" "$fallback"
   fi
@@ -31,6 +33,8 @@ if [[ "${1:-initrd}" == runtime ]]; then
   if [[ "$status" = 0 ]]; then
     export AURORA_RUNTIME_FIRMWARE_READY=1
   fi
+elif [[ -e "$parameter" ]]; then
+  printf '%s' "$destination/vendorfw" > "$parameter"
 fi
 aurora-peripheral-admission
 exit "$status"

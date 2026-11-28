@@ -6,7 +6,8 @@ in {
   # The distributable image cannot embed another Mac's calibration in /nix/store.
   # Replace build-time extraction with an initrd/runtime ESP handoff.
   hardware.asahi.extractPeripheralFirmware = lib.mkDefault false;
-  boot.kernelParams = [ "firmware_class.path=/run/aurora-firmware/vendorfw" ];
+  # aurora-load-vendor-firmware points firmware_class.path at the per-device
+  # tree in the initrd and again on the real root; no kernel parameter.
   # udev activation resets firmware_class.path on every switch, including
   # switches that leave our active oneshot unit unchanged. Restore the path
   # after that activation without rerunning extraction or peripheral probes.

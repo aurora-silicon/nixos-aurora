@@ -171,7 +171,8 @@ class PeripheralAdmissionTests(unittest.TestCase):
             self.assertIn(b"the installed system will retry", result.stderr)
             self.assertEqual(calls, ["extract", f"admit:0:{root}/destination/vendorfw",
                                      "module:dockchannel-hid", "module:aop"])
-            self.assertEqual((root / "parameter").read_text(), "old-search-path")
+            # The initrd sets the search path itself: there is no kernel parameter.
+            self.assertEqual((root / "parameter").read_text(), f"{root}/destination/vendorfw")
             self.assertFalse((root / "fallback").exists())
 
     def test_runtime_reports_extraction_failure_after_admitting_keyboard(self):
