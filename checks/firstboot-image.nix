@@ -44,7 +44,9 @@ let
       && patchedWith "0002-drm-Reset-inherited-HDR-connector-state-before-SDR.patch" c.boot.plymouth.package
       && patchedWith "0003-drm-Flush-only-the-damaged-areas.patch" c.boot.plymouth.package
       && c.boot.plymouth.package.doCheck) [ kde gnome minimal ];
-    "minimal images boot without a splash" = !minimal.boot.plymouth.enable;
+    "minimal images boot without a splash" = !minimal.boot.plymouth.enable
+      && !(minimal.boot.initrd.systemd.services ? plymouth-start)
+      && !(minimal.systemd.services ? plymouth-start);
     "the initrd asks for no TPM drivers, which the shared kernel lacks" = lib.all (c:
       !(lib.elem "tpm-tis" c.boot.initrd.availableKernelModules)
       && !(lib.elem "tpm-crb" c.boot.initrd.availableKernelModules)) [ kde gnome minimal ];
