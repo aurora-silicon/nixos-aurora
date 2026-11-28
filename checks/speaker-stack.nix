@@ -40,7 +40,7 @@ in assert lib.assertMsg (on.aurora.speakers.stack == "sgv2"
    pkgs.runCommand "aurora-speaker-stack-check" { } ''
      p=${pkgs.aurora-speaker-stack}
      test -x $p/bin/aurora-speaker-stack
-     test -f $p/share/man/man8/aurora-speaker-stack.8
+     test -f $p/share/man/man8/aurora-speaker-stack.8.gz
      test -f $p/share/doc/aurora-audio/README.md
      $p/bin/aurora-speaker-stack --help >/dev/null
      touch $out
