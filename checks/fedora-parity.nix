@@ -41,6 +41,12 @@ let
         "early display audio carries the sequencer" = lib.elem "snd-seq" config.boot.initrd.availableKernelModules;
         "the Type-C port controllers find their USB4 router in the initrd" =
           lib.all (m: lib.elem m config.boot.initrd.availableKernelModules) [ "tps6598x" "thunderbolt_apple" ];
+        "bolt authorizes USB4 and Thunderbolt PCIe tunnels on every profile, with Plasma's Thunderbolt settings on KDE, as on Fedora and ALARM" =
+          config.services.hardware.bolt.enable
+          && lib.elem config.services.hardware.bolt.package config.services.udev.packages
+          && lib.elem config.services.hardware.bolt.package config.systemd.packages
+          && (config.aurora.desktop != "kde"
+            || lib.elem value.pkgs.kdePackages.plasma-thunderbolt config.environment.systemPackages);
         "the display chain and its PMP come up before the root is unlocked" =
           lib.all (m: lib.elem m config.boot.initrd.availableKernelModules)
             [ "apple-pmp" "mux-apple-display-crossbar" "appledrm" ];

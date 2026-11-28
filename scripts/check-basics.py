@@ -13,6 +13,9 @@ filesystems the installer writes):
              every module, font, file and filesystem UUID its
              configurations name is in the image
   network    NetworkManager is enabled; desktops ship its settings UI
+  usb4       bolt authorizes USB4 and Thunderbolt devices: boltctl, an
+             unmasked bolt.service and the udev rule that starts it; KDE
+             ships its Thunderbolt settings (GNOME Settings has them)
   lid        logind still suspends on lid close; sleep is not masked
   touchid    sudo, polkit and the lock screen offer a fingerprint, the login
              screen, the console login, su and ssh ask for the password;
@@ -204,6 +207,46 @@ def check_network(root, profile):
             root.path(f'{root.usr}/share/applications/kcm_networkmanagement.desktop').is_file()
             or root.path(f'{root.usr}/share/plasma/plasmoids/org.kde.plasma.networkmanagement').is_dir()):
         return "Plasma's network settings (plasma-nm) are missing"
+    return None
+
+
+def bolt_udev_rule(text):
+    """Whether a udev rules file starts bolt.service for Thunderbolt devices."""
+    for line in text.replace('\\\n', ' ').splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if (re.search(r'(?:^|[\s,])SUBSYSTEM\s*==\s*"thunderbolt"', line)
+                and re.search(r'(?:^|[\s,])ENV\{SYSTEMD_WANTS\}\s*\+?=\s*"(?:[^"]*\s)?bolt\.service(?:\s[^"]*)?"', line)):
+            return True
+    return False
+
+
+def check_usb4(root, profile):
+    # A USB4 or Thunderbolt domain at security level "user" builds a PCIe
+    # tunnel only once userspace authorizes the device; bolt does that. Its
+    # udev rule starts boltd at the first Thunderbolt device. udev reads a
+    # rule in /etc over the one of the same name in /usr/lib.
+    if not root.path(f'{root.usr}/bin/boltctl').is_file():
+        return 'bolt is missing: nothing authorizes USB4 and Thunderbolt devices'
+    units = (f'{root.usr}/lib/systemd/system', f'{root.etc}/systemd/system')
+    unit = root.path(units[1]) / 'bolt.service'
+    if unit.is_symlink() and os.readlink(unit) == '/dev/null':
+        return 'bolt.service is masked'
+    if not any(root.path(f'{directory}/bolt.service').is_file() for directory in units):
+        return 'bolt.service is missing'
+    rules = {}
+    for directory in (f'{root.usr}/lib/udev/rules.d', f'{root.etc}/udev/rules.d'):
+        if root.path(directory).is_dir():
+            for entry in root.path(directory).iterdir():
+                if entry.name.endswith('.rules'):
+                    rules[entry.name] = root.path(f'{directory}/{entry.name}')
+    if not any(path.is_file() and bolt_udev_rule(path.read_text(errors='replace'))
+               for path in rules.values()):
+        return 'no udev rule starts bolt.service for Thunderbolt devices'
+    # plasma-thunderbolt: the new-device notification and the System Settings page.
+    if profile == 'kde' and not root.path(f'{root.usr}/share/knotifications6/kded_bolt.notifyrc').is_file():
+        return "Plasma's Thunderbolt settings (plasma-thunderbolt) are missing"
     return None
 
 
@@ -999,6 +1042,7 @@ def main():
             checks.append(('wallpaper', check_wallpaper(root, args.profile)))
             checks.append(('logos', check_logos(root)))
         checks.append(('network', check_network(root, args.profile)))
+        checks.append(('usb4', check_usb4(root, args.profile)))
         checks.append(('lid', check_lid(root)))
         checks.append(('touchid', check_touchid(root, args.profile)))
         checks.append(('greeter', check_greeter(root, args.profile)))

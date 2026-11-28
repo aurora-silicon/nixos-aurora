@@ -104,6 +104,13 @@
     services.displayManager.plasma-login-manager.enable = config.aurora.desktop == "kde";
     services.desktopManager.gnome.enable = config.aurora.desktop == "gnome";
     services.displayManager.gdm.enable = config.aurora.desktop == "gnome";
+    # USB4 and Thunderbolt devices get their PCIe tunnel only once userspace
+    # authorizes them (the kernel's domain is at security level "user"), as on
+    # Fedora and ALARM. boltd starts at the first Thunderbolt device and enrolls
+    # a new one itself only where the domain reports IOMMU DMA protection
+    # (bolt's iommu policy). GNOME turned it on already; Plasma adds its
+    # Thunderbolt settings (plasma-thunderbolt) when it is on.
+    services.hardware.bolt.enable = lib.mkDefault true;
     # The Mission Control key (F3 on every Apple silicon laptop keyboard and the
     # Magic Keyboards: KEY_SCALE, keysym XF86LaunchA) shows every open window
     # on macOS. GNOME binds nothing to it; give it the Activities overview, as
