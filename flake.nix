@@ -44,7 +44,7 @@
           plymouth docker libfprint fprintd omarchy-ane-tools mil-hwx-compiler upower
           fex steam mesa speakerguardd mutter speakersafetyd aurora-bless
           plymouth-theme-aurora omdrop-awdl speakerguardd-v2 iio-sensor-proxy
-          gnome-settings-daemon;
+          gnome-settings-daemon gnome-control-center;
         logos = pkgs.aurora-logos;
         firstboot = pkgs.aurora-firstboot;
         power-budget = pkgs.aurora-power-budget;

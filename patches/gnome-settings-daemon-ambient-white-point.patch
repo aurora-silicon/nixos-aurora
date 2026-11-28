@@ -20,7 +20,7 @@ index 286ea80..01d03c5 100644
        <description>This is the number of days after which the printer color profile is considered invalid.</description>
      </key>
 +    <key name="ambient-white-point-enabled" type="b">
-+      <default>false</default>
++      <default>true</default>
 +      <summary>Adapt the display white point to the ambient light</summary>
 +      <description>Use the ambient light sensor's colour temperature, where the computer has one, to make the displays slightly warmer in warm light, similar to how paper looks under different lights. Night Light takes priority. Requires a light sensor that reports colour and a compositor that supports Night Light.</description>
 +    </key>
@@ -172,10 +172,10 @@ index 0000000..03f9ff7
 +}
 diff --git a/plugins/color/ambient-service-test.c b/plugins/color/ambient-service-test.c
 new file mode 100644
-index 0000000..5f32a5f
+index 0000000..b88015f
 --- /dev/null
 +++ b/plugins/color/ambient-service-test.c
-@@ -0,0 +1,300 @@
+@@ -0,0 +1,377 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + *
 + * Runs the ambient white point object against fake iio-sensor-proxy and
@@ -183,6 +183,7 @@ index 0000000..5f32a5f
 + */
 +#include <math.h>
 +#include <gio/gio.h>
++#include <glib/gstdio.h>
 +#include "gsd-ambient-white-point.h"
 +
 +static const char sensor_xml[] =
@@ -208,6 +209,7 @@ index 0000000..5f32a5f
 +        const char *unit;
 +        double lux, kelvin;
 +        int claims;
++        char *iio_dir;
 +        GSettings *settings;
 +        GsdAmbientWhitePoint *ambient;
 +} Fixture;
@@ -265,6 +267,21 @@ index 0000000..5f32a5f
 +        emit_changed (f, "/net/hadess/SensorProxy", "net.hadess.SensorProxy", "ColorTemperature", g_variant_new_double (kelvin));
 +}
 +
++/* Adds or removes the fake light sensor's colour channel in the fake sysfs,
++ * and reports the sensor again, as iio-sensor-proxy does when one appears. */
++static void
++set_colour_channel (Fixture *f, gboolean present)
++{
++        g_autofree char *path = g_build_filename (f->iio_dir, "iio:device0", "in_colortemp_input", NULL);
++
++        if (present)
++                g_assert_true (g_file_set_contents (path, "3000\n", -1, NULL));
++        else
++                g_assert_cmpint (g_unlink (path), ==, 0);
++        emit_changed (f, "/net/hadess/SensorProxy", "net.hadess.SensorProxy", "HasAmbientLight",
++                      g_variant_new_boolean (f->has_light));
++}
++
 +static void
 +set_supported (Fixture *f, gboolean supported)
 +{
@@ -308,6 +325,18 @@ index 0000000..5f32a5f
 +static void
 +setup (Fixture *f, gconstpointer data)
 +{
++        g_autofree char *device = NULL, *illuminance = NULL, *colour = NULL;
++
++        /* A light sensor with a colour channel. */
++        f->iio_dir = g_dir_make_tmp ("ambient-service-test-XXXXXX", NULL);
++        g_assert_nonnull (f->iio_dir);
++        device = g_build_filename (f->iio_dir, "iio:device0", NULL);
++        illuminance = g_build_filename (device, "in_illuminance_input", NULL);
++        colour = g_build_filename (device, "in_colortemp_input", NULL);
++        g_assert_cmpint (g_mkdir (device, 0700), ==, 0);
++        g_assert_true (g_file_set_contents (illuminance, "300\n", -1, NULL));
++        g_assert_true (g_file_set_contents (colour, "3000\n", -1, NULL));
++
 +        f->bus = g_test_dbus_new (G_TEST_DBUS_NONE);
 +        g_test_dbus_up (f->bus);
 +        g_setenv ("DBUS_SYSTEM_BUS_ADDRESS", g_test_dbus_get_bus_address (f->bus), TRUE);
@@ -333,12 +362,22 @@ index 0000000..5f32a5f
 +        g_settings_set_boolean (f->settings, "ambient-white-point-enabled", FALSE);
 +        f->ambient = gsd_ambient_white_point_new ();
 +        gsd_ambient_white_point_set_tick_interval (f->ambient, 2);
++        gsd_ambient_white_point_set_iio_devices_dir (f->ambient, f->iio_dir);
 +        gsd_ambient_white_point_start (f->ambient);
 +}
 +
 +static void
 +teardown (Fixture *f, gconstpointer data)
 +{
++        g_autofree char *device = g_build_filename (f->iio_dir, "iio:device0", NULL);
++        g_autofree char *illuminance = g_build_filename (device, "in_illuminance_input", NULL);
++        g_autofree char *colour = g_build_filename (device, "in_colortemp_input", NULL);
++
++        g_unlink (colour);
++        g_unlink (illuminance);
++        g_rmdir (device);
++        g_rmdir (f->iio_dir);
++        g_clear_pointer (&f->iio_dir, g_free);
 +        gsd_ambient_white_point_stop (f->ambient);
 +        g_clear_object (&f->ambient);
 +        g_clear_object (&f->settings);
@@ -359,14 +398,26 @@ index 0000000..5f32a5f
 +                g_main_context_iteration (NULL, FALSE);
 +}
 +
-+/* Off by default: no claim, neutral. */
++/* Off: no claim, neutral. The switch can still be offered. */
 +static void
-+test_default_off (Fixture *f, gconstpointer data)
++test_off (Fixture *f, gconstpointer data)
 +{
 +        spin (300);
 +        g_assert_cmpint (f->claims, ==, 0);
 +        g_assert_cmpuint (gsd_ambient_white_point_get_temperature (f->ambient), ==, 6500);
 +        g_assert_false (gsd_ambient_white_point_get_active (f->ambient));
++        g_assert_true (gsd_ambient_white_point_get_available (f->ambient));
++}
++
++/* The schema default is on: a colour sensor is claimed and followed with
++ * nothing set. */
++static void
++test_default_on (Fixture *f, gconstpointer data)
++{
++        g_settings_reset (f->settings, "ambient-white-point-enabled");
++        g_assert_true (g_settings_get_boolean (f->settings, "ambient-white-point-enabled"));
++        WAIT_FOR (f->claims == 1);
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 5000);
 +}
 +
 +/* Enabled in warm light: claims the sensor, ramps slowly to the warm limit,
@@ -425,17 +476,41 @@ index 0000000..5f32a5f
 +        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 5000);
 +}
 +
-+/* A sensor without colour, or a light level that is not in lux, does
-+ * nothing. */
++/* A light sensor without a colour channel is never claimed, enabled or
++ * not. One that gains the channel later is picked up, and dropped again
++ * when the channel goes. */
 +static void
-+test_no_colour (Fixture *f, gconstpointer data)
++test_no_colour_channel (Fixture *f, gconstpointer data)
++{
++        set_colour_channel (f, FALSE);
++        g_settings_set_boolean (f->settings, "ambient-white-point-enabled", TRUE);
++        spin (300);
++        g_assert_cmpint (f->claims, ==, 0);
++        g_assert_cmpuint (gsd_ambient_white_point_get_temperature (f->ambient), ==, 6500);
++        g_assert_false (gsd_ambient_white_point_get_available (f->ambient));
++        g_assert_false (gsd_ambient_white_point_get_active (f->ambient));
++
++        set_colour_channel (f, TRUE);
++        WAIT_FOR (f->claims == 1);
++        g_assert_true (gsd_ambient_white_point_get_available (f->ambient));
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 5000);
++
++        set_colour_channel (f, FALSE);
++        WAIT_FOR (gsd_ambient_white_point_get_temperature (f->ambient) == 6500);
++        WAIT_FOR (f->claims == 0);
++        g_assert_false (gsd_ambient_white_point_get_available (f->ambient));
++}
++
++/* A colour channel that reads nothing, or a light level that is not in lux,
++ * does nothing. */
++static void
++test_no_reading (Fixture *f, gconstpointer data)
 +{
 +        f->kelvin = 0;
 +        g_settings_set_boolean (f->settings, "ambient-white-point-enabled", TRUE);
 +        WAIT_FOR (f->claims == 1);
 +        spin (300);
 +        g_assert_cmpuint (gsd_ambient_white_point_get_temperature (f->ambient), ==, 6500);
-+        g_assert_false (gsd_ambient_white_point_get_available (f->ambient));
 +
 +        f->unit = "vendor";
 +        emit_changed (f, "/net/hadess/SensorProxy", "net.hadess.SensorProxy", "LightLevelUnit",
@@ -469,10 +544,12 @@ index 0000000..5f32a5f
 +{
 +        g_setenv ("GSETTINGS_BACKEND", "memory", TRUE);
 +        g_test_init (&argc, &argv, NULL);
-+        g_test_add ("/color/ambient-service/default-off", Fixture, NULL, setup, test_default_off, teardown);
++        g_test_add ("/color/ambient-service/off", Fixture, NULL, setup, test_off, teardown);
++        g_test_add ("/color/ambient-service/default-on", Fixture, NULL, setup, test_default_on, teardown);
 +        g_test_add ("/color/ambient-service/follow-and-release", Fixture, NULL, setup, test_follow_and_release, teardown);
 +        g_test_add ("/color/ambient-service/back-off", Fixture, NULL, setup, test_back_off, teardown);
-+        g_test_add ("/color/ambient-service/no-colour", Fixture, NULL, setup, test_no_colour, teardown);
++        g_test_add ("/color/ambient-service/no-colour-channel", Fixture, NULL, setup, test_no_colour_channel, teardown);
++        g_test_add ("/color/ambient-service/no-reading", Fixture, NULL, setup, test_no_reading, teardown);
 +        g_test_add ("/color/ambient-service/pause", Fixture, NULL, setup, test_pause, teardown);
 +        return g_test_run ();
 +}
@@ -932,13 +1009,13 @@ index 0000000..f09f8cf
 +}
 diff --git a/plugins/color/gsd-ambient-white-point.c b/plugins/color/gsd-ambient-white-point.c
 new file mode 100644
-index 0000000..abee986
+index 0000000..4801143
 --- /dev/null
 +++ b/plugins/color/gsd-ambient-white-point.c
-@@ -0,0 +1,422 @@
+@@ -0,0 +1,454 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + *
-+ * Opt-in ambient white point. The ambient light's colour temperature and
++ * Ambient white point. The ambient light's colour temperature and
 + * illuminance come from iio-sensor-proxy (the same light claim gsd-power
 + * uses for automatic brightness), the policy picks a display white point,
 + * and the colour manager publishes it through the existing Temperature
@@ -952,6 +1029,7 @@ index 0000000..abee986
 +#define SENSOR_PROXY_PATH  "/net/hadess/SensorProxy"
 +#define DISPLAY_CONFIG_NAME "org.gnome.Mutter.DisplayConfig"
 +#define DISPLAY_CONFIG_PATH "/org/gnome/Mutter/DisplayConfig"
++#define IIO_DEVICES_DIR     "/sys/bus/iio/devices"
 +
 +struct _GsdAmbientWhitePoint {
 +        GObject parent;
@@ -962,6 +1040,8 @@ index 0000000..abee986
 +        GDBusProxy *sensor;
 +        GCancellable *sensor_cancellable;
 +        gboolean claimed;
++        char *iio_dir;
++        gboolean colour;
 +
 +        guint display_watch;
 +        GDBusProxy *display;
@@ -1023,11 +1103,32 @@ index 0000000..abee986
 +               get_double (self->sensor, "ColorTemperature", kelvin) && *kelvin > 0;
 +}
 +
++/* iio-sensor-proxy only reads the colour temperature while the light is
++ * claimed, so whether the sensor reports colour at all comes from the
++ * kernel: the IIO channel in_colortemp_input, which is what iio-sensor-proxy
++ * reads. A light sensor without it is never claimed. */
++static gboolean
++colour_channel_present (const char *iio_dir)
++{
++        g_autoptr(GDir) dir = g_dir_open (iio_dir, 0, NULL);
++        const char *name;
++
++        if (!dir)
++                return FALSE;
++        while ((name = g_dir_read_name (dir)) != NULL) {
++                g_autofree char *path = g_build_filename (iio_dir, name, "in_colortemp_input", NULL);
++
++                if (g_file_test (path, G_FILE_TEST_EXISTS))
++                        return TRUE;
++        }
++        return FALSE;
++}
++
 +static gboolean
 +wanted (GsdAmbientWhitePoint *self)
 +{
 +        return self->running && enabled (self) && !self->paused && self->supported &&
-+               self->sensor && get_boolean (self->sensor, "HasAmbientLight");
++               self->colour;
 +}
 +
 +static void
@@ -1086,6 +1187,9 @@ index 0000000..abee986
 +static void
 +update (GsdAmbientWhitePoint *self)
 +{
++        /* Every change in the sensor's availability comes through here. */
++        self->colour = get_boolean (self->sensor, "HasAmbientLight") &&
++                       colour_channel_present (self->iio_dir);
 +        if (wanted (self))
 +                claim (self, TRUE);
 +        if (self->timer == 0 && (wanted (self) || !gsd_ambient_policy_is_neutral (&self->policy))) {
@@ -1255,6 +1359,7 @@ index 0000000..abee986
 +        if (self->sensor)
 +                g_signal_handlers_disconnect_by_data (self->sensor, self);
 +        g_clear_object (&self->sensor);
++        self->colour = FALSE;
 +        if (self->display)
 +                g_signal_handlers_disconnect_by_data (self->display, self);
 +        g_clear_object (&self->display);
@@ -1285,12 +1390,7 @@ index 0000000..abee986
 +gboolean
 +gsd_ambient_white_point_get_available (GsdAmbientWhitePoint *self)
 +{
-+        double kelvin;
-+
-+        /* The colour temperature is only known while the light is claimed,
-+         * so availability is reported once a reading has arrived. */
-+        return self->running && self->supported && get_boolean (self->sensor, "HasAmbientLight") &&
-+               get_double (self->sensor, "ColorTemperature", &kelvin) && kelvin > 0;
++        return self->running && self->supported && self->colour;
 +}
 +
 +gboolean
@@ -1324,6 +1424,7 @@ index 0000000..abee986
 +
 +        gsd_ambient_white_point_stop (self);
 +        g_clear_object (&self->settings);
++        g_clear_pointer (&self->iio_dir, g_free);
 +        G_OBJECT_CLASS (gsd_ambient_white_point_parent_class)->dispose (object);
 +}
 +
@@ -1341,6 +1442,7 @@ index 0000000..abee986
 +        gsd_ambient_policy_init (&self->policy, &gsd_ambient_model_default);
 +        self->tick_ms = (guint) (GSD_AMBIENT_TICK_S * 1000);
 +        self->step_ms = (guint) (GSD_AMBIENT_STEP_S * 1000);
++        self->iio_dir = g_strdup (IIO_DEVICES_DIR);
 +        self->settings = g_settings_new ("org.gnome.settings-daemon.plugins.color");
 +        g_signal_connect (self->settings, "changed::ambient-white-point-enabled",
 +                          G_CALLBACK (setting_changed), self);
@@ -1353,6 +1455,13 @@ index 0000000..abee986
 +        self->step_ms = MAX (1, ms / 10);
 +}
 +
++void
++gsd_ambient_white_point_set_iio_devices_dir (GsdAmbientWhitePoint *self, const char *dir)
++{
++        g_free (self->iio_dir);
++        self->iio_dir = g_strdup (dir);
++}
++
 +GsdAmbientWhitePoint *
 +gsd_ambient_white_point_new (void)
 +{
@@ -1360,10 +1469,10 @@ index 0000000..abee986
 +}
 diff --git a/plugins/color/gsd-ambient-white-point.h b/plugins/color/gsd-ambient-white-point.h
 new file mode 100644
-index 0000000..9e97260
+index 0000000..93b93e8
 --- /dev/null
 +++ b/plugins/color/gsd-ambient-white-point.h
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,27 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#pragma once
 +#include <gio/gio.h>
@@ -1374,13 +1483,16 @@ index 0000000..9e97260
 +GsdAmbientWhitePoint *gsd_ambient_white_point_new (void);
 +/* Tests only: run the policy ticks faster than real time. */
 +void gsd_ambient_white_point_set_tick_interval (GsdAmbientWhitePoint *self, guint ms);
++/* Tests only: where to look for IIO devices instead of /sys/bus/iio/devices. */
++void gsd_ambient_white_point_set_iio_devices_dir (GsdAmbientWhitePoint *self, const char *dir);
 +void gsd_ambient_white_point_start (GsdAmbientWhitePoint *self);
 +void gsd_ambient_white_point_stop (GsdAmbientWhitePoint *self);
 +/* A temperature set directly over D-Bus takes precedence until the setting
 + * is toggled. Neither persistent setting is rewritten. */
 +void gsd_ambient_white_point_pause (GsdAmbientWhitePoint *self);
 +gboolean gsd_ambient_white_point_get_paused (GsdAmbientWhitePoint *self);
-+/* An ambient colour sensor and compositor support are both present. */
++/* A light sensor with a colour channel and compositor support are both
++ * present. */
 +gboolean gsd_ambient_white_point_get_available (GsdAmbientWhitePoint *self);
 +/* Enabled and currently away from neutral, or moving. */
 +gboolean gsd_ambient_white_point_get_active (GsdAmbientWhitePoint *self);
@@ -1541,7 +1653,7 @@ index aae10e4..8c022de 100644
          manager->calibrate = gsd_color_calibrate_new (manager);
          manager->state = gsd_color_state_new ();
  
-+        /* ambient white point, off unless enabled */
++        /* ambient white point, while enabled */
 +        manager->ambient = gsd_ambient_white_point_new ();
 +        manager->ambient_temperature = GSD_COLOR_TEMPERATURE_DEFAULT;
 +        g_signal_connect (manager->ambient, "changed",

@@ -1,0 +1,121 @@
+diff -ruN a/panels/display/cc-night-light-page.blp b/panels/display/cc-night-light-page.blp
+--- a/panels/display/cc-night-light-page.blp	2026-11-13 16:58:28
++++ b/panels/display/cc-night-light-page.blp	2026-11-13 16:58:28
+@@ -320,6 +320,16 @@
+               }
+             }
+           }
++
++          Adw.PreferencesGroup ambient_white_point_group {
++            visible: false;
++
++            Adw.SwitchRow ambient_white_point_row {
++              title: _("_Adapt to Ambient Light");
++              subtitle: _("Match the white of the screen to the color of the light around you");
++              use-underline: true;
++            }
++          }
+         }
+       };
+     }
+diff -ruN a/panels/display/cc-night-light-page.c b/panels/display/cc-night-light-page.c
+--- a/panels/display/cc-night-light-page.c	2026-11-13 16:58:28
++++ b/panels/display/cc-night-light-page.c	2026-11-13 16:58:28
+@@ -53,6 +53,10 @@
+   GtkSpinButton       *spinbutton_to_minutes;
+   GtkStack            *stack_from;
+   GtkStack            *stack_to;
++  AdwPreferencesGroup *ambient_white_point_group;
++  AdwSwitchRow *ambient_white_point_row;
++  gboolean ambient_white_point_has_key;
++  gboolean ambient_white_point_sensor;
+ 
+   GtkAdjustment       *adjustment_from_hours;
+   GtkAdjustment       *adjustment_from_minutes;
+@@ -127,9 +131,52 @@
+   gtk_stack_set_visible_child (stack, is_pm ? GTK_WIDGET (button_pm) : GTK_WIDGET (button_am));
+ }
+ 
++/* The ambient white point row is shown when gnome-settings-daemon knows the
++ * setting and the computer has a light sensor that reports colour: an IIO
++ * device with a colour temperature channel, or gnome-settings-daemon already
++ * reading one. */
++static gboolean
++ambient_white_point_sensor_present (void)
++{
++  g_autoptr(GDir) dir = NULL;
++  const gchar *name;
++
++  dir = g_dir_open ("/sys/bus/iio/devices", 0, NULL);
++  if (dir == NULL)
++    return FALSE;
++  while ((name = g_dir_read_name (dir)) != NULL)
++    {
++      g_autofree gchar *path = g_build_filename ("/sys/bus/iio/devices", name,
++                                                 "in_colortemp_input", NULL);
++      if (g_file_test (path, G_FILE_TEST_EXISTS))
++        return TRUE;
++    }
++  return FALSE;
++}
++
+ static void
++ambient_white_point_update_visibility (CcNightLightPage *self)
++{
++  gboolean available = FALSE;
++
++  if (self->ambient_white_point_has_key && self->proxy_color != NULL)
++    {
++      g_autoptr(GVariant) value = NULL;
++      value = g_dbus_proxy_get_cached_property (self->proxy_color,
++                                                "AmbientWhitePointAvailable");
++      if (value != NULL && g_variant_is_of_type (value, G_VARIANT_TYPE_BOOLEAN))
++        available = g_variant_get_boolean (value);
++    }
++  if (self->ambient_white_point_has_key && self->ambient_white_point_sensor)
++    available = TRUE;
++  gtk_widget_set_visible (GTK_WIDGET (self->ambient_white_point_group), available);
++}
++
++static void
+ dialog_update_state (CcNightLightPage *self)
+ {
++  ambient_white_point_update_visibility (self);
++
+   if (cc_display_config_manager_get_night_light_supported (self->config_manager))
+     {
+       gboolean automatic;
+@@ -632,6 +679,8 @@
+   gtk_widget_class_bind_template_child (widget_class, CcNightLightPage, spinbutton_to_minutes);
+   gtk_widget_class_bind_template_child (widget_class, CcNightLightPage, stack_from);
+   gtk_widget_class_bind_template_child (widget_class, CcNightLightPage, stack_to);
++  gtk_widget_class_bind_template_child (widget_class, CcNightLightPage, ambient_white_point_group);
++  gtk_widget_class_bind_template_child (widget_class, CcNightLightPage, ambient_white_point_row);
+ 
+   gtk_widget_class_bind_template_callback (widget_class, dialog_am_pm_from_button_clicked_cb);
+   gtk_widget_class_bind_template_callback (widget_class, dialog_am_pm_to_button_clicked_cb);
+@@ -673,6 +722,24 @@
+   g_settings_bind_writable (self->settings_display, "night-light-enabled",
+                             self->night_light_toggle_row, "sensitive",
+                             FALSE);
++
++  {
++    g_autoptr(GSettingsSchema) schema = NULL;
++
++    g_object_get (self->settings_display, "settings-schema", &schema, NULL);
++    self->ambient_white_point_has_key = g_settings_schema_has_key (schema,
++                                                                   "ambient-white-point-enabled");
++  }
++  self->ambient_white_point_sensor = ambient_white_point_sensor_present ();
++  if (self->ambient_white_point_has_key)
++    {
++      g_settings_bind (self->settings_display, "ambient-white-point-enabled",
++                       self->ambient_white_point_row, "active",
++                       G_SETTINGS_BIND_DEFAULT);
++      g_settings_bind_writable (self->settings_display, "ambient-white-point-enabled",
++                                self->ambient_white_point_row, "sensitive",
++                                FALSE);
++    }
+ 
+   g_settings_bind_writable (self->settings_display, "night-light-schedule-from",
+                             self->spinbutton_from_hours, "sensitive",

@@ -40,10 +40,10 @@ index 41a5047ea1..cf233b20b5 100644
 +endif()
 diff --git a/src/plugins/nightlight/ambientwhitepoint.cpp b/src/plugins/nightlight/ambientwhitepoint.cpp
 new file mode 100644
-index 0000000000..b9849d74ce
+index 0000000000..021195ee6d
 --- /dev/null
 +++ b/src/plugins/nightlight/ambientwhitepoint.cpp
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,178 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -51,6 +51,9 @@ index 0000000000..b9849d74ce
 +    SPDX-License-Identifier: GPL-2.0-or-later
 +*/
 +#include "ambientwhitepoint.h"
++
++#include <QDir>
++#include <QFileInfo>
 +
 +#include <algorithm>
 +#include <cmath>
@@ -209,13 +212,22 @@ index 0000000000..b9849d74ce
 +    return std::abs(m_currentMired - mired(m_model.neutralK)) < 1e-9;
 +}
 +
++bool ambientColorChannelPresent(const QString &iioDevicesDir)
++{
++    const QDir dir(iioDevicesDir);
++    const QStringList devices = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
++    return std::ranges::any_of(devices, [&dir](const QString &device) {
++        return QFileInfo::exists(dir.filePath(device + QLatin1String("/in_colortemp_input")));
++    });
++}
++
 +} // namespace KWin
 diff --git a/src/plugins/nightlight/ambientwhitepoint.h b/src/plugins/nightlight/ambientwhitepoint.h
 new file mode 100644
-index 0000000000..0fda48e5e4
+index 0000000000..d4f83dd99d
 --- /dev/null
 +++ b/src/plugins/nightlight/ambientwhitepoint.h
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,122 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -223,6 +235,8 @@ index 0000000000..0fda48e5e4
 +    SPDX-License-Identifier: GPL-2.0-or-later
 +*/
 +#pragma once
++
++#include <QString>
 +
 +#include <array>
 +
@@ -315,6 +329,15 @@ index 0000000000..0fda48e5e4
 +    double m_rampDuration = 0;
 +    bool m_haveTarget = false;
 +};
++
++/**
++ * Returns @c true if a light sensor reports the colour of the light: an IIO
++ * device under @p iioDevicesDir has the in_colortemp_input channel, which is
++ * what iio-sensor-proxy reads. iio-sensor-proxy only reads the colour
++ * temperature while the sensor is claimed, so this tells whether claiming it
++ * is of any use.
++ */
++bool ambientColorChannelPresent(const QString &iioDevicesDir = QStringLiteral("/sys/bus/iio/devices"));
 +
 +/**
 + * Night Light always wins: ambient adaptation can never make the screen
@@ -487,10 +510,10 @@ index 0000000000..ba05f5b686
 +};
 diff --git a/src/plugins/nightlight/autotests/ambientpolicytest.cpp b/src/plugins/nightlight/autotests/ambientpolicytest.cpp
 new file mode 100644
-index 0000000000..969b9e4dc8
+index 0000000000..7d735136f3
 --- /dev/null
 +++ b/src/plugins/nightlight/autotests/ambientpolicytest.cpp
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,167 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -500,6 +523,9 @@ index 0000000000..969b9e4dc8
 +#include "../ambientwhitepoint.h"
 +#include "ambient-test-vectors.h"
 +
++#include <QDir>
++#include <QFile>
++#include <QTemporaryDir>
 +#include <QTest>
 +#include <cmath>
 +#include <iterator>
@@ -516,6 +542,7 @@ index 0000000000..969b9e4dc8
 +    void limits();
 +    void ramp();
 +    void compose();
++    void colorChannel();
 +};
 +
 +void AmbientPolicyTest::targets()
@@ -624,6 +651,34 @@ index 0000000000..969b9e4dc8
 +    QCOMPARE(composeTemperature(4000, 6500), 4000);
 +}
 +
++// Only a light sensor with the in_colortemp_input channel counts; a lux-only
++// one, or none, does not.
++void AmbientPolicyTest::colorChannel()
++{
++    QTemporaryDir sysfs;
++    QVERIFY(sysfs.isValid());
++    const QDir dir(sysfs.path());
++    const auto touch = [&dir](const QString &name) {
++        QFile file(dir.filePath(name));
++        return file.open(QIODevice::WriteOnly);
++    };
++
++    QVERIFY(!ambientColorChannelPresent(dir.filePath(QStringLiteral("missing"))));
++    QVERIFY(!ambientColorChannelPresent(dir.path()));
++
++    QVERIFY(dir.mkdir(QStringLiteral("iio:device0")));
++    QVERIFY(touch(QStringLiteral("iio:device0/in_illuminance_input")));
++    QVERIFY(!ambientColorChannelPresent(dir.path()));
++
++    QVERIFY(dir.mkdir(QStringLiteral("iio:device1")));
++    QVERIFY(touch(QStringLiteral("iio:device1/in_illuminance_input")));
++    QVERIFY(touch(QStringLiteral("iio:device1/in_colortemp_input")));
++    QVERIFY(ambientColorChannelPresent(dir.path()));
++
++    QVERIFY(QFile::remove(dir.filePath(QStringLiteral("iio:device1/in_colortemp_input"))));
++    QVERIFY(!ambientColorChannelPresent(dir.path()));
++}
++
 +QTEST_GUILESS_MAIN(AmbientPolicyTest)
 +#include "ambientpolicytest.moc"
 diff --git a/src/plugins/nightlight/nightlightdbusinterface.cpp b/src/plugins/nightlight/nightlightdbusinterface.cpp
@@ -716,7 +771,7 @@ index 40da7d4270..5779f58f07 100644
  public Q_SLOTS:
      /**
 diff --git a/src/plugins/nightlight/nightlightmanager.cpp b/src/plugins/nightlight/nightlightmanager.cpp
-index d8616c92a3..1b9f77c02d 100644
+index d8616c92a3..5fdb350891 100644
 --- a/src/plugins/nightlight/nightlightmanager.cpp
 +++ b/src/plugins/nightlight/nightlightmanager.cpp
 @@ -17,6 +17,8 @@
@@ -841,19 +896,21 @@ index d8616c92a3..1b9f77c02d 100644
 +
 +bool NightLightManager::ambientWanted() const
 +{
-+    const LightSensor *sensor = workspace() ? workspace()->lightSensor() : nullptr;
-+    return m_ambientEnabled && !isInhibited() && sensor && sensor->isAvailable()
++    return m_ambientEnabled && !isInhibited() && m_ambientColorSensor
 +        && kwinApp()->session()->isActive();
 +}
 +
 +// Claims the light sensor and runs the policy while wanted; otherwise lets
 +// the white point return to neutral, then stops and releases the sensor.
++// A light sensor without a colour channel is never claimed.
 +void NightLightManager::updateAmbient()
 +{
 +    LightSensor *sensor = workspace() ? workspace()->lightSensor() : nullptr;
 +    if (!sensor) {
 +        return;
 +    }
++    // Every change in the sensor's availability comes through here.
++    m_ambientColorSensor = sensor->isAvailable() && ambientColorChannelPresent();
 +    const bool wanted = ambientWanted();
 +    if (wanted && !m_ambientSensorHeld) {
 +        sensor->acquire();
@@ -907,9 +964,7 @@ index d8616c92a3..1b9f77c02d 100644
 +
 +bool NightLightManager::isAmbientWhitePointAvailable() const
 +{
-+    const LightSensor *sensor = workspace() ? workspace()->lightSensor() : nullptr;
-+    // The colour temperature is only known while the light sensor is claimed.
-+    return sensor && sensor->isAvailable() && sensor->colorTemperature().has_value();
++    return m_ambientColorSensor;
 +}
 +
 +bool NightLightManager::isAmbientWhitePointActive() const
@@ -936,7 +991,7 @@ index d8616c92a3..1b9f77c02d 100644
  
  void NightLightManager::setEnabled(bool enabled)
 diff --git a/src/plugins/nightlight/nightlightmanager.h b/src/plugins/nightlight/nightlightmanager.h
-index 0b347403cb..ef1538f2ee 100644
+index 0b347403cb..c6aee6aa16 100644
 --- a/src/plugins/nightlight/nightlightmanager.h
 +++ b/src/plugins/nightlight/nightlightmanager.h
 @@ -10,6 +10,7 @@
@@ -1018,13 +1073,14 @@ index 0b347403cb..ef1538f2ee 100644
  
      void setEnabled(bool enabled);
      void setRunning(bool running);
-@@ -286,6 +330,14 @@ private:
+@@ -286,6 +330,15 @@ private:
      int m_nightTargetTemperature = DEFAULT_NIGHT_TEMPERATURE;
  
      int m_inhibitReferenceCount = 0;
 +
-+    // Ambient white point, off unless AmbientWhitePoint is set.
++    // Ambient white point, on unless AmbientWhitePoint is false.
 +    bool m_ambientEnabled = false;
++    bool m_ambientColorSensor = false;
 +    bool m_ambientSensorHeld = false;
 +    AmbientPolicy m_ambientPolicy;
 +    QTimer m_ambientTimer;
@@ -1043,7 +1099,7 @@ index a99b262f6b..67c29a8455 100644
          </entry>
 +        <entry name="AmbientWhitePoint" type="Bool">
 +            <label>Adapt the screen white point to the ambient light, where a light sensor reports its colour. Night Light takes priority.</label>
-+            <default>false</default>
++            <default>true</default>
 +        </entry>
      </group>
  </kcfg>
