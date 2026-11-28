@@ -40,7 +40,7 @@ stdenvNoCC.mkDerivation {
       install -Dm644 $f $lib/$f
     done
     sed -e "s,@LIBDIR@,$lib," -e "s,@USERPAGES@,${aurora-userpages}/bin/userpages," \
-      -e 's|@USER4K_HINT@|keep aurora.userpages.enable on (it adds user4k=on to boot.kernelParams), rebuild and reboot|' \
+      -e 's|@USER4K_HINT@|remove user4k=off from boot.kernelParams, rebuild and reboot|' \
       ${./steam} > $out/bin-steam
     # NixOS mounts the FEX guest graphics provider (aurora.fexMesa) here,
     # not at the launch loop's /usr/share/guestos default.

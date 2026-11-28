@@ -1043,10 +1043,10 @@ Name of the Aurora input to update in the consumer flake.
 
 ## `aurora.userpages.enable`
 
-Add `user4k=on` first on the kernel command line and install the
-`userpages` launcher (`userpages 4k COMMAND`). False omits both.
-`boot.kernelParams = [ "user4k=off" ];` overrides the boot selection
-while retaining the launcher. Kernel-command-line changes need a reboot.
+Install the `userpages` launcher (`userpages 4k COMMAND`). The kernel
+offers 4K userspace pages without a kernel parameter;
+`boot.kernelParams = [ "user4k=off" ];` turns them off. Kernel-command-line
+changes need a reboot.
 
 **Type:** boolean
 
