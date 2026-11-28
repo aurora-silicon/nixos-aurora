@@ -39,7 +39,8 @@ let
     [ ! -e /run/sep-fixture/no-module ] || exit 1
     printf '/fixture/apple_sep.ko.zst\n'
   '';
-  fprintd = pkgs.runCommand "fixture-fprintd" {} ''
+  # Stands in for Aurora's fprintd, so it satisfies modules/sep.nix's guard.
+  fprintd = pkgs.runCommand "fixture-fprintd" { passthru.auroraNoEnrollGc = 1; } ''
     mkdir -p $out/libexec
     cp ${pkgs.writeShellScript "fixture-fprintd" ''
       echo fprintd >> /run/sep-fixture/events

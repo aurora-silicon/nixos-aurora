@@ -7,5 +7,6 @@
     "0002-report-lockout-and-fall-back-to-the-password.patch": "b29df6766dafadbdc2dac34b5fc0396ac24a7628e822018285189cf30f52c34e",
     "0003-say-why-the-reader-needs-the-password.patch": "1db338603ce2bbf15688c909d4c24120c7933755ca390358b940ac4579cb82d3",
     "0004-dont-ask-for-a-finger-the-reader-will-not-take.patch": "ca498a36e63e39450e8bd7bb090134093942e4ffc7919bd8748a579e1669db1a"
-  }
+  },
+  "adaptations": "Local 0005 skips DATA_FULL garbage collection for apple-sep and explains full storage in fprintd-enroll; the overlay runs test_enroll_capacity.py against the patched source and marks the package auroraNoEnrollGc = 1. The file hashes above remain the original provenance."
 }
