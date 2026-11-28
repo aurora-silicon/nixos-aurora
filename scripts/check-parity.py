@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Check the finished installer root's Aurora payloads and early sequencer."""
+"""Check the finished installer root's Aurora payloads and initrd modules."""
 import argparse
 import importlib.util
 import json
@@ -60,8 +60,9 @@ def check_initrd(path):
     else:
         with path.open('rb') as stream:
             names = list(cpio_names(stream))
-    if not any(re.search(r'(^|/)snd-seq\.ko(?:\.(?:xz|gz|zst))?$', name) for name in names):
-        raise ValueError('the image initrd does not carry snd-seq')
+    for module in ('snd-seq', 'apple-soc-cpufreq'):
+        if not any(re.search(rf'(^|/){re.escape(module)}\.ko(?:\.(?:xz|gz|zst))?$', name) for name in names):
+            raise ValueError(f'the image initrd does not carry {module}')
 
 
 def check(root):

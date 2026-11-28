@@ -30,6 +30,13 @@ in {
   # tiny-dfr's udev rule starts it only when a Touch Bar display appears, so
   # it stays inert on every other Mac.
   hardware.apple.touchBar.enable = lib.mkDefault true;
+  # The CPU frequency driver in the initrd, so the cores leave the boot
+  # loader's clock there instead of after the switch to the real root (MacBook
+  # Neo: 744 MHz until ~7 s otherwise). It binds by the cluster controllers'
+  # compatible, so it loads on every Apple silicon Mac. The kernel builds it as
+  # a module (CONFIG_ARM_APPLE_SOC_CPUFREQ=m); scripts/check-parity.py checks
+  # that the image's initrd carries it.
+  boot.initrd.availableKernelModules = [ "apple-soc-cpufreq" ];
   hardware.enableRedistributableFirmware = true;
   hardware.firmware = [ avdFirmware ];
   services.upower.enable = true;

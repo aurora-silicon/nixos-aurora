@@ -45,8 +45,12 @@ class ImageParityTests(unittest.TestCase):
             self.write('/nix/store/flatpakGL/refs/heads/runtime/org.freedesktop.Platform.GL.aurora/aarch64/' + branch, 'ostree-commit')
         for variant in ('v2-t0', 'v3-t0', 'v3-t1', 'v3-t2', 'v4-t0', 'v5-t0', 'v5-t1', 'v5-t2'):
             self.write(f'/nix/store/avdFirmware/lib/firmware/apple/avd-fw-{variant}.bin', b'firmware')
-        self.write(self.system + '/initrd', cpio('lib/modules/kernel/snd-seq.ko.zst') + cpio('TRAILER!!!', b''))
+        self.write(self.system + '/initrd', self.initrd('snd-seq', 'apple-soc-cpufreq'))
         self.save_metadata()
+
+    @staticmethod
+    def initrd(*modules):
+        return b''.join(cpio(f'lib/modules/kernel/{name}.ko.zst') for name in modules) + cpio('TRAILER!!!', b'')
 
     def write(self, path, data):
         p = self.root / path.lstrip('/')
@@ -99,9 +103,18 @@ class ImageParityTests(unittest.TestCase):
             self.check()
 
     def test_the_sequencer_must_be_in_the_actual_initrd(self):
-        self.write(self.system + '/initrd', cpio('lib/modules/kernel/snd-pcm.ko') + cpio('TRAILER!!!', b''))
+        self.write(self.system + '/initrd', self.initrd('snd-pcm', 'apple-soc-cpufreq'))
         with self.assertRaisesRegex(ValueError, 'does not carry snd-seq'):
             self.check()
+
+    def test_the_cpu_frequency_driver_must_be_in_the_actual_initrd(self):
+        # Without it every core stays at the boot loader's clock until udev on
+        # the real root loads the driver.
+        for initrd in (self.initrd('snd-seq'), self.initrd('snd-seq', 'apple-soc-cpufreq-test')):
+            with self.subTest(initrd=initrd):
+                self.write(self.system + '/initrd', initrd)
+                with self.assertRaisesRegex(ValueError, 'does not carry apple-soc-cpufreq'):
+                    self.check()
 
     def test_a_ucm_stamp_cannot_replace_the_actual_lid_jack_profile(self):
         self.write('/nix/store/ucm/share/alsa/ucm2/conf.d/aop_audio/3chan/HiFi.conf', '# old profiles\n')
