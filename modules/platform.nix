@@ -107,6 +107,13 @@ in {
     # 50-aurora-warm-restart.conf.)
     ExecStartPre = "+${pkgs.runtimeShell} -c 'if [ -e /run/speakersafetyd.started ]; then : > /run/speakersafetyd/speakersafetyd.flag; fi'";
     ExecStopPost = "+${pkgs.coreutils}/bin/touch /run/speakersafetyd.started";
+    # The kernel lets only a CAP_SYS_ADMIN process take and renew the
+    # "Speaker Volume Unlock" lock, as for "Speaker Protection": access to
+    # the card's control device, which the seat user has, does not lift the
+    # speakers' safe level. These add to the packaged unit's sets. (Fedora
+    # Aurora's 60-aurora-volume-lock-cap.conf.)
+    AmbientCapabilities = "CAP_SYS_ADMIN";
+    CapabilityBoundingSet = "CAP_SYS_ADMIN";
   };
   # Power defaults for every Apple silicon Mac, the same unit as Fedora's
   # aurora-platform-core and ALARM's aurora-system-fixes. Neither setting
