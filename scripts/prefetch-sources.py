@@ -80,6 +80,7 @@ NEEDS = {
     'fido': ['aurora-fido'],
     'sep-sk': ['aurora-sep-sk'],
     'sep-luks': ['aurora-sep-luks'],
+    'sep-host-state': ['aurora-sep-host-state'],
     'omdrop-awdl': ['omdrop-awdl', 'omdrop-awdl/omdrop-plugin'],
     'xart': ['aurora-xart'],
 }

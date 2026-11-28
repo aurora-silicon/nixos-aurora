@@ -209,6 +209,17 @@ in {
           TimeoutStartSec = 180;
         };
       };
+      # A power cut while the driver writes its host-state store can leave a
+      # prefix of the file. The driver refuses any size but the full one and
+      # does not reinitialise it, so Touch ID stays dead until the file is
+      # recovered by hand. The helper, its unit and its preset ship in the
+      # shared SEP userspace (pkgs.aurora-sep-host-state,
+      # aurora-silicon/aurora-sep-userspace host-state/) and the unit orders
+      # itself before this loader; it does nothing when the store is whole
+      # and never touches a full-size file. NixOS has no presets, so the unit
+      # is pulled in here.
+      systemd.packages = [ pkgs.aurora-sep-host-state ];
+      systemd.services.aurora-sep-host-state-repair.wantedBy = [ "aurora-sep.service" ];
       # Every sleep that suspends waits for a SEP load still in progress
       # (see the file). A drop-in only, also where a unit isn't shipped.
       systemd.units = lib.genAttrs [

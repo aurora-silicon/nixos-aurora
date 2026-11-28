@@ -289,6 +289,47 @@ in {
       platforms = final.lib.platforms.linux;
     };
   };
+  # Recovers /var/lib/aurora-sep-host-state.bin after a power cut left a
+  # prefix of it: the helper, its unit and its preset ship in the shared SEP
+  # userspace (host-state/, aurora-silicon/aurora-sep-userspace#36) so Fedora
+  # and Arch run the same recovery. modules/sep.nix only orders the unit
+  # before the loader.
+  aurora-sep-host-state = final.stdenvNoCC.mkDerivation {
+    pname = "aurora-sep-host-state";
+    version = pins.aurora-sep-host-state.version;
+    src = source "aurora-sep-host-state";
+    sourceRoot = "${pins.aurora-sep-host-state.archive_root}/host-state";
+    nativeCheckInputs = [ final.python3 ];
+    makeFlags = [
+      "LIBEXECDIR=${placeholder "out"}/libexec"
+      "UNITDIR=${placeholder "out"}/lib/systemd/system"
+      "PRESETDIR=${placeholder "out"}/lib/systemd/system-preset"
+      "DOCDIR=${placeholder "out"}/share/doc/aurora-sep-host-state"
+    ];
+    doCheck = true;
+    checkTarget = "check";
+    postInstall = ''
+      # The shebang names the distribution python, which NixOS does not have
+      # under /usr; point it at the store interpreter, as the fido package
+      # does for its python daemons.
+      substituteInPlace $out/libexec/aurora-sep-host-state-repair \
+        --replace-fail "#!/usr/bin/python3 -I" "#!${final.python3.interpreter} -I"
+    '';
+    doInstallCheck = true;
+    installCheckPhase = ''
+      runHook preInstallCheck
+      AURORA_SEP_HOST_STATE="$TMPDIR/no-store.bin" AURORA_SEP_QUARANTINE="$TMPDIR/no-quarantine" \
+        $out/libexec/aurora-sep-host-state-repair
+      runHook postInstallCheck
+    '';
+    passthru.commit = pins.aurora-sep-host-state.commit;
+    meta = {
+      description = "Recover a truncated SEP host-state store after a power cut";
+      homepage = "https://github.com/aurora-silicon/aurora-sep-userspace";
+      license = final.lib.licenses.mit;
+      platforms = final.lib.platforms.linux;
+    };
+  };
   aurora-firstboot = final.callPackage ./firstboot.nix { };
   aurora-power-budget = final.callPackage ./power-budget.nix { };
   aurora-secboot = final.callPackage ./secboot.nix { };
