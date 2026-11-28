@@ -297,7 +297,7 @@ in {
     src = source "aurora-wifi-firmware";
     version = pins.aurora-wifi-firmware.version;
   };
-  # The legacy-to-speakerguardd-v2 upgrade tool (modules/speaker-upgrade.nix).
+  # The speakerguardd v2 upgrade tool (modules/speaker-upgrade.nix).
   aurora-speaker-upgrade = final.callPackage ./aurora-speaker-upgrade.nix {
     src = source "aurora-speaker-upgrade";
     version = pins.aurora-speaker-upgrade.version;
@@ -491,8 +491,11 @@ in {
   });
   asahi-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
-    version = "${pins.aurora-audio.version}-aurora16";
-    patches = (old.patches or [ ]) ++ [ (stableFile ./patches/0001-restore-legacy-speaker-graphs.patch) ];
+    version = "${pins.aurora-audio.version}-aurora18";
+    # speakerguardd v2 drives every Mac's speakers from the Mac's own tuning: no
+    # speaker graph, speaker FIR or raw speaker volume lock is installed (the
+    # same patch as fedora-aurora and alarm-aurora aurora-audio).
+    patches = (old.patches or [ ]) ++ [ (stableFile ./patches/0001-install-no-speaker-graphs.patch) ];
     postInstall = (old.postInstall or "") + ''
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
       test -e "$out/share/wireplumber/scripts/device/asahi-keep-profile.lua"
@@ -502,14 +505,23 @@ in {
     '';
     # nixpkgs' fixup phase rewrites /usr paths to this output first.
     postFixup = (old.postFixup or "") + ''
-      for board in j316 j413 j616 j700; do
-        test -s "$out/share/asahi-audio/$board/graph.json"
-        grep -q "$out/share/asahi-audio/$board/graph.json" "$out/share/wireplumber/wireplumber.conf.d/99-asahi.conf"
+      wp="$out/share/wireplumber/wireplumber.conf.d/99-asahi.conf"
+      # No speaker graph, speaker FIR or speaker rule of the Asahi stack.
+      test -z "$(find "$out/share/asahi-audio" \( -name 'graph*.json' -o -name '*.wav' \) -print)"
+      if grep -Eq 'graph[^"/]*\.json|RawSpeakers|asahi-lock-volume' "$wp"; then
+        echo '99-asahi.conf still creates or locks a speaker path' >&2; exit 1
+      fi
+      test ! -e "$out/share/wireplumber/scripts/device/asahi-lock-volume.lua"
+      # Every filter the rules create is installed: the microphone graphs.
+      for f in $(grep -o "$out/share/asahi-audio/[^\"]*" "$wp"); do
+        test -s "$f"
       done
-      test -s "$out/share/asahi-audio/j700/48.wav"
+      for board in j293 j313 j314 j316 j413 j415 j604 j614 j616 j700 j714; do
+        test -s "$out/share/asahi-audio/$board/mic.json"
+      done
     '';
     # asahi-audio#24: the built-in card stays on HiFi with nothing in the jack.
-    passthru = (old.passthru or { }) // { keepsBuiltinProfile = true; legacySpeakerGraphs = true; };
+    passthru = (old.passthru or { }) // { keepsBuiltinProfile = true; };
   });
   # A VRR-capable output defaults to variable refresh rate: the variable
   # variant of the preferred mode becomes the preferred one, which new monitor
@@ -560,47 +572,20 @@ in {
     src = source "alsa-ucm-conf-aurora";
     pin = pins.alsa-ucm-conf-aurora;
   };
-  # Fedora Aurora's speakersafetyd-aurora-profiles: the J616s speaker model
-  # (speakersafetyd's J316 values with the J616 V/I sense layout) and the udev
-  # rule that starts the daemon for its card. The daemon reads its models from
-  # its own share directory, so they go into the package.
-  speakersafetyd = prev.speakersafetyd.overrideAttrs (old: {
-    # Downstream: a sense period read after a startup probe closed the speakers
-    # is skipped instead of panicking the daemon (every boot and PipeWire restart
-    # on an M2 Air). Any other invalid rate still fails safe. Same change as
-    # fedora-aurora/alarm-aurora speakersafetyd 2.0.1, on nixpkgs' 3.0.0.
-    patches = (old.patches or [ ]) ++ [
-      (stableFile ./speakersafetyd/0001-skip-a-sense-period-read-after-a-probe-closed-the-speakers.patch)
-    ];
-    postInstall = (old.postInstall or "") + ''
-      install -Dm644 ${stableFile ./speakersafetyd/j616.conf} $out/share/speakersafetyd/apple/j616.conf
-      install -Dm644 ${stableFile ./speakersafetyd/96-speakersafetyd-aurora.rules} \
-        $out/lib/udev/rules.d/96-speakersafetyd-aurora.rules
-    '';
-  });
-  speakerguardd = rustPackage "speakerguardd" ./locks/speakerguardd.Cargo.lock {
-    # The binary names its source in -V and the journal. The unit keeps its
-    # own start limit (five attempts in 60 s); only the J700 model is named.
-    env.SPEAKERGUARDD_COMMIT = builtins.substring 0 12 pins.speakerguardd.commit;
-    nativeBuildInputs = [ final.pkg-config ];
-    buildInputs = [ final.alsa-lib ];
-    postInstall = ''
-      mkdir -p $out/share/speakerguardd
-      cp -r conf/* $out/share/speakerguardd/
-      mkdir -p $out/lib/systemd/system $out/lib/udev/rules.d $out/libexec/speakerguardd
-      substitute speakerguardd.service $out/lib/systemd/system/speakerguardd.service \
-        --replace-fail "ExecStart=/usr/bin/speakerguardd -c /usr/share/speakerguardd --wait-for-card 30" \
-          "ExecStart=$out/bin/speakerguardd -c $out/share/speakerguardd -C AppleJ700 --wait-for-card 30"
-      cp 95-speakerguardd.rules $out/lib/udev/rules.d/
-      cp ${stableFile ./firmware/use-feedback-guard} $out/libexec/speakerguardd/use-feedback-guard
-      chmod +x $out/libexec/speakerguardd/use-feedback-guard
-      patchShebangs $out/libexec/speakerguardd/use-feedback-guard
-    '';
-  };
-  # speakerguardd 1.0 (the v2 branch): a new program, packaged beside the 0.1
-  # daemon above. modules/speakerguardd-v2.nix installs it with
-  # aurora.speakerguardd.v2.enable (on in the Aurora platform), and its gate
-  # keeps speakersafetyd in charge until aurora-speaker-upgrade switches.
+  # speakerguardd v2 is the speaker stack: speakersafetyd is not installed.
+  # nixos-apple-silicon's sound module (hardware.asahi.setupAsahiSound, which
+  # also sets up PipeWire and WirePlumber with asahi-audio) adds this package's
+  # unit and udev rule; an empty package leaves nothing of it to install, and
+  # modules/platform.nix masks speakersafetyd.service.
+  speakersafetyd = final.runCommand "speakersafetyd-not-shipped" {
+    meta.description = "Empty: speakerguardd v2 is the speaker protection on Aurora";
+  } "mkdir -p $out";
+  # nixpkgs' own build, unchanged and installed by nothing here: kept so that a
+  # user's explicit choice of speakersafetyd can still name it.
+  speakersafetyd-nixpkgs = prev.speakersafetyd;
+  # speakerguardd 1.0, the only speaker stack (packaged as speakerguardd-v2;
+  # the 0.1 daemon is gone). modules/speakerguardd-v2.nix installs it, and the
+  # Aurora platform always turns it on with aurora-speaker-upgrade.
   speakerguardd-v2 = let
     # The crates this package ships; the rig and benchmark crates stay out.
     crates = [ "-p" "sgv2-core" "-p" "sgv2-lv2" "-p" "sgv2-supervisor" "-p" "aurora-speaker-tuning" ];

@@ -13,7 +13,7 @@ track the same merged content using each distribution's existing version scheme.
 | --- | --- | --- | --- | --- |
 | aurora-sep | 1-14 | 1-14 | 1.14 | Vendored integration from linux `7cc30f35ecea3e90ceedd44babbde128c1d487a6`, with the already merged Touch ID setup adaptations |
 | aurora-audio / asahi-audio | 4.1-7 | 4.1.aurora2-7 | 4.1-aurora7 | asahi-audio `d957fabbacbe7dd67b39f052b2ff21edea7ee038` |
-| speakerguardd | 0.1.12-1 | 0.1.12-1 | 0.1.12 | speakerguardd main `34aeed9085ad0f66cb8f266f997e11dd781470a6` |
+| speakerguardd-v2 (the only speaker stack since 2026-11-28; see below) | 1.0.0~alpha.2-0.64.20261128gite0672aca6aa3 | 1.0.0alpha.2-14 | 1.0.0-alpha.2 | speakerguardd main `e0672aca6aa310bfecfd5c581043e016b085239a` |
 
 Arch retains `4.1.aurora2` so this remains an upgrade from `4.1.aurora2-4`.
 Nix keeps the upstream audio version in sources.json and adds the Fedora
@@ -39,3 +39,15 @@ audit without rebuilding an artificial package release. Arch and Nix only change
 SEP/audio version labels. speakerguardd source, behavior, profiles, service
 settings and protection interlocks are unchanged. No unmerged speaker changes
 are included. The merged libfprint aurora6 updates are outside this change.
+
+## 2026-11-28: speakerguardd v2 is the only speaker stack
+
+speakersafetyd, speakersafetyd-aurora-profiles and speakerguardd 0.1 are no
+longer packaged in any of the three distributions, and aurora-audio installs
+no Asahi speaker graph, speaker FIR or raw speaker volume lock (its
+microphone graphs, jack and card rules and the speaker period-interrupt rule
+stay). An existing install loses them on the upgrade:
+
+| | Fedora | Arch Linux ARM | NixOS |
+| --- | --- | --- | --- |
+| aurora-audio | 4.1-18: Obsoletes speakersafetyd < 2.0.1-2, speakersafetyd-aurora-profiles < 1-2 (the builds we shipped), speakerguardd < 0.2, asahi-audio < 4.1-18; requires speakerguardd-v2 and aurora-speaker-upgrade | 4.1.aurora2-19: replaces speakersafetyd<2.0.1-2 and speakersafetyd-aurora-profiles<1-3 (the builds we shipped), replaces and conflicts with speakerguardd<0.2 | asahi-audio 4.1-aurora18; speakerguardd 0.1 is no longer packaged, speakersafetyd is an empty package (nixos-apple-silicon still names it) and `speakersafetyd.service` is masked; v2 and the upgrade tool are always on |

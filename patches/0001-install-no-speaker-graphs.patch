@@ -1,0 +1,485 @@
+diff --git a/Makefile b/Makefile
+index 81b7d56..a7b2f77 100644
+--- a/Makefile
++++ b/Makefile
+@@ -55,7 +55,6 @@ core:
+ 	install -dDm0755 $(DESTDIR)/$(DATA_DIR)/pipewire/pipewire.conf.d/
+ 	install -dDm0755 $(DESTDIR)/$(DATA_DIR)/pipewire/pipewire-pulse.conf.d/
+ 	install -pm0644 conf/wireplumber.conf $(DESTDIR)/$(DATA_DIR)/wireplumber/wireplumber.conf.d/99-asahi.conf
+-	install -pm0644 conf/asahi-lock-volume.lua $(DESTDIR)/$(DATA_DIR)/wireplumber/scripts/device/asahi-lock-volume.lua
+ 	install -pm0644 conf/asahi-unplugged-routes.lua $(DESTDIR)/$(DATA_DIR)/wireplumber/scripts/device/asahi-unplugged-routes.lua
+ 	install -pm0644 conf/asahi-hide-devices.lua $(DESTDIR)/$(DATA_DIR)/wireplumber/scripts/device/asahi-hide-devices.lua
+ 	install -pm0644 conf/asahi-keep-profile.lua $(DESTDIR)/$(DATA_DIR)/wireplumber/scripts/device/asahi-keep-profile.lua
+@@ -69,15 +68,12 @@ j%: core
+ 	install -pm0644 -t $(DESTDIR)/$(DATA_DIR)/asahi-audio/$@/ $(wildcard firs/$@/*)
+ 
+ 
+-# Boards whose speakers speakerguardd v2 drives from the Mac's own Apple tuning
+-# (Plan A, voicing_pre): no asahi-audio speaker graph is installed for them.
+-# Their FIRs stay where an alias graph of another board still uses them
+-# (j316 for j416/j516/j616, j413 for j613); the microphone graphs stay.
+-V2_SPEAKER_BOARDS = j316 j413 j616 j700
+-
+-install: aliases core j274 j293 j313 j314 j316 j413 j415 j375 j604 j614 j616 j700 j714
+-	for b in $(V2_SPEAKER_BOARDS); do rm -f $(DESTDIR)/$(DATA_DIR)/asahi-audio/$$b/graph.json; done
+-	rm -f $(DESTDIR)/$(DATA_DIR)/asahi-audio/j700/48.wav
++# speakerguardd v2 drives the speakers of every Mac from the Mac's own Apple
++# tuning: no speaker graph or speaker FIR is installed, and nothing in
++# wireplumber.conf creates one. Only the microphone graphs are installed.
++# j274 and j375 have no microphone graph.
++install: aliases core j293 j313 j314 j316 j413 j415 j604 j614 j616 j700 j714
++	rm -f $(DESTDIR)/$(DATA_DIR)/asahi-audio/*/graph*.json $(DESTDIR)/$(DATA_DIR)/asahi-audio/*/*.wav
+ 
+ uninstall:
+ 	rm -rf $(DESTDIR)/$(DATA_DIR)/asahi-audio/
+diff --git a/conf/wireplumber.conf b/conf/wireplumber.conf
+index 27fb126..c5688fc 100644
+--- a/conf/wireplumber.conf
++++ b/conf/wireplumber.conf
+@@ -14,35 +14,6 @@ context.modules = [
+ ]
+ 
+ monitor.alsa.rules = [
+-    {
+-        matches = [
+-            { api.alsa.path = "~hw:AppleJ[0-9][0-9][0-9],1" }
+-        ]
+-        actions = {
+-            update-props = {
+-                audio.allowed-rates = [96000, 88200, 48000, 44100]
+-                node.name = "alsa_output.platform-sound.RawSpeakers"
+-                node.description = "Raw Speaker Device (do not use)"
+-                node.nick = "RawSpeakers"
+-            }
+-        }
+-    }
+-    # J713 (MacBook Air 13", M4): the AOP speaker stream is the J616s one,
+-    # six slots at 48 kHz only, of which the four amps take the first four
+-    # (left woofer, right woofer, left tweeter, right tweeter). Name the
+-    # slots so the j413 graph's four outputs land on them, not upmixed.
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ713,1" }
+-        ]
+-        actions = {
+-            update-props = {
+-                audio.allowed-rates = [48000]
+-                audio.channels = 6
+-                audio.position = [AUX0, AUX1, AUX2, AUX3, AUX4, AUX5]
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "~hw:AppleJ[0-9][0-9][0-9]HPAI,0" }
+@@ -160,9 +131,8 @@ monitor.alsa.rules = [
+     # speakers do not apply across the two cards. Its UCM ties the Headphones
+     # and Headset devices to the jack switches: unplugged, the card has no
+     # available profile. Plugged in, these make the jack the default sink and
+-    # source, above the J616 speaker filter (priority.session 850) and the
+-    # built-in microphones (2000). A default chosen by hand still wins while
+-    # it is available.
++    # source, above the speakers and the built-in microphones (2000). A
++    # default chosen by hand still wins while it is available.
+     {
+         matches = [
+             { node.name = "~alsa_output.*", api.alsa.path = "hw:AppleJack,0" }
+@@ -189,17 +159,6 @@ monitor.alsa.rules = [
+ 
+ node.software-dsp.rules = [
+     # J293 (MacBook Pro 13", M1, 2020)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ293,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j293/graph.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ293HPAI,0" }
+@@ -213,17 +172,6 @@ node.software-dsp.rules = [
+     }
+ 
+     # J493 (MacBook Pro 13", M2, 2022)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ493,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j293/graph-j493.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ493HPAI,0" }
+@@ -237,17 +185,6 @@ node.software-dsp.rules = [
+     }
+ 
+     # J313 (MacBook Air 13", M1, 2020)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ313,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j313/graph.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ313HPAI,0" }
+@@ -261,8 +198,6 @@ node.software-dsp.rules = [
+     }
+ 
+     # J413 (MacBook Air 15", M2, 2023)
+-    # J413 speakers: speakerguardd v2 builds the speaker graph from this Mac's
+-    # own Apple tuning (Plan A); asahi-audio provides no speaker graph here.
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ413HPAI,0" }
+@@ -276,17 +211,6 @@ node.software-dsp.rules = [
+     }
+ 
+     # J415 (MacBook Air 15", M2, 2023)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ415,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j415/graph.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ415HPAI,0" }
+@@ -300,17 +224,6 @@ node.software-dsp.rules = [
+     }
+ 
+     # J314 (MacBook Pro 14", M1 Pro/Max, 2021)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ314,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j314/graph.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ314HPAI,0" }
+@@ -324,17 +237,6 @@ node.software-dsp.rules = [
+     }
+ 
+     # J414 (MacBook Pro 14", M2 Pro/Max, 2023)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ414,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j314/graph-j414.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ414HPAI,0" }
+@@ -348,8 +250,6 @@ node.software-dsp.rules = [
+     }
+ 
+     # J316 (MacBook Pro 16", M1 Pro/Max, 2021)
+-    # J316 speakers: speakerguardd v2 builds the speaker graph from this Mac's
+-    # own Apple tuning (Plan A); asahi-audio provides no speaker graph here.
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ316HPAI,0" }
+@@ -363,17 +263,6 @@ node.software-dsp.rules = [
+     }
+ 
+     # J416 (MacBook Pro 16", M2 Pro/Max, 2023)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ416,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j316/graph-j416.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ416HPAI,0" }
+@@ -386,83 +275,7 @@ node.software-dsp.rules = [
+         }
+     }
+ 
+-    # J274 (Mac mini, M1, 2020)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ274,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j274/graph.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+-
+-    # J473 (Mac mini, M2, 2023)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ473,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j274/graph-j473.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+-
+-    # J474 (Mac mini, M2 Pro/Max, 2023)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ474,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j274/graph-j474.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+-
+-    # J375 (Mac Studio, M1 Max/Ultra, 2021)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ375,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j375/graph.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+-
+-    # J475 (Mac Studio, M2 Max/Ultra, 2021)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ475,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j375/graph-j475.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+-
+     # J504 (MacBook Pro 14", M3, 2023)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ504,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j314/graph-j504.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ504HPAI,0" }
+@@ -475,19 +288,7 @@ node.software-dsp.rules = [
+         }
+     }
+ 
+-
+     # J514 (MacBook Pro 14", M3 Pro/Max, 2023)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ514,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j314/graph-j514.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ514HPAI,0" }
+@@ -500,19 +301,7 @@ node.software-dsp.rules = [
+         }
+     }
+ 
+-
+     # J516 (MacBook Pro 16", M3 Pro/Max, 2023)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ516,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j316/graph-j516.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ516HPAI,0" }
+@@ -526,17 +315,6 @@ node.software-dsp.rules = [
+     }
+ 
+     # J613 (MacBook Air 13", M3, 2023)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ613,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j413/graph-j613.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ613HPAI,0" }
+@@ -549,19 +327,7 @@ node.software-dsp.rules = [
+         }
+     }
+ 
+-    # J713 (MacBook Air 13", M4, 2025): the J413/J613 chassis, speakers and
+-    # microphone array
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ713,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j413/graph-j713.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
++    # J713 (MacBook Air 13", M4, 2025): the J413/J613 microphone array
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ713HPAI,0" }
+@@ -575,17 +341,6 @@ node.software-dsp.rules = [
+     }
+ 
+     # J615 (MacBook Air 15", M3, 2023)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ615,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j415/graph-j615.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ615HPAI,0" }
+@@ -598,19 +353,6 @@ node.software-dsp.rules = [
+         }
+     }
+ 
+-    # J575 (Mac Studio, M3 Max/Ultra, 2023)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ575,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j375/graph-j575.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+-
+     # J614s (MacBook Pro 14", M4 Pro, 2024)
+     {
+         matches = [
+@@ -649,21 +391,8 @@ node.software-dsp.rules = [
+             }
+         }
+     }
+-    # J616 speakers: speakerguardd v2 builds the speaker graph from this Mac's
+-    # own Apple tuning (Plan A); asahi-audio provides no speaker graph here.
+ 
+     # J714 (MacBook Pro 14", M5 Pro/Max)
+-    {
+-        matches = [
+-            { api.alsa.path = "hw:AppleJ714,1" }
+-        ]
+-        actions = {
+-            create-filter = {
+-                filter-path = "/usr/share/asahi-audio/j314/graph-j714.json"
+-                hide-parent = true
+-            }
+-        }
+-    }
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ714AOP,0" }
+@@ -677,8 +406,6 @@ node.software-dsp.rules = [
+     }
+ 
+     # J700 (MacBook Neo, A18 Pro, 2026)
+-    # J700 speakers: speakerguardd v2 builds the speaker graph from this Mac's
+-    # own Apple tuning (Plan A); asahi-audio provides no speaker graph here.
+     {
+         matches = [
+             { api.alsa.path = "hw:AppleJ700AOP,1" }
+@@ -690,14 +417,9 @@ node.software-dsp.rules = [
+             }
+         }
+     }
+-
+ ]
+ 
+ wireplumber.components = [
+-    {
+-        name = device/asahi-lock-volume.lua, type = script/lua,
+-        provides = custom.asahi
+-    }
+     # A hook script must be loaded before the event source starts, or it
+     # misses the events of the devices and nodes that already exist by then.
+     {
+@@ -725,7 +447,6 @@ wireplumber.components = [
+ 
+ wireplumber.profiles = {
+     main = {
+-        custom.asahi = required
+         custom.asahi-unplugged-routes = required
+         hooks.asahi.restore-volume = required
+         custom.asahi-hide-devices = required
