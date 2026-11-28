@@ -1,0 +1,100 @@
+.TH AURORA-SPEAKER-STACK 8 "2026-11-28" "Aurora Silicon" "System Administration"
+.SH NAME
+aurora-speaker-stack \- select the Apple Silicon speaker protection stack
+.SH SYNOPSIS
+.B aurora-speaker-stack status
+[\fB\-\-json\fR]
+.br
+.B aurora-speaker-stack select sgv2
+[\fB\-\-no\-switch\fR]
+.br
+.B aurora-speaker-stack select speakersafetyd
+[\fB\-\-no\-install\fR] [\fB\-\-no\-switch\fR]
+.SH DESCRIPTION
+.B speakerguardd v2
+(\fBsgv2\fR) is the default speaker protection and voicing stack on all Aurora
+Silicon installations. New installs and upgraded existing installs migrate to
+.B sgv2
+automatically, removing the legacy Asahi speaker DSP graphs and retiring
+\fBspeakerguardd\fR 0.1 and legacy Aurora \fBspeakersafetyd\fR builds from the
+default package set.
+.PP
+Users who explicitly prefer to run \fBspeakersafetyd\fR instead of \fBsgv2\fR
+can opt out with a single command:
+.PP
+.RS
+.nf
+sudo aurora-speaker-stack select speakersafetyd
+.fi
+.RE
+.PP
+This verifies kernel support and installs \fBspeakersafetyd\fR first (or writes
+the declarative \fBaurora.speakers.stack\fR drop-in on NixOS), then masks the
+\fBspeakerguardd-v2\fR and \fBaurora-speaker-upgrade\fR systemd units, switches
+the kernel interlock, records the choice in
+.IR /etc/aurora/speaker-stack.conf ,
+installs a root \fBExecStartPre\fR drop-in
+(\fI/etc/systemd/system/speakersafetyd.service.d/50-aurora-speaker-stack.conf\fR)
+that arms the per-bind \fBSpeaker Protection Interface\fR control on every boot,
+and starts \fBspeakersafetyd.service\fR. If package installation, interlock
+hand-over, or service startup fails, the previous \fBsgv2\fR configuration is
+preserved or restored and the command exits non-zero.
+.PP
+Note: \fBaurora-audio\fR no longer installs the Asahi speaker DSP graphs,
+speaker FIRs, or the WirePlumber raw speaker volume lock. Opting into stock
+\fBspeakersafetyd\fR runs \fBspeakersafetyd\fR without those Asahi speaker
+profiles unless you supply them separately.
+.PP
+Future package upgrades read
+.I /etc/aurora/speaker-stack.conf
+and preserve an explicit \fBspeakersafetyd\fR opt-out instead of migrating the
+machine back to \fBsgv2\fR.
+.PP
+To return to the default \fBspeakerguardd v2\fR stack at any time:
+.PP
+.RS
+.nf
+sudo aurora-speaker-stack select sgv2
+.fi
+.RE
+.SH COMMANDS
+.TP
+.B status [\-\-json]
+Display the configured stack (default or explicit override), unit states, and
+detected ALSA speaker interlock state. Does not require root privileges.
+.TP
+.B select sgv2 [\-\-no\-switch]
+Select \fBspeakerguardd v2\fR, remove the \fBspeakersafetyd\fR opt-in drop-in,
+mask \fBspeakersafetyd.service\fR, unmask and enable the \fBspeakerguardd-v2\fR
+and \fBaurora-speaker-upgrade\fR units, and run \fBaurora-speaker-upgrade\fR
+unless \fB\-\-no\-switch\fR is passed.
+.TP
+.B select speakersafetyd [\-\-no\-install] [\-\-no\-switch]
+Verify kernel support, install \fBspeakersafetyd\fR (unless
+\fB\-\-no\-install\fR), mask \fBspeakerguardd-v2\fR and
+\fBaurora-speaker-upgrade\fR, hand over the kernel interlock, record an
+explicit opt-out in \fI/etc/aurora/speaker-stack.conf\fR, install the root
+\fBExecStartPre\fR interlock drop-in, and start \fBspeakersafetyd.service\fR.
+.TP
+.B interlock\-apply
+Internal \fBExecStartPre\fR helper for \fBspeakersafetyd.service\fR. Fails
+closed unless \fI/etc/aurora/speaker-stack.conf\fR explicitly selects
+\fBspeakersafetyd\fR; when selected, writes \fBSpeaker Volume Unlock\fR to
+\fBSpeaker Protection Interface\fR as root.
+.SH FILES
+.TP
+.I /etc/aurora/speaker-stack.conf
+Persistent user selection (\fBstack=sgv2\fR or \fBstack=speakersafetyd\fR).
+Absent by default, which means \fBsgv2\fR. On NixOS this file is managed
+declaratively by \fBaurora.speakers.stack\fR.
+.TP
+.I /etc/systemd/system/speakersafetyd.service.d/50-aurora-speaker-stack.conf
+Systemd drop-in installed on explicit \fBspeakersafetyd\fR opt-out (Fedora and
+Arch Linux ARM) so the per-bind kernel interlock is armed before
+\fBspeakersafetyd\fR starts on each boot.
+.TP
+.I /etc/nixos/aurora-speaker-stack.nix
+Generated NixOS module override written on NixOS systems.
+.SH SEE ALSO
+.BR aurora-speaker-upgrade (8),
+.BR systemctl (1)

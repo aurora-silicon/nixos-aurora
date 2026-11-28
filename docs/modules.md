@@ -140,7 +140,7 @@ settings; they do not need separate imports. Full option details are in the
 | File in `modules/` | Role and configuration |
 | --- | --- |
 | `ane.nix` | Opt-in Apple Neural Engine (ANE) tools and compiler. `aurora.ane.enable` and `firmwarePackage`; Apple firmware must be supplied locally. See [ANE setup](ane.md). |
-| `audio.nix` | ALSA restore handling, the early sequencer and PipeWire volume/latency/AirPlay fixes. `aurora.audio.skipLockedControls` and `initrdSequencer`, both default on; the PipeWire daemon package is a `lib.mkDefault`. |
+| `audio.nix` | ALSA restore handling, the early sequencer, PipeWire volume/latency/AirPlay fixes, and the `aurora-speaker-stack` opt-out selector. `aurora.audio.skipLockedControls` and `initrdSequencer` default on; `aurora.speakers.stack` defaults to `"sgv2"` (set `"speakersafetyd"` for the explicit user opt-out); the PipeWire daemon package is a `lib.mkDefault`. |
 | `awdl.nix` | Opt-in AirDrop userspace for supported Broadcom Wi-Fi, excluding the Neo's MediaTek. `aurora.awdl.enable` installs tools without creating `awdl0` or enabling discovery; `createAtBoot` is also off by default. See the option reference for activation commands. |
 | `boot-splash.nix` | Desktop Plymouth splash, early display coldplug and quiet GRUB defaults. Configure `boot.plymouth.*` and `boot.loader.*`; minimal has no splash by default. |
 | `branding.nix` | Aurora artwork and Plasma's About page. No Aurora-specific options. |

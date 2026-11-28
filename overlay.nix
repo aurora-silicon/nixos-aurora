@@ -302,6 +302,8 @@ in {
     src = source "aurora-speaker-upgrade";
     version = pins.aurora-speaker-upgrade.version;
   };
+  # The speaker protection stack selector (modules/audio.nix).
+  aurora-speaker-stack = final.callPackage ./aurora-speaker-stack.nix { };
   aurora-avd-firmware = final.callPackage ./avd-fw.nix {
     src = source "avd-fw";
     version = pins.avd-fw.version;
