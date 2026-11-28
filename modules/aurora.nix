@@ -115,6 +115,12 @@
     '';
     # Every Aurora desktop image comes with a web browser, as Fedora and ALARM do.
     programs.firefox.enable = config.aurora.desktop != "minimal";
+    # Use Fedora's zram sizing on desktops that have no configured disk swap.
+    zramSwap = lib.mkIf (config.aurora.desktop != "minimal" && config.swapDevices == [ ]) {
+      enable = lib.mkDefault true;
+      memoryPercent = lib.mkDefault 100;
+      memoryMax = lib.mkDefault (8 * 1024 * 1024 * 1024);
+    };
     # Every image has the OpenSSH server, but nothing starts it: no unit at
     # boot wants sshd or its host key generation, and the firewall keeps
     # port 22 closed. `sudo systemctl start sshd` starts it without a rebuild
