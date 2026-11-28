@@ -64,7 +64,6 @@ import tempfile
 import time
 
 
-DEVICE = Path('/dev/disk/by-partlabel/iBootSystemContainer')
 STATE = Path('/var/lib/aurora-sep')
 RUN = Path('/run/aurora-sep')
 EXTRACTOR = Path('/usr/libexec/aurora/extract-mesa-calibration')
@@ -360,6 +359,114 @@ def reseal(payload, seal, trust):
                   + encode(0x30, encode(0x16, b'secb') + encode(0x04, trust)))
 
 
+# ---------------------------------------------------------------- the boot disk
+
+# The partition is found by its GPT name on the disk that holds the system
+# ESP, never through /dev/disk/by-partlabel, which names whichever disk
+# udev saw last: a disk plugged in later can carry a partition of that name.
+ISC_NAME = 'iBootSystemContainer'
+DT_ESP = 'chosen/asahi,efi-system-partition'
+ESP_MOUNTS = ('/boot/efi', '/boot')
+# Transports of disks that can be plugged in (FireWire disks show as sbp); lsblk's RM and HOTPLUG cover
+# removable media and devices behind a hot-plug port (Thunderbolt).
+EXTERNAL_TRAN = ('usb', 'mmc', 'sbp')
+
+
+def _flag(value):
+    return value is True or str(value).strip().lower() in ('1', 'true')
+
+
+def _external(item, devices):
+    """Whether a partition or disk, or the disk it sits on, can be plugged in."""
+    parent = next((d for d in devices if d.get('path') == item.get('pkname')), None)
+    return any(_flag(d.get('rm')) or _flag(d.get('hotplug')) or
+               (d.get('tran') or '').lower() in EXTERNAL_TRAN
+               for d in (item, parent) if d)
+
+
+def block_devices(run):
+    """lsblk's block devices, each with the path of its parent (pkname)."""
+    done = run(['lsblk', '-J', '-p', '-o', 'PATH,PKNAME,PARTLABEL,PARTUUID,RM,HOTPLUG,TRAN,TYPE'],
+               capture_output=True, text=True)
+    if done.returncode:
+        raise Refused(f'lsblk failed ({done.stderr.strip()})')
+    found = []
+
+    def walk(items, parent=None):
+        for item in items:
+            item = dict(item)
+            if not item.get('pkname') and parent:
+                item['pkname'] = parent
+            found.append(item)
+            walk(item.get('children') or [], item.get('path'))
+    try:
+        walk(json.loads(done.stdout).get('blockdevices', []))
+    except (ValueError, AttributeError, TypeError):
+        raise Refused('lsblk listed no block devices') from None
+    return found
+
+
+def esp_partition(devices, run, dt):
+    """The system ESP: the partition whose PARTUUID the boot loader put in
+    the device tree, else the vfat file system mounted at /boot/efi or /boot."""
+    try:
+        raw = (dt / DT_ESP).read_bytes()
+    except FileNotFoundError:
+        raw = None
+    except OSError as e:
+        raise Refused(f'the device tree ESP property could not be read ({e})') from None
+    if raw is not None:
+        try:
+            uuid = raw.split(b'\0')[0].decode().strip().lower()
+        except UnicodeDecodeError:
+            uuid = ''
+        if not uuid:
+            raise Refused('the device tree ESP property is empty or not text')
+        # A removable or external disk can carry a copy of the ESP's PARTUUID;
+        # it is not counted, so it can neither be chosen nor hide the real one.
+        found = [d for d in devices if d.get('type') == 'part'
+                 and (d.get('partuuid') or '').lower() == uuid]
+        matches = [d.get('path') for d in found if not _external(d, devices)]
+        if not matches and found:
+            raise Refused(f'the system ESP (PARTUUID {uuid}) is only on a removable or external disk')
+        if len(matches) != 1:
+            raise Refused(f'the system ESP (PARTUUID {uuid}) matches {len(matches)} partitions, not one')
+        return matches[0]
+    for mount in ESP_MOUNTS:
+        done = run(['findmnt', '-n', '-v', '-o', 'SOURCE,FSTYPE', '--mountpoint', mount],
+                   capture_output=True, text=True)
+        rows = [line.split() for line in done.stdout.splitlines()] if done.returncode == 0 else []
+        sources = {os.path.realpath(row[0]) for row in rows
+                   if len(row) == 2 and row[0].startswith('/dev/') and row[1] == 'vfat'}
+        if len(sources) == 1:
+            return sources.pop()
+    raise Refused('the system ESP is not known: no ESP in the device tree and no vfat '
+                  'file system at /boot/efi or /boot')
+
+
+def system_container(run=subprocess.run, dt=DT):
+    """The iBootSystemContainer partition of the disk that holds the system
+    ESP. Refused when that disk is not known, is removable or external, or
+    does not hold exactly one: no other disk is read in its place."""
+    devices = block_devices(run)
+    esp_dev = esp_partition(devices, run, dt)
+    by_path = {d.get('path'): d for d in devices}
+    esp = by_path.get(esp_dev)
+    disk = by_path.get(esp.get('pkname')) if esp else None
+    if not esp or not disk or esp.get('type') != 'part' or disk.get('type') != 'disk':
+        raise Refused(f'the disk holding the system ESP {esp_dev} was not found')
+    for item in (esp, disk):
+        if _external(item, devices):
+            raise Refused(f'the system ESP {esp_dev} is on a removable or external disk '
+                          f'({disk["path"]})')
+    found = [d.get('path') for d in devices if d.get('pkname') == disk['path']
+             and d.get('type') == 'part' and d.get('partlabel') == ISC_NAME]
+    if len(found) != 1:
+        raise Refused(f'{disk["path"]}, the disk holding the system ESP, has {len(found)} '
+                      f'{ISC_NAME} partitions, not one')
+    return Path(found[0])
+
+
 # ---------------------------------------------------------------- APFS
 
 APFS_ROLE_HARDWARE = 5 << 6
@@ -368,15 +475,32 @@ APFS_MAX_BLOCK = 65536
 APFS_MAX_NODES = 16384
 APFS_MAX_DEPTH = 8
 APFS_MAX_FILES = 4096
+# File-system tree records kept while looking for the factory cache, and the
+# bytes of their keys and values.
+APFS_MAX_RECORDS = 65536
+APFS_MAX_RECORD_BYTES = 16 * 1024 * 1024
+# The factory records read, together: room for four records at RECORD_LIMIT.
+# Only the families below are read and counted; other factory files are not.
+FACTORY_BUDGET = 4 * RECORD_LIMIT
+
+
+def consumed(name):
+    """A factory record that build() and admit() use: the FSC2 calibration,
+    the MSRk root key, the seal and the trust bundles."""
+    return name.startswith(('FSC2-', 'MSRk-', 'trustobject-')) or name.lower().startswith('seal-')
 
 
 class Container:
     """Read-only APFS, just enough for one directory of the Hardware volume:
     the newest valid checkpoint, the container and volume object maps, the
     file-system tree and uncompressed, unencrypted regular files. Every object
-    read is checksummed; any other layout is refused."""
+    read is checksummed, each tree block is visited once per walk, and any
+    other layout, including a record too short for its fields, is refused.
+    `size`, the partition's size in bytes, bounds the blocks the container may
+    claim; file data is read only for the records consume() names, up to each
+    file's logical size and FACTORY_BUDGET in all."""
 
-    def __init__(self, read):
+    def __init__(self, read, size):
         self._read = read
         head = read(0, 4096)
         if len(head) < 4096 or head[32:36] != b'NXSB':
@@ -384,7 +508,10 @@ class Container:
         self.block_size, self.blocks = struct.unpack_from('<IQ', head, 36)
         if not 4096 <= self.block_size <= APFS_MAX_BLOCK or self.block_size & (self.block_size - 1):
             raise Refused('unsupported APFS block size')
+        if self.blocks * self.block_size > size:
+            raise Refused('the APFS container is larger than its partition')
         self.nodes = 0
+        self.budget = FACTORY_BUDGET
         first = self.block(0, 0x1)
         base, count = struct.unpack_from('<Q', first, 112)[0], struct.unpack_from('<I', first, 104)[0]
         if count & 0x80000000 or not 0 < count <= 65536:
@@ -410,12 +537,17 @@ class Container:
             raise Refused('unexpected APFS object')
         return data
 
-    def entries(self, number, resolve=None, depth=0):
+    def entries(self, number, resolve=None, depth=0, seen=None):
         """Each (key, value) of the B-tree at block `number`, in order; a
-        virtual tree's children go through `resolve`."""
+        virtual tree's children go through `resolve`. A block that comes up
+        twice in one walk is refused."""
         self.nodes += 1
         if self.nodes > APFS_MAX_NODES or depth > APFS_MAX_DEPTH:
             raise Refused('APFS tree too large')
+        seen = set() if seen is None else seen
+        if number in seen:
+            raise Refused('APFS tree block reached twice')
+        seen.add(number)
         node = self.block(number)
         if struct.unpack_from('<I', node, 24)[0] & 0xffff not in (0x2, 0x3):
             raise Refused('unexpected APFS object')
@@ -443,12 +575,16 @@ class Container:
             if level == 0:
                 yield key, value
             else:
+                if len(value) < 8:
+                    raise Refused('malformed APFS tree node')
                 child = struct.unpack_from('<Q', value)[0]
-                yield from self.entries(resolve(child) if resolve else child, resolve, depth + 1)
+                yield from self.entries(resolve(child) if resolve else child, resolve, depth + 1, seen)
 
     def lookup(self, root, oid, as_of):
         found = None
         for key, value in self.entries(root):
+            if len(key) < 16 or len(value) < 16:
+                raise Refused('malformed APFS object map record')
             key_oid, key_xid = struct.unpack_from('<QQ', key)
             if key_oid == oid and key_xid <= as_of and (found is None or key_xid > found[0]):
                 found = key_xid, value
@@ -461,7 +597,15 @@ class Container:
 
     def hardware(self):
         """{name: bytes} of the regular files in the Hardware volume's
-        factory cache."""
+        factory cache that consumed() names."""
+        try:
+            return self._hardware()
+        except struct.error:
+            # A field read past the end of its record: refused like any
+            # other malformed metadata, so the carve fallback still runs.
+            raise Refused('malformed APFS record') from None
+
+    def _hardware(self):
         volumes = []
         count = min(struct.unpack_from('<I', self.superblock, 180)[0], 100)
         for index in range(count):
@@ -487,10 +631,20 @@ class Container:
 
         hashed = struct.unpack_from('<Q', volume, 56)[0] & 0x9
         directories, inodes, extents = {}, {}, {}
+        kept = kept_bytes = 0
         for key, value in self.entries(resolve(struct.unpack_from('<Q', volume, 136)[0]), resolve):
+            if len(key) < 8:
+                raise Refused('malformed APFS file-system record')
             header = struct.unpack_from('<Q', key)[0]
             oid, kind = header & (1 << 60) - 1, header >> 60
+            if kind not in (3, 8, 9):
+                continue
+            kept, kept_bytes = kept + 1, kept_bytes + len(key) + len(value)
+            if kept > APFS_MAX_RECORDS or kept_bytes > APFS_MAX_RECORD_BYTES:
+                raise Refused('APFS file-system tree too large')
             if kind == 9:
+                if len(key) < (12 if hashed else 10) or len(value) < 18:
+                    raise Refused('malformed APFS directory entry')
                 if hashed:
                     length, name_at = struct.unpack_from('<I', key, 8)[0] & 0x3ff, 12
                 else:
@@ -504,6 +658,8 @@ class Container:
             elif kind == 3:
                 inodes[oid] = value
             elif kind == 8:
+                if len(key) < 16 or len(value) < 16:
+                    raise Refused('malformed APFS file extent')
                 logical = struct.unpack_from('<Q', key, 8)[0]
                 length, physical_block = struct.unpack_from('<QQ', value)
                 extents.setdefault(oid, []).append((logical, length & (1 << 56) - 1, physical_block))
@@ -515,10 +671,11 @@ class Container:
             directory = entry[0]
         found = {}
         for name, (file_id, kind) in sorted(directories.get(directory, {}).items()):
-            if kind == 8:
+            text = name.decode('utf-8', 'replace')
+            if kind == 8 and consumed(text):
                 if len(found) == APFS_MAX_FILES:
                     raise Refused('too many factory records')
-                found[name.decode('utf-8', 'replace')] = self.contents(inodes.get(file_id), extents)
+                found[text] = self.contents(inodes.get(file_id), extents)
         return found
 
     def contents(self, inode, extents):
@@ -529,15 +686,22 @@ class Container:
         private_id = struct.unpack_from('<Q', inode, 8)[0]
         count = struct.unpack_from('<H', inode, 92)[0]
         types, at, size = 96, 96 + 4 * count, 0
+        if at > len(inode):
+            raise Refused('malformed APFS inode')
         for index in range(count):
             field, _, length = struct.unpack_from('<BBH', inode, types + 4 * index)
             if at + length > len(inode):
                 raise Refused('malformed APFS inode')
             if field == 8:
+                if length < 8:
+                    raise Refused('malformed APFS inode')
                 size = struct.unpack_from('<Q', inode, at)[0]
             at += length + 7 & ~7
         if size > RECORD_LIMIT:
             raise Refused('oversized factory record')
+        if size > self.budget:
+            raise Refused('factory records too large in all')
+        self.budget -= size
         data, covered = bytearray(), 0
         for logical, length, block in sorted(extents.get(private_id, [])):
             if covered >= size:
@@ -545,11 +709,16 @@ class Container:
             if logical != covered or not length or length % self.block_size or \
                     not 0 < block <= self.blocks - length // self.block_size:
                 raise Refused('sparse or malformed APFS extent')
-            data += self._read(block * self.block_size, length)
+            # The extent may be longer than the file: read only what is left of it.
+            wanted = min(length, size - covered)
+            chunk = self._read(block * self.block_size, wanted)
+            if len(chunk) != wanted:
+                raise Refused('factory record shorter than its size')
+            data += chunk
             covered += length
-        if covered < size or len(data) < size:
+        if covered < size or len(data) != size:
             raise Refused('factory record shorter than its size')
-        return bytes(data[:size])
+        return bytes(data)
 
 
 def xid(obj):
@@ -787,9 +956,9 @@ class Wanted:
         self.evidence = {}
 
 
-def factory(read):
+def factory(read, size):
     try:
-        return Container(read).hardware(), None
+        return Container(read, size).hardware(), None
     except Refused as error:
         return {}, str(error)
 
@@ -808,11 +977,11 @@ def carve(device, extractor, work=None):
         return output.read_bytes()
 
 
-def build(read, device, extractor, identity, names, work=None):
+def build(read, device, extractor, identity, names, work, size):
     """The files this Mac's sensor loads, built from its own factory data."""
     calibration = Wanted('calibration', names[0])
     wanted = [calibration]
-    records, unreadable = factory(read)
+    records, unreadable = factory(read, size)
     try:
         if any(name.startswith('FSC2-') for name in records):
             calibration.data, calibration.evidence = admit(records, identity, b'FSC2')
@@ -995,8 +1164,8 @@ def boot_id():
         return None
 
 
-def setup(read, device, extractor, tree, firmware, state, run, *, check=False, trigger='user',
-          search=None, sep_bio=Path('/dev/sep-bio'), devices=DIAG):
+def setup(read, device, extractor, tree, firmware, state, run, *, size, check=False,
+          trigger='user', search=None, sep_bio=Path('/dev/sep-bio'), devices=DIAG):
     """Set up (or, with `check`, only report) this Mac's Touch ID files."""
     result = {'tool': 'aurora-touchid-setup', 'version': 1,
               'time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
@@ -1020,7 +1189,7 @@ def setup(read, device, extractor, tree, firmware, state, run, *, check=False, t
         fcntl.flock(lock, fcntl.LOCK_EX)
     try:
         ours = installed_by_us(state) if state.is_dir() else set()
-        wanted = build(read, device, extractor, identity, names, None if check else state)
+        wanted = build(read, device, extractor, identity, names, None if check else state, size)
         for item in wanted:
             target = firmware / item.name
             installed = read_installed(target)
@@ -1125,12 +1294,14 @@ def main(argv=None):
             log('the enclave refused the installed Touch ID file this boot; rebuilding it once')
     firmware, search = firmware_dirs()
     try:
-        if not stat.S_ISBLK(DEVICE.stat().st_mode):
-            raise ValueError(f'{DEVICE} is not a block device')
-        fd = os.open(DEVICE, os.O_RDONLY | os.O_CLOEXEC)
+        device = system_container()
+        if not stat.S_ISBLK(device.stat().st_mode):
+            raise ValueError(f'{device} is not a block device')
+        fd = os.open(device, os.O_RDONLY | os.O_CLOEXEC)
         try:
-            result = setup(lambda offset, length: os.pread(fd, length, offset), DEVICE, EXTRACTOR,
-                           DT, firmware, STATE, RUN, check=args.check, trigger=trigger, search=search)
+            result = setup(lambda offset, length: os.pread(fd, length, offset), device, EXTRACTOR,
+                           DT, firmware, STATE, RUN, check=args.check, trigger=trigger, search=search,
+                           size=os.lseek(fd, 0, os.SEEK_END))
         finally:
             os.close(fd)
     except (OSError, ValueError) as error:

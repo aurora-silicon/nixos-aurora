@@ -22,5 +22,8 @@ in {
     # starts it once the NVRAM device exists.
     systemd.packages = [ cfg.package ];
     services.udev.packages = [ cfg.package ];
+    # Connect the keyboards and mice paired in macOS again after a resume
+    # (aurora-btsync.service pulls the unit in at boot).
+    systemd.services.aurora-btsync-connect.wantedBy = [ "suspend.target" ];
   };
 }

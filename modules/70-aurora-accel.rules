@@ -1,0 +1,6 @@
+# /dev/accel/accel*: DRM compute accelerators; on these Macs, the Neural
+# Engine (ane, ane_t6021). systemd's 50-udev-default.rules makes the node
+# mode 0666 for every account. Restrict it to the accel group, plus the user
+# of the active local session: TAG+="uaccess" makes 73-seat-late.rules add
+# that user's ACL (systemd's 70-uaccess.rules has no entry for accel).
+SUBSYSTEM=="accel", KERNEL=="accel[0-9]*", GROUP="accel", MODE="0660", TAG+="uaccess"

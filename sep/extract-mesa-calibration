@@ -8,16 +8,16 @@ presence is checked; cryptographic signatures are not verified.
 
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tempfile
 
 
-ISC_PARTITION_NAME = "iBootSystemContainer"
-SYS_BLOCK = Path("/sys/class/block")
-DEV_ROOT = Path("/dev")
+DT = Path("/sys/firmware/devicetree/base")
 SCAN_CHUNK_SIZE = 4 * 1024 * 1024
 SCAN_OVERLAP = 4 * 1024 * 1024
 DER_MAX_DEPTH = 32
@@ -26,6 +26,10 @@ DER_MAX_NODES = 16384
 
 class DERError(ValueError):
     pass
+
+
+class Refused(RuntimeError):
+    """The iBoot System Container cannot be identified."""
 
 
 class TLV:
@@ -292,57 +296,121 @@ def find_comb_calibrations(data):
     return results
 
 
-def discover_isc_inputs(sys_block=SYS_BLOCK, dev_root=DEV_ROOT):
-    """Find every iSC by GPT partition name, independent of disk numbering."""
-    candidates = []
+# ---------------------------------------------------------------- the boot disk
+
+# The partition is found by its GPT name on the disk that holds the system
+# ESP, never through /dev/disk/by-partlabel, which names whichever disk
+# udev saw last: a disk plugged in later can carry a partition of that name.
+ISC_NAME = 'iBootSystemContainer'
+DT_ESP = 'chosen/asahi,efi-system-partition'
+ESP_MOUNTS = ('/boot/efi', '/boot')
+# Transports of disks that can be plugged in (FireWire disks show as sbp); lsblk's RM and HOTPLUG cover
+# removable media and devices behind a hot-plug port (Thunderbolt).
+EXTERNAL_TRAN = ('usb', 'mmc', 'sbp')
+
+
+def _flag(value):
+    return value is True or str(value).strip().lower() in ('1', 'true')
+
+
+def _external(item, devices):
+    """Whether a partition or disk, or the disk it sits on, can be plugged in."""
+    parent = next((d for d in devices if d.get('path') == item.get('pkname')), None)
+    return any(_flag(d.get('rm')) or _flag(d.get('hotplug')) or
+               (d.get('tran') or '').lower() in EXTERNAL_TRAN
+               for d in (item, parent) if d)
+
+
+def block_devices(run):
+    """lsblk's block devices, each with the path of its parent (pkname)."""
+    done = run(['lsblk', '-J', '-p', '-o', 'PATH,PKNAME,PARTLABEL,PARTUUID,RM,HOTPLUG,TRAN,TYPE'],
+               capture_output=True, text=True)
+    if done.returncode:
+        raise Refused(f'lsblk failed ({done.stderr.strip()})')
+    found = []
+
+    def walk(items, parent=None):
+        for item in items:
+            item = dict(item)
+            if not item.get('pkname') and parent:
+                item['pkname'] = parent
+            found.append(item)
+            walk(item.get('children') or [], item.get('path'))
     try:
-        block_devices = sorted(sys_block.iterdir())
-    except OSError as error:
-        block_devices = []
-        sysfs_error = error
-    else:
-        sysfs_error = None
+        walk(json.loads(done.stdout).get('blockdevices', []))
+    except (ValueError, AttributeError, TypeError):
+        raise Refused('lsblk listed no block devices') from None
+    return found
 
-    for block_device in block_devices:
+
+def esp_partition(devices, run, dt):
+    """The system ESP: the partition whose PARTUUID the boot loader put in
+    the device tree, else the vfat file system mounted at /boot/efi or /boot."""
+    try:
+        raw = (dt / DT_ESP).read_bytes()
+    except FileNotFoundError:
+        raw = None
+    except OSError as e:
+        raise Refused(f'the device tree ESP property could not be read ({e})') from None
+    if raw is not None:
         try:
-            properties = {}
-            for line in (block_device / "uevent").read_text().splitlines():
-                key, separator, value = line.partition("=")
-                if separator:
-                    properties[key] = value
-        except OSError:
-            continue
-        if properties.get("PARTNAME") != ISC_PARTITION_NAME:
-            continue
-        device_name = properties.get("DEVNAME", block_device.name)
-        if device_name.startswith("/dev/"):
-            device_name = device_name[5:]
-        device = dev_root / device_name
-        if device.exists():
-            candidates.append(device)
+            uuid = raw.split(b'\0')[0].decode().strip().lower()
+        except UnicodeDecodeError:
+            uuid = ''
+        if not uuid:
+            raise Refused('the device tree ESP property is empty or not text')
+        # A removable or external disk can carry a copy of the ESP's PARTUUID;
+        # it is not counted, so it can neither be chosen nor hide the real one.
+        found = [d for d in devices if d.get('type') == 'part'
+                 and (d.get('partuuid') or '').lower() == uuid]
+        matches = [d.get('path') for d in found if not _external(d, devices)]
+        if not matches and found:
+            raise Refused(f'the system ESP (PARTUUID {uuid}) is only on a removable or external disk')
+        if len(matches) != 1:
+            raise Refused(f'the system ESP (PARTUUID {uuid}) matches {len(matches)} partitions, not one')
+        return matches[0]
+    for mount in ESP_MOUNTS:
+        done = run(['findmnt', '-n', '-v', '-o', 'SOURCE,FSTYPE', '--mountpoint', mount],
+                   capture_output=True, text=True)
+        rows = [line.split() for line in done.stdout.splitlines()] if done.returncode == 0 else []
+        sources = {os.path.realpath(row[0]) for row in rows
+                   if len(row) == 2 and row[0].startswith('/dev/') and row[1] == 'vfat'}
+        if len(sources) == 1:
+            return sources.pop()
+    raise Refused('the system ESP is not known: no ESP in the device tree and no vfat '
+                  'file system at /boot/efi or /boot')
 
-    # This standard udev link also covers chroots where /sys is unavailable.
-    by_partlabel = dev_root / "disk/by-partlabel" / ISC_PARTITION_NAME
-    if by_partlabel.exists():
-        candidates.append(by_partlabel)
 
-    # Preserve order while removing aliases or duplicate sysfs entries.
-    unique = []
-    seen = set()
-    for candidate in candidates:
-        try:
-            identity = candidate.resolve()
-        except OSError:
-            identity = candidate
-        if identity not in seen:
-            seen.add(identity)
-            unique.append(candidate)
-    if not unique and sysfs_error is not None:
-        raise RuntimeError(
-            f"cannot inspect {sys_block} and {by_partlabel} is unavailable: "
-            f"{sysfs_error}"
-        ) from sysfs_error
-    return unique
+def system_container(run=subprocess.run, dt=DT):
+    """The iBootSystemContainer partition of the disk that holds the system
+    ESP. Refused when that disk is not known, is removable or external, or
+    does not hold exactly one: no other disk is read in its place."""
+    devices = block_devices(run)
+    esp_dev = esp_partition(devices, run, dt)
+    by_path = {d.get('path'): d for d in devices}
+    esp = by_path.get(esp_dev)
+    disk = by_path.get(esp.get('pkname')) if esp else None
+    if not esp or not disk or esp.get('type') != 'part' or disk.get('type') != 'disk':
+        raise Refused(f'the disk holding the system ESP {esp_dev} was not found')
+    for item in (esp, disk):
+        if _external(item, devices):
+            raise Refused(f'the system ESP {esp_dev} is on a removable or external disk '
+                          f'({disk["path"]})')
+    found = [d.get('path') for d in devices if d.get('pkname') == disk['path']
+             and d.get('type') == 'part' and d.get('partlabel') == ISC_NAME]
+    if len(found) != 1:
+        raise Refused(f'{disk["path"]}, the disk holding the system ESP, has {len(found)} '
+                      f'{ISC_NAME} partitions, not one')
+    return Path(found[0])
+
+
+def discover_isc_inputs(run=subprocess.run, dt=DT):
+    """The iBoot System Container of the disk that holds the system ESP."""
+    try:
+        return [system_container(run, dt)]
+    except Refused as error:
+        raise Refused(f"{error}; pass the container's block device or a raw "
+                      "partition dump explicitly") from None
 
 
 def scan_input(path):
@@ -423,8 +491,8 @@ def parse_args(argv=None):
     parser.add_argument(
         "input", nargs="?", type=Path,
         help=(
-            "raw iBoot System Container or dump; omit to discover all "
-            "iBootSystemContainer partitions"
+            "raw iBoot System Container or dump; omit to use the "
+            "iBootSystemContainer partition of the disk that holds the system ESP"
         ),
     )
     parser.add_argument(
@@ -438,11 +506,6 @@ def main():
     args = parse_args()
     try:
         inputs = [args.input] if args.input is not None else discover_isc_inputs()
-        if not inputs:
-            raise RuntimeError(
-                "no iBootSystemContainer partition found; pass its block device "
-                "or a raw partition dump explicitly"
-            )
         validate_output(args.output, inputs)
 
         candidates = []

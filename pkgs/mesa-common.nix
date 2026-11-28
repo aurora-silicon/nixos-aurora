@@ -11,7 +11,13 @@
       NIX_CFLAGS_COMPILE = "-ffile-prefix-map=/nix/store=/usr/src/nix -ffile-prefix-map=/build=/usr/src/mesa";
     };
   # The i686 BO-bind test fix is upstream since aurora-silicon/mesa#174.
-  patches = [ ];
+  # The host image copy test reads /proc/self/maps with %lx into uintptr_t,
+  # which fails the i686 guest build; carried until a pin includes
+  # aurora-silicon/mesa#1154.
+  patches = [
+    ../patches/mesa-host-image-copy-test-scnxptr.patch
+    ../patches/mesa-host-alias-offset-64bit.patch
+  ];
   outputs = [ "out" ];
   # Guest debug outputs would retain host source paths. Preserve the build
   # IDs the drivers need explicitly, while shipping stripped guest libraries.

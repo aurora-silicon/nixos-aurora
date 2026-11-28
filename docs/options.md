@@ -9,9 +9,9 @@ Apple Silicon options remain available; see the links in the module guide. For d
 
 ## `aurora.ane.enable`
 
-Install the Apple Neural Engine (ANE) tools and compiler, create the `accel` group and add
-device access rules. Disabling this omits that userspace integration;
-it does not change the kernel driver or fetch firmware.
+Install the Apple Neural Engine (ANE) tools and compiler. The `accel` group and the
+`/dev/accel` access rule come from the platform module either way. Disabling this
+omits the tools; it does not change the kernel driver or fetch firmware.
 
 **Type:** boolean
 
@@ -1063,3 +1063,27 @@ Keep the ESP's Wi-Fi firmware on the installed macOS's, as macOS does (aurora-wi
 **Default:** `true`
 
 **Declared in:** [wifi-firmware.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/wifi-firmware.nix)
+
+## `aurora.wifisync.enable`
+
+Use the Wi-Fi networks saved in macOS: when the NVRAM device appears,
+aurora-wifisync adds them to NetworkManager as keyfiles before
+NetworkManager starts, so a first boot joins a network macOS knows.
+Profiles made on Linux are left alone and no key is printed. False
+leaves NetworkManager's profiles alone.
+
+**Type:** boolean
+
+**Default:** `config.networking.networkmanager.enable`
+
+**Declared in:** [wifisync.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/wifisync.nix)
+
+## `aurora.wifisync.package`
+
+The aurora-wifisync package to use.
+
+**Type:** package
+
+**Default:** `pkgs.aurora-wifisync`
+
+**Declared in:** [wifisync.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/wifisync.nix)

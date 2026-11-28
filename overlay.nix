@@ -197,6 +197,7 @@ in {
   gnome-settings-daemon = prev.gnome-settings-daemon.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       (stableFile ./patches/gnome-settings-daemon-ambient-white-point.patch)
+      (stableFile ./patches/gnome-settings-daemon-ambient-brightness-neutral.patch)
     ];
     nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ final.dbus ];
     doCheck = true;
@@ -412,7 +413,7 @@ in {
   linux-asahi = final.lib.makeOverridable ({ _kernelPatches ? [ ] }:
     final.lib.recurseIntoAttrs (final.linuxPackagesFor (import ./pkgs/kernel.nix {
       # Preserve buildLinux's .override API (features, extraMakeFlags, ...).
-      inherit (final) lib callPackage path writeText openssl kmod binutils aurora-bindgen;
+      inherit (final) lib callPackage path writeText openssl binutils aurora-bindgen;
       src = source "kernel-aurora" // { rev = pins.kernel-aurora.commit; };
       pin = pins.kernel-aurora;
       llvmPackages = kernelLLVM;
@@ -490,7 +491,7 @@ in {
   });
   asahi-audio = prev.asahi-audio.overrideAttrs (old: {
     src = source "aurora-audio";
-    version = "${pins.aurora-audio.version}-aurora15";
+    version = "${pins.aurora-audio.version}-aurora16";
     patches = (old.patches or [ ]) ++ [ (stableFile ./patches/0001-restore-legacy-speaker-graphs.patch) ];
     postInstall = (old.postInstall or "") + ''
       echo ${pins.aurora-audio.commit} > "$out/.aurora-audio-commit"
@@ -530,6 +531,7 @@ in {
       ./patches/mutter-pq-reference-luminance.patch
       ./patches/mutter-builtin-desktop-vrr.patch
       ./patches/mutter-power-save-onscreens-dispose.patch
+      ./patches/mutter-linear-backlight-perceptual-scale.patch
     ];
   });
   # Firefox's RDD sandbox admits the media controller node of an allowed M2M
@@ -623,7 +625,12 @@ in {
     # the gate's, which also runs as the older daemons' ExecCondition.
     buildInputs = [ final.python3 ];
     nativeCheckInputs = [ final.python3 ];
-    postCheck = "python3 -I packaging/session/test_provision.py";
+    postCheck = ''
+      python3 -I packaging/session/test_provision.py
+      python3 -I packaging/session/test_wiring.py
+      python3 -I packaging/session/test_verify.py
+      python3 -I packaging/session/test_session.py
+    '';
     postInstall = ''
       lx=$out/libexec/speakerguardd-v2
       mkdir -p $lx $out/lib/lv2/sgv2.lv2 $out/lib/systemd/system $out/lib/systemd/user
@@ -935,7 +942,7 @@ in {
   # patches as fedora-aurora's and alarm-aurora's omdrop-awdl; modules/awdl.nix
   # installs it with aurora.awdl.enable, off by default.
   omdrop-awdl = let
-    py = final.python3.withPackages (ps: [ ps.libarchive-c ps.pillow ps.dbus-python ps.pygobject3 ]);
+    py = final.python3.withPackages (ps: [ ps.ifaddr ps.libarchive-c ps.pillow ps.dbus-python ps.pygobject3 ps.zeroconf ]);
     plugin = let pin = pins.omdrop-awdl.extra_sources.omdrop-plugin; in final.fetchurl {
       name = "omdrop-plugin-${pin.commit}.tar.gz";
       url = pin.source_url;
@@ -1058,8 +1065,8 @@ in {
   # updater logic with its NixOS adapter.
   aurora-stage2 = final.callPackage ./stage2/package.nix { };
   aurora-bless = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
-    cargoBuildFlags = [ "-p" "asahi-bless" ];
-    cargoTestFlags = [ "-p" "asahi-bless" "-p" "apple-nvram" "-p" "aurora-nvram" ];
+    cargoBuildFlags = [ "-p" "aurora-bless" ];
+    cargoTestFlags = [ "-p" "aurora-bless" "-p" "apple-nvram" "-p" "aurora-nvram" ];
   };
   # NVRAM reader/writer from the aurora-bless workspace; parses the NVRAM v3
   # stores of current Macs. asahi-nvram stays as a name for old scripts.
@@ -1094,6 +1101,12 @@ in {
       unit=$out/lib/systemd/system/aurora-btsync.service
       install -Dm644 aurora-btsync/etc/systemd/system/aurora-btsync.service $unit
       substituteInPlace $unit --replace-fail /usr/bin/aurora-btsync $out/bin/aurora-btsync
+      resolve=$out/lib/systemd/system/aurora-btsync-resolve.service
+      install -Dm644 aurora-btsync/etc/systemd/system/aurora-btsync-resolve.service $resolve
+      substituteInPlace $resolve --replace-fail /usr/bin/aurora-btsync $out/bin/aurora-btsync
+      connect=$out/lib/systemd/system/aurora-btsync-connect.service
+      install -Dm644 aurora-btsync/etc/systemd/system/aurora-btsync-connect.service $connect
+      substituteInPlace $connect --replace-fail /usr/bin/aurora-btsync $out/bin/aurora-btsync
       ln -s aurora-btsync.service $out/lib/systemd/system/asahi-btsync.service
       install -Dm644 aurora-btsync/etc/udev/rules.d/96-aurora-btsync.rules $out/lib/udev/rules.d/96-aurora-btsync.rules
       install -Dm644 aurora-btsync/README.md -t $out/share/doc/aurora-btsync
@@ -1105,6 +1118,31 @@ in {
       homepage = "https://github.com/aurora-silicon/aurora-bless";
       license = final.lib.licenses.mit;
       mainProgram = "aurora-btsync";
+      platforms = [ "aarch64-linux" ];
+    };
+  };
+  # Wi-Fi networks saved in macOS, added to NetworkManager
+  # (modules/wifisync.nix), from the aurora-bless workspace.
+  aurora-wifisync = rustPackage "aurora-bless" ./locks/aurora-bless.Cargo.lock {
+    pname = "aurora-wifisync";
+    nativeBuildInputs = [ final.pkg-config ];
+    buildInputs = [ final.dbus ];
+    cargoBuildFlags = [ "-p" "aurora-wifisync" ];
+    cargoTestFlags = [ "-p" "aurora-wifisync" ];
+    postInstall = ''
+      unit=$out/lib/systemd/system/aurora-wifisync.service
+      install -Dm644 aurora-wifisync/etc/systemd/system/aurora-wifisync.service $unit
+      substituteInPlace $unit --replace-fail /usr/bin/aurora-wifisync $out/bin/aurora-wifisync
+      install -Dm644 aurora-wifisync/etc/udev/rules.d/96-aurora-wifisync.rules $out/lib/udev/rules.d/96-aurora-wifisync.rules
+      install -Dm644 aurora-wifisync/README.md -t $out/share/doc/aurora-wifisync
+      install -Dm644 LICENSE $out/share/licenses/aurora-wifisync/LICENSE
+    '';
+    passthru.commit = pins.aurora-bless.commit;
+    meta = {
+      description = "Join the Wi-Fi networks saved in macOS on Linux";
+      homepage = "https://github.com/aurora-silicon/aurora-bless";
+      license = final.lib.licenses.mit;
+      mainProgram = "aurora-wifisync";
       platforms = [ "aarch64-linux" ];
     };
   };

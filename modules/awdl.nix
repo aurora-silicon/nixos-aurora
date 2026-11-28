@@ -38,9 +38,13 @@ in {
         done
       '')
     ];
-    # Units (awdl0.service, awdl-warmup.service, the user airdrop-receiver) and
-    # the system-sleep hook that removes awdl0 before suspend.
+    # Units (awdl0.service, awdl-warmup.service, the user airdrop-receiver).
     systemd.packages = [ cfg.package ];
+    # The system-sleep hook that removes awdl0 before suspend. systemd.packages
+    # links units only: NixOS's systemd-sleep runs the hooks in
+    # /etc/systemd/system-sleep (as modules/m5-platform.nix does for its own).
+    environment.etc."systemd/system-sleep/omdrop-awdl".source =
+      "${cfg.package}/lib/systemd/system-sleep/omdrop-awdl";
     systemd.services.awdl0.wantedBy = lib.mkIf cfg.createAtBoot [ "multi-user.target" ];
     networking.networkmanager.unmanaged = [ "interface-name:awdl0" ];
     security.polkit.enable = true;

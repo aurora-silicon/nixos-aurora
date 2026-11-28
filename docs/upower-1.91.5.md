@@ -8,6 +8,20 @@ drivers retain upstream behavior. Capacity, cycles and charge thresholds are
 upstream properties. Upstream 1.91.5 also prefers live charge thresholds over
 hwdb defaults. This package sets no charging policy.
 
+## Charge limit owner
+
+UPower is the only writer of the battery charge limit: it keeps the on/off
+choice in `/var/lib/upower/charging-threshold-status` and applies the limit
+when it finds the battery. The old macsmc-battery save/restore helper is not
+shipped beside it (Fedora's `asahi-battery`, which this package obsoletes; the
+units Arch's `asahi-scripts` installed before 20261023-10; NixOS never had it).
+On Fedora and Arch, `upower-charge-limit-migrate` runs before `upower.service`
+on the first boot after the update: a limit below 100 that the helper saved in
+`/etc/udev/macsmc-battery.conf` turns UPower's limit on (unless it was switched
+off in UPower after that save), a limit other than 80 stays the battery's
+`CHARGE_LIMIT` in `/etc/udev/rules.d/61-upower-charge-limit.rules`, and the old
+file is removed. Without that file it does nothing.
+
 ## Fedora 45 lead install
 
 Use the `upower-fedora45` artifact from the successful **UPower Fedora 45** PR

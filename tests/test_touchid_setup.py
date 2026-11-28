@@ -187,10 +187,11 @@ def fs_key(oid, kind, rest=b''):
 
 
 def apfs(files, *, role=helper.APFS_ROLE_HARDWARE, flags=1, bsd_flags=0, path=None,
-         hashed=True, extra_volume=True, newer=None):
+         hashed=True, extra_volume=True, newer=None, slack=0, extra=()):
     """A container whose Hardware volume holds `files` in its factory cache.
     `newer` maps to a second, newer checkpoint superblock pointing at another
-    container built from those files."""
+    container built from those files. Each file's extent is `slack` blocks
+    longer than its data; `extra` adds raw (key, value) file-system records."""
     blocks = {}
     path = helper.APFS_FACTORY if path is None else path
     entries, next_block, next_oid = [], 20, 16
@@ -210,8 +211,9 @@ def apfs(files, *, role=helper.APFS_ROLE_HARDWARE, flags=1, bsd_flags=0, path=No
             for index in range(count):
                 blocks[next_block + index] = data[index * BS:(index + 1) * BS].ljust(BS, b'\0')
             entries.append((fs_key(oid, 8, struct.pack('<Q', 0)),
-                            struct.pack('<QQQ', count * BS, next_block, 0)))
-            next_block += count
+                            struct.pack('<QQQ', (count + slack) * BS, next_block, 0)))
+            next_block += count + slack
+    entries.extend(extra)
     entries.sort(key=lambda e: e[0])
     blocks[10] = node(entries, False, oid=1027)
     blocks[9] = node([(struct.pack('<QQ', 1027, 1), struct.pack('<IIQ', 0, BS, 10))], True, oid=9)
@@ -279,17 +281,22 @@ def reader(image):
     return lambda offset, length: image[offset:offset + length]
 
 
+def container(image):
+    """The container in `image`, on a partition of exactly its size."""
+    return helper.Container(reader(image), len(image))
+
+
 # ---------------------------------------------------------------- tests
 
 class ContainerTests(unittest.TestCase):
     def test_the_factory_cache_is_read_from_the_hardware_volume(self):
         files = records()
         files[f'FSC2-{SENSOR}'] = FACTORY + bytes(2 * BS)  # spans blocks
-        self.assertEqual(helper.Container(reader(apfs(files))).hardware(), files)
+        self.assertEqual(container(apfs(files)).hardware(), files)
 
     def test_unhashed_directory_keys_are_read(self):
         files = records()
-        self.assertEqual(helper.Container(reader(apfs(files, hashed=False))).hardware(), files)
+        self.assertEqual(container(apfs(files, hashed=False)).hardware(), files)
 
     def test_unsupported_layouts_are_refused(self):
         image = apfs(records())
@@ -303,7 +310,7 @@ class ContainerTests(unittest.TestCase):
             'no factory cache': apfs(records(), path=('FactoryData',)),
         }.items():
             with self.subTest(name), self.assertRaises(helper.Refused):
-                helper.Container(reader(bad)).hardware()
+                container(bad).hardware()
 
     def test_the_newest_valid_checkpoint_is_used(self):
         image = bytearray(apfs(records()))
@@ -313,10 +320,319 @@ class ContainerTests(unittest.TestCase):
         newest = bytearray(image[BS:2 * BS])
         struct.pack_into('<Q', newest, 16, 5)
         image[BS:2 * BS] = checksummed(bytes(newest))
-        self.assertEqual(helper.Container(reader(bytes(image))).hardware(), records())
+        self.assertEqual(container(bytes(image)).hardware(), records())
         image[BS + 200] ^= 1  # a damaged newest checkpoint is skipped
         with self.assertRaises(helper.Refused):
-            helper.Container(reader(bytes(image))).hardware()
+            container(bytes(image)).hardware()
+
+
+    def test_a_long_extent_is_read_only_up_to_the_file_size(self):
+        # Each extent claims 64 blocks more than its file; only the file's
+        # bytes are read, never the whole extent.
+        files = records()
+        image = apfs(files, slack=64)
+        reads = []
+
+        def counting(offset, length):
+            reads.append(length)
+            return image[offset:offset + length]
+
+        self.assertEqual(helper.Container(counting, len(image)).hardware(), files)
+        self.assertLessEqual(max(reads), BS)
+        self.assertLess(sum(reads), 64 * BS)
+
+    def test_the_container_must_fit_its_partition(self):
+        image = apfs(records())
+        self.assertEqual(helper.Container(reader(image), len(image)).hardware(), records())
+        with self.assertRaisesRegex(helper.Refused, 'larger than its partition'):
+            helper.Container(reader(image), len(image) - BS)
+
+    def test_the_factory_records_have_a_byte_budget_in_all(self):
+        files = records()
+        total = sum(len(data) for data in files.values())
+        image = apfs(files)
+        with patch.object(helper, 'FACTORY_BUDGET', total):
+            self.assertEqual(container(image).hardware(), files)
+        with patch.object(helper, 'FACTORY_BUDGET', total - 1), \
+                self.assertRaisesRegex(helper.Refused, 'too large in all'):
+            container(image).hardware()
+        # Refused metadata is a clean refusal: no records, a reason.
+        with patch.object(helper, 'FACTORY_BUDGET', total - 1):
+            self.assertEqual(helper.factory(reader(image), len(image)),
+                             ({}, 'factory records too large in all'))
+
+    def test_a_file_whose_data_the_partition_does_not_hold_is_refused(self):
+        files = records()
+        image = apfs(files)
+        # The container's last block is cut off by the end of the device.
+        with self.assertRaises(helper.Refused):
+            helper.Container(reader(image[:-BS]), len(image) - BS)
+        # A read that comes back short is refused, not padded.
+        short = lambda offset, length: image[offset:offset + length][:max(0, length - 1)] \
+            if offset >= 20 * BS else image[offset:offset + length]
+        with self.assertRaisesRegex(helper.Refused, 'shorter than its size'):
+            helper.Container(short, len(image)).hardware()
+
+
+    def test_only_the_records_in_use_are_read_and_counted(self):
+        # Other factory files are neither read nor counted against the budget.
+        files = records()
+        used = sum(len(data) for data in files.values())
+        image = apfs({**files, 'HmCA-0': b'\x5a' * (3 * BS), 'Other-1': b'x'})
+        reads = []
+
+        def counting(offset, length):
+            reads.append((offset, length))
+            return image[offset:offset + length]
+
+        with patch.object(helper, 'FACTORY_BUDGET', used):
+            self.assertEqual(helper.Container(counting, len(image)).hardware(), files)
+        self.assertNotIn(b'\x5a' * 64, b''.join(image[o:o + n] for o, n in reads))
+        for name in ('FSC2-x', 'MSRk-x', 'seal-x', 'SEAL-x', 'trustobject-current'):
+            self.assertTrue(helper.consumed(name), name)
+        for name in ('HmCA-0', 'fsc2-x', 'trust-x', 'xseal-'):
+            self.assertFalse(helper.consumed(name), name)
+
+    def test_records_too_short_for_their_fields_are_refused(self):
+        # Each would make a field read run past its record (struct.error);
+        # all are Refused, and factory() gives no records and the reason.
+        for name, record in {
+            'record key': (b'\0' * 4, b''),
+            'extent key': (fs_key(900, 8), struct.pack('<QQQ', BS, 20, 0)),
+            'extent value': (fs_key(900, 8, struct.pack('<Q', 0)), b'\0' * 8),
+            'directory entry key': (fs_key(2, 9, b'\0\0'), drec(900, 8)),
+            'directory entry value': (drec_key(2, b'short', True), b'\0' * 10),
+        }.items():
+            with self.subTest(name):
+                image = apfs(records(), extra=[record])
+                with self.assertRaises(helper.Refused):
+                    container(image).hardware()
+                found, reason = helper.factory(reader(image), len(image))
+                self.assertEqual(found, {})
+                self.assertIn('malformed APFS', reason)
+
+    def test_a_short_inode_field_table_is_refused(self):
+        c = container(apfs(records()))
+        # A size field of 4 bytes, and a field table longer than the inode.
+        with self.assertRaises(helper.Refused):
+            c.contents(bytes(92) + struct.pack('<HH', 1, 4) + struct.pack('<BBH', 8, 0, 4) + bytes(4), {})
+        with self.assertRaises(helper.Refused):
+            c.contents(bytes(92) + struct.pack('<HH', 50, 0), {})
+
+    def test_the_file_system_records_kept_are_bounded(self):
+        image = apfs(records())
+        with patch.object(helper, 'APFS_MAX_RECORDS', 8), \
+                self.assertRaisesRegex(helper.Refused, 'file-system tree too large'):
+            container(image).hardware()
+        with patch.object(helper, 'APFS_MAX_RECORD_BYTES', 256), \
+                self.assertRaisesRegex(helper.Refused, 'file-system tree too large'):
+            container(image).hardware()
+
+    def test_a_tree_block_is_visited_once_per_walk(self):
+        image = bytearray(apfs(records()))
+        # Blocks 12 and 13 are free in the synthetic container: a leaf, and an
+        # index root that names it twice.
+        image[12 * BS:13 * BS] = node([(fs_key(5, 3), inode(5, 0))], False, root=False, oid=12)
+        image[13 * BS:14 * BS] = node([(fs_key(1, 3), struct.pack('<Q', 12)),
+                                       (fs_key(9, 3), struct.pack('<Q', 12))],
+                                      False, leaf=False, oid=13)
+        c = container(bytes(image))
+        with self.assertRaisesRegex(helper.Refused, 'reached twice'):
+            list(c.entries(13))
+        # A fresh walk of the same tree is not a second visit.
+        image[13 * BS:14 * BS] = node([(fs_key(1, 3), struct.pack('<Q', 12))], False, leaf=False, oid=13)
+        c = container(bytes(image))
+        self.assertEqual(len(list(c.entries(13))), 1)
+        self.assertEqual(len(list(c.entries(13))), 1)
+
+
+def disk(path, *parts, rm=False, hotplug=False, tran='nvme'):
+    return {'path': path, 'pkname': None, 'partlabel': None, 'partuuid': None, 'rm': rm,
+            'hotplug': hotplug, 'tran': tran, 'type': 'disk', 'children': list(parts)}
+
+
+def part(path, label=None, uuid=None, rm=False, hotplug=False):
+    return {'path': path, 'pkname': None, 'partlabel': label, 'partuuid': uuid, 'rm': rm,
+            'hotplug': hotplug, 'tran': None, 'type': 'part'}
+
+
+ESP_UUID = '6e6c1d9b-35e3-4a51-8e2c-4a7f0d5a1b20'
+INTERNAL = disk('/dev/nvme0n1', part('/dev/nvme0n1p1', 'iBootSystemContainer'),
+                part('/dev/nvme0n1p2', 'Container'), part('/dev/nvme0n1p4', 'EFI - AURORA', ESP_UUID),
+                part('/dev/nvme0n1p6', 'RecoveryOSContainer'))
+# A disk plugged in later, with a partition of the same name. udev's
+# by-partlabel link may name it.
+PLUGGED = disk('/dev/sda', part('/dev/sda1', 'iBootSystemContainer'), tran='usb', hotplug=True)
+
+
+class BootDisk:
+    """lsblk -J and findmnt as subprocess.run would answer them."""
+
+    def __init__(self, *disks, mounts=None, lsblk_rc=0):
+        self.disks, self.mounts, self.lsblk_rc, self.calls = disks, mounts or {}, lsblk_rc, []
+
+    def __call__(self, argv, **_):
+        self.calls.append(argv)
+        if argv[0] == 'lsblk':
+            out = json.dumps({'blockdevices': list(self.disks)})
+            return subprocess.CompletedProcess(argv, self.lsblk_rc, out, 'lsblk: boom')
+        if argv[0] == 'findmnt':
+            line = self.mounts.get(argv[-1])
+            return subprocess.CompletedProcess(argv, 0 if line else 1, line or '', '')
+        raise AssertionError(argv)
+
+
+class SystemContainerTests(unittest.TestCase):
+    def tree(self, uuid=ESP_UUID):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        if uuid is not None:
+            (root / 'chosen').mkdir()
+            (root / 'chosen' / 'asahi,efi-system-partition').write_bytes(uuid.upper().encode() + b'\0')
+        return root
+
+    def test_the_partition_on_the_esp_disk_is_used_not_a_plugged_in_one(self):
+        for order in ((INTERNAL, PLUGGED), (PLUGGED, INTERNAL)):
+            with self.subTest(first=order[0]['path']):
+                self.assertEqual(helper.system_container(BootDisk(*order), self.tree()),
+                                 Path('/dev/nvme0n1p1'))
+
+    def test_without_the_device_tree_property_the_mounted_esp_is_used(self):
+        run = BootDisk(INTERNAL, PLUGGED, mounts={'/boot/efi': '/dev/nvme0n1p4 vfat\n'})
+        self.assertEqual(helper.system_container(run, self.tree(None)), Path('/dev/nvme0n1p1'))
+        run = BootDisk(INTERNAL, PLUGGED, mounts={'/boot': '/dev/nvme0n1p4 vfat\n'})
+        self.assertEqual(helper.system_container(run, self.tree(None)), Path('/dev/nvme0n1p1'))
+        self.assertIn(['findmnt', '-n', '-v', '-o', 'SOURCE,FSTYPE', '--mountpoint', '/boot'], run.calls)
+
+    def test_an_unknown_esp_is_refused(self):
+        for name, run, tree in (
+            ('no property, nothing mounted', BootDisk(INTERNAL), self.tree(None)),
+            ('mounted, not vfat', BootDisk(INTERNAL, mounts={'/boot': '/dev/nvme0n1p4 ext4\n'}), self.tree(None)),
+            ('property names no partition', BootDisk(INTERNAL), self.tree('00000000-0000-0000-0000-000000000000')),
+            ('property names two partitions', BootDisk(INTERNAL, disk('/dev/sdb', part('/dev/sdb1', 'EFI', ESP_UUID))),
+             self.tree()),
+            ('lsblk fails', BootDisk(INTERNAL, lsblk_rc=1), self.tree()),
+        ):
+            with self.subTest(name), self.assertRaises(helper.Refused):
+                helper.system_container(run, tree)
+
+    def test_an_esp_on_a_removable_or_external_disk_is_refused(self):
+        for name, external in (
+            ('usb', disk('/dev/sda', part('/dev/sda1', 'iBootSystemContainer'),
+                         part('/dev/sda2', 'EFI', ESP_UUID), tran='usb')),
+            ('removable', disk('/dev/sda', part('/dev/sda1', 'iBootSystemContainer'),
+                               part('/dev/sda2', 'EFI', ESP_UUID), rm=True, tran='sata')),
+            ('hotplug', disk('/dev/nvme1n1', part('/dev/nvme1n1p1', 'iBootSystemContainer'),
+                             part('/dev/nvme1n1p2', 'EFI', ESP_UUID, hotplug=True))),
+        ):
+            with self.subTest(name), self.assertRaisesRegex(helper.Refused, 'removable or external'):
+                helper.system_container(BootDisk(external), self.tree())
+
+    def test_the_esp_disk_must_hold_exactly_one_container(self):
+        none = disk('/dev/nvme0n1', part('/dev/nvme0n1p4', 'EFI', ESP_UUID))
+        two = disk('/dev/nvme0n1', part('/dev/nvme0n1p1', 'iBootSystemContainer'),
+                   part('/dev/nvme0n1p2', 'iBootSystemContainer'), part('/dev/nvme0n1p4', 'EFI', ESP_UUID))
+        for name, layout in (('none', none), ('two', two)):
+            with self.subTest(name), self.assertRaisesRegex(helper.Refused, 'not one'):
+                helper.system_container(BootDisk(layout, PLUGGED), self.tree())
+
+    def test_the_helpers_open_no_partition_by_label(self):
+        for name in ('aurora-touchid-setup', 'extract-mesa-calibration'):
+            self.assertNotRegex((PACKAGE / name).read_text(), r'''["']/dev/disk/by-partlabel''', name)
+
+
+class EspPropertyTests(unittest.TestCase):
+    tree = SystemContainerTests.tree
+
+    def raw_tree(self, data):
+        root = self.tree(None)
+        (root / 'chosen').mkdir()
+        (root / 'chosen' / 'asahi,efi-system-partition').write_bytes(data)
+        return root
+
+    def test_an_empty_or_binary_property_is_refused_not_skipped(self):
+        # The mounted ESP would resolve; a property that is present but
+        # unusable must not fall back to it.
+        run = BootDisk(INTERNAL, mounts={'/boot/efi': '/dev/nvme0n1p4 vfat\n'})
+        for name, data in (('empty', b''), ('nul only', b'\0'), ('blank', b' \0'), ('binary', b'\xff\xfe\0')):
+            with self.subTest(name), self.assertRaisesRegex(helper.Refused, 'empty or not text'):
+                helper.system_container(run, self.raw_tree(data))
+
+    def test_an_external_copy_of_the_esp_partuuid_is_not_counted(self):
+        copy = disk('/dev/sda', part('/dev/sda1', 'iBootSystemContainer'),
+                    part('/dev/sda2', 'EFI', ESP_UUID), tran='usb')
+        for order in ((INTERNAL, copy), (copy, INTERNAL)):
+            with self.subTest(first=order[0]['path']):
+                self.assertEqual(helper.system_container(BootDisk(*order), self.tree()),
+                                 Path('/dev/nvme0n1p1'))
+        # Alone, the external copy is still not chosen.
+        with self.assertRaises(helper.Refused):
+            helper.system_container(BootDisk(copy), self.tree())
+
+    def test_a_firewire_disk_is_external(self):
+        firewire = disk('/dev/sdc', part('/dev/sdc1', 'iBootSystemContainer'),
+                        part('/dev/sdc2', 'EFI', ESP_UUID), tran='sbp')
+        with self.assertRaises(helper.Refused):
+            helper.system_container(BootDisk(firewire), self.tree())
+
+
+def listed(*rows):
+    """Rows as lsblk prints them for these columns: one flat list, PKNAME set."""
+    return [dict(zip(('path', 'pkname', 'partlabel', 'partuuid', 'rm', 'hotplug', 'tran', 'type'), row))
+            for row in rows]
+
+
+# util-linux 2.41 on an M2 (PARTUUIDs replaced): the disk and its two extra
+# NVMe namespaces are separate disks, and nothing is nested.
+LISTING = listed(
+    ('/dev/nvme0n1', None, None, None, False, False, 'nvme', 'disk'),
+    ('/dev/nvme0n1p1', '/dev/nvme0n1', 'iBootSystemContainer', '11111111-0000-4000-8000-000000000001', False, False, 'nvme', 'part'),
+    ('/dev/nvme0n1p2', '/dev/nvme0n1', 'Container', '11111111-0000-4000-8000-000000000002', False, False, 'nvme', 'part'),
+    ('/dev/nvme0n1p3', '/dev/nvme0n1', None, '11111111-0000-4000-8000-000000000003', False, False, 'nvme', 'part'),
+    ('/dev/nvme0n1p4', '/dev/nvme0n1', None, ESP_UUID, False, False, 'nvme', 'part'),
+    ('/dev/nvme0n1p7', '/dev/nvme0n1', 'RecoveryOSContainer', '11111111-0000-4000-8000-000000000007', False, False, 'nvme', 'part'),
+    ('/dev/nvme0n2', None, None, None, False, False, 'nvme', 'disk'),
+    ('/dev/nvme0n3', None, None, None, False, False, 'nvme', 'disk'),
+)
+STICK = listed(
+    ('/dev/sda', None, None, None, False, False, 'usb', 'disk'),
+    ('/dev/sda1', '/dev/sda', 'iBootSystemContainer', '22222222-0000-4000-8000-000000000001', False, False, 'usb', 'part'),
+)
+
+
+class ListingTests(unittest.TestCase):
+    tree = SystemContainerTests.tree
+
+    def test_a_flat_listing_with_pkname_resolves(self):
+        for order in (LISTING + STICK, STICK + LISTING):
+            self.assertEqual(helper.system_container(BootDisk(*order), self.tree()), Path('/dev/nvme0n1p1'))
+
+    def test_flags_printed_as_strings_are_read(self):
+        # lsblk before 2.33 prints RM and HOTPLUG as "0"/"1".
+        def strings(rows):
+            return [{k: str(int(v)) if isinstance(v, bool) else v for k, v in row.items()} for row in rows]
+        self.assertEqual(helper.system_container(BootDisk(*strings(LISTING + STICK)), self.tree()),
+                         Path('/dev/nvme0n1p1'))
+        external = strings(listed(
+            ('/dev/nvme1n1', None, None, None, False, True, 'nvme', 'disk'),
+            ('/dev/nvme1n1p1', '/dev/nvme1n1', 'iBootSystemContainer', None, False, True, 'nvme', 'part'),
+            ('/dev/nvme1n1p2', '/dev/nvme1n1', 'EFI', ESP_UUID, False, True, 'nvme', 'part')))
+        with self.assertRaisesRegex(helper.Refused, 'removable or external'):
+            helper.system_container(BootDisk(*external), self.tree())
+
+    def test_an_automount_row_does_not_hide_the_mounted_esp(self):
+        run = BootDisk(*LISTING, mounts={'/boot/efi': 'systemd-1 autofs\n/dev/nvme0n1p4 vfat\n'})
+        self.assertEqual(helper.system_container(run, self.tree(None)), Path('/dev/nvme0n1p1'))
+        run = BootDisk(*LISTING, mounts={'/boot/efi': 'systemd-1 autofs\n'})
+        with self.assertRaises(helper.Refused):
+            helper.system_container(run, self.tree(None))
+
+    def test_both_tools_carry_the_same_resolver(self):
+        def block(name):
+            text = (PACKAGE / name).read_text()
+            return text[text.index('the boot disk\n'):text.index("    return Path(found[0])\n")]
+        self.assertEqual(block('aurora-touchid-setup'), block('extract-mesa-calibration'))
 
 
 class ManifestTests(unittest.TestCase):
@@ -572,7 +888,8 @@ class SetupTests(unittest.TestCase):
         options.setdefault('devices', self.root / 'no-devices')
         with contextlib.redirect_stderr(io.StringIO()) as out:
             result = helper.setup(reader(self.image), self.root / 'device', self.extractor,
-                                  self.tree, self.firmware, self.state, self.run, **options)
+                                  self.tree, self.firmware, self.state, self.run,
+                                  **{'size': len(self.image), **options})
         self.output = out.getvalue()
         return result
 
@@ -689,6 +1006,46 @@ class SetupTests(unittest.TestCase):
                 self.assertEqual(self.actions(result), {'calibration': 'install'})
                 self.assertEqual(self.target.read_bytes(), fscl)
                 self.assertEqual(result['files'][0]['source'], 'carved from the iBoot System Container')
+
+    def test_malformed_factory_metadata_falls_back_to_the_carved_record(self):
+        self.image = apfs(records(), extra=[(fs_key(900, 8), struct.pack('<QQQ', BS, 20, 0))])
+        self.carved.write_bytes(FSCL_RECORDS[0])
+        result = self.setup()
+        self.assertEqual(self.actions(result), {'calibration': 'install'})
+        self.assertEqual(result['files'][0]['source'], 'carved from the iBoot System Container')
+
+    def test_main_reads_the_device_with_its_size(self):
+        # main() hands setup() the device's size, so the container bounds hold.
+        device = self.root / 'container.img'
+        device.write_bytes(self.image)
+        seen = {}
+
+        def fake_setup(read, *args, **options):
+            seen.update(options, head=read(0, 64))
+            return {'status': 'ok', 'files': []}
+
+        with patch.object(helper, 'system_container', return_value=device), \
+                patch.object(helper.os, 'geteuid', return_value=0), \
+                patch.object(helper.stat, 'S_ISBLK', return_value=True), \
+                patch.object(helper, 'firmware_dirs', return_value=(self.firmware, None)), \
+                patch.object(helper, 'setup', fake_setup), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(helper.main(['--check']), 0)
+        self.assertEqual(seen['size'], len(self.image))
+        self.assertEqual(seen['head'], self.image[:64])
+        self.assertTrue(seen['check'])
+
+    def test_main_refuses_cleanly_when_the_container_is_not_identified(self):
+        out = io.StringIO()
+        with patch.object(helper, 'system_container', side_effect=helper.Refused('the system ESP is not known')), \
+                patch.object(helper.os, 'geteuid', return_value=0), \
+                patch.object(helper, 'firmware_dirs', return_value=(self.firmware, None)), \
+                patch.object(helper, 'setup') as setup, contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(helper.main(['--check', '--json']), 2)
+        setup.assert_not_called()
+        result = json.loads(out.getvalue())
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['error'], 'the system ESP is not known')
 
     def test_no_carvable_record_fails_without_writing(self):
         self.image = apfs({'HmCA-0': b'unrelated'})

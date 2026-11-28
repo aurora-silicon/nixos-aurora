@@ -32,7 +32,7 @@ stdenvNoCC.mkDerivation {
     substituteInPlace $out/bin/aurora-touchid-setup \
       --replace-fail /usr/libexec/aurora/extract-mesa-calibration $out/libexec/aurora/extract-mesa-calibration
     patchShebangs $out/libexec $out/bin
-    for helper in $out/libexec/aurora-sep-load $out/libexec/aurora-sep-ready $out/libexec/aurora/sensor-present $out/libexec/aurora/touchid-setup-needed $out/libexec/aurora/touchid-publish; do
+    for helper in $out/libexec/aurora-sep-load $out/libexec/aurora-sep-ready $out/libexec/aurora/extract-mesa-calibration $out/libexec/aurora/sensor-present $out/libexec/aurora/touchid-setup-needed $out/libexec/aurora/touchid-publish; do
       wrapProgram "$helper" --prefix PATH : ${lib.makeBinPath [ bash coreutils keyutils kmod util-linux gnugrep systemd ]}
     done
     # aurora-sep status asks systemctl and the journal.

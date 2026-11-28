@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Wed, 25 Nov 2026 13:15:00 +1100
+Subject: [PATCH] power: Normalize ambient brightness baseline to neutral 50%
+
+gnome-shell's BrightnessManager applies the auto-brightness target as a
+bias centered at 0.5:
+
+  target = clamp(abTarget + scale.value - 0.5, 0.0, 1.0)
+
+gsd-power normalized the initial ambient reading with factor 1.5, which
+produced an initial ambient target of 100 / 1.5 = 66.7% (0.667). On every
+session login under constant light this added +16.7% to the restored
+brightness, ratcheting the display toward maximum across reboots and
+preventing the slider from reaching the bottom of the backlight range.
+In addition, re-normalizing after a manual user adjustment left the old
+ambient_accumulator in place so the filter kept pushing against the user's
+chosen level.
+
+Use a normalization factor of 2.0 (baseline 50% = 0.5) and reset
+ambient_accumulator and ambient_update_last_time on re-normalization so
+constant room light keeps the user's or restored brightness unchanged and
+the full 0..100% range remains reachable.
+
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+diff --git a/plugins/power/gsd-power-manager.c b/plugins/power/gsd-power-manager.c
+index 7d57383..0c668c7 100644
+--- a/plugins/power/gsd-power-manager.c
++++ b/plugins/power/gsd-power-manager.c
+@@ -95,9 +95,10 @@
+  * for us in the future so we can drop this value to ~1 time per second. */
+ #define GSD_AMBIENT_SEND_UPDATE_INTERVAL (G_USEC_PER_SEC * 0.1f)
+ 
+-/* Normalize against this factor of the current absolute reading.
+- * The value has been chosen arbitrarily but seems to work in practice. */
+-#define GSD_AMBIENT_NORMALIZE_CONSTANT (1.5f)
++/* Normalize against twice the current absolute reading so the baseline
++ * ambient target is 50% (0.5), matching gnome-shell's neutral bias point
++ * (target = clamp(abTarget + scale.value - 0.5, 0, 1)). */
++#define GSD_AMBIENT_NORMALIZE_CONSTANT (2.0f)
+ 
+ static const gchar introspection_xml[] =
+ "<node>"
+@@ -2974,8 +2975,8 @@ iio_proxy_changed (GsdPowerManager *manager)
+                 g_debug ("Normalizing light level");
+ 
+                 manager->ambient_norm_value = ambient_last_absolute * GSD_AMBIENT_NORMALIZE_CONSTANT;
+-                if (manager->ambient_accumulator <= 0.f)
+-                        manager->ambient_accumulator = 100.f / GSD_AMBIENT_NORMALIZE_CONSTANT;
++                manager->ambient_accumulator = 100.f / GSD_AMBIENT_NORMALIZE_CONSTANT;
++                manager->ambient_update_last_time = 0;
+ 
+                 manager->ambient_norm_required = FALSE;
+         }

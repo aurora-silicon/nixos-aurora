@@ -94,7 +94,10 @@ jobs:
           [[ $BASE_RELEASE =~ ^cache-[A-Za-z0-9._-]+$ ]]
           echo "tag=$BASE_RELEASE" >> "$GITHUB_OUTPUT"
           echo "commit=$("$GITHUB_WORKSPACE/scripts/gh-retry" api "repos/$GITHUB_REPOSITORY/releases/tags/$BASE_RELEASE" --jq .target_commitish)" >> "$GITHUB_OUTPUT"
-          served=$("$GITHUB_WORKSPACE/scripts/gh-retry" api "repos/$GITHUB_REPOSITORY/commits/channel-testing" --jq .sha 2>/dev/null || true)
+          # Empty only while no channel-testing branch exists; a failed lookup
+          # fails the step instead of skipping the rollback guard.
+          served=$("$GITHUB_WORKSPACE/scripts/gh-retry" api "repos/$GITHUB_REPOSITORY/git/matching-refs/heads/channel-testing" \
+            --jq '.[] | select(.ref == "refs/heads/channel-testing") | .object.sha')
           echo "served=$served" >> "$GITHUB_OUTPUT"
           "$GITHUB_WORKSPACE/scripts/gh-retry" release download "$BASE_RELEASE" --repo "$GITHUB_REPOSITORY" --pattern cache-metadata.tar.gz --dir previous
           python3 scripts/extract-cache-metadata.py previous/cache-metadata.tar.gz previous/site

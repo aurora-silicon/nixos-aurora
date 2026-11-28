@@ -1,0 +1,49 @@
+From a41505df08475ad7826c9327959b6a544364686d Mon Sep 17 00:00:00 2001
+From: Ryan Murray <ryan@aurorasilicon.org>
+Date: Fri, 27 Nov 2026 04:43:45 +1100
+Subject: [PATCH] borealis: read /proc/self/maps addresses as uintptr_t in the
+ host image copy test
+
+The test scans /proc/self/maps with %lx into uintptr_t. On a 32-bit
+build uintptr_t is unsigned int, so -Werror=format stops the build of
+the i686 driver (the FEX guest Mesa). Use SCNxPTR, which matches
+uintptr_t on every ABI.
+
+Signed-off-by: Ryan Murray <ryan@aurorasilicon.org>
+---
+ src/asahi/vulkan/tests/test-hk-host-image-copy.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/asahi/vulkan/tests/test-hk-host-image-copy.c b/src/asahi/vulkan/tests/test-hk-host-image-copy.c
+index 288b93fa0b0f9..1f5b3eb6c2e27 100644
+--- a/src/asahi/vulkan/tests/test-hk-host-image-copy.c
++++ b/src/asahi/vulkan/tests/test-hk-host-image-copy.c
+@@ -13,6 +13,7 @@
+ #include "hk_image.h"
+ 
+ #include <assert.h>
++#include <inttypes.h>
+ #include <pthread.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -213,7 +214,7 @@ reserved(const void *addr, size_t size)
+    while (fgets(line, sizeof(line), maps)) {
+       uintptr_t lo, hi;
+       char perms[5];
+-      if (sscanf(line, "%lx-%lx %4s", &lo, &hi, perms) != 3)
++      if (sscanf(line, "%" SCNxPTR "-%" SCNxPTR " %4s", &lo, &hi, perms) != 3)
+          continue;
+       if (lo <= (uintptr_t)addr && (uintptr_t)addr + size <= hi) {
+          found = !strcmp(perms, "---p");
+@@ -236,7 +237,7 @@ mapped_rw(const void *addr, size_t size)
+    while (fgets(line, sizeof(line), maps)) {
+       uintptr_t lo, hi;
+       char perms[5];
+-      if (sscanf(line, "%lx-%lx %4s", &lo, &hi, perms) != 3)
++      if (sscanf(line, "%" SCNxPTR "-%" SCNxPTR " %4s", &lo, &hi, perms) != 3)
+          continue;
+       if (lo <= (uintptr_t)addr && (uintptr_t)addr + size <= hi) {
+          found = !strncmp(perms, "rw", 2);
+-- 
+2.54.0
+
