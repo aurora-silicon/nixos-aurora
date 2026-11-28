@@ -27,9 +27,11 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / 'scripts'))
 import updatelib as lib  # noqa: E402
 from cache_inputs import expected_outputs, require_coverage, store_paths  # noqa: E402
+import edgelib  # noqa: E402
 
 TAG = re.compile(r'cache-[A-Za-z0-9._-]+')
-REFS = {'testing': 'channel-testing', 'stable': 'channel-stable'}
+# channel-edge moves only with the adopted aurora-distributions Edge train (edgelib.edge_gate).
+REFS = {'testing': 'channel-testing', 'stable': 'channel-stable', 'edge': 'channel-edge'}
 CACHE_URL = 'https://aurorasilicon.org/nixos-aurora/cache'
 
 
@@ -142,9 +144,16 @@ def assemble(args):
             before and not lib.is_ancestor(ROOT, before, commit) for before in current):
         raise SystemExit('Cache or testing would move backwards; use --allow-downgrade for an approved rollback')
     report = pin_history(previous_commit(state, repository, args.tag), commit, args.allow_downgrade)
+    advance_edge = getattr(args, 'advance_edge', False)
+    if advance_edge:
+        if not getattr(args, 'edge_train', None):
+            raise SystemExit('Advancing channel-edge needs the adopted Edge train record (--edge-train).')
+        edgelib.edge_gate(json.loads(Path(args.edge_train).read_text()), commit,
+                          lib.json_at(ROOT, commit, 'sources.json'))
     covered = store_paths(site / 'cache')
     for channel, entry in state['channels'].items():
-        if (channel == 'testing' and args.advance_testing) or entry['commit'] == commit:
+        if ((channel == 'testing' and args.advance_testing) or (channel == 'edge' and advance_edge)
+                or entry['commit'] == commit):
             continue
         expected = expected_outputs(entry['commit'])
         try:
@@ -161,6 +170,8 @@ def assemble(args):
     state['cache'] = entry
     if args.advance_testing:
         state = lib.record_channel(state, 'testing', entry)
+    if advance_edge:
+        state = lib.record_channel(state, 'edge', entry)
     (site / 'channels.json').write_text(json.dumps({'repository': repository, 'cache': state['cache'],
                                                     'channels': state['channels'], 'updated_at': stamp},
                                                    indent=2, sort_keys=True) + '\n')
@@ -242,6 +253,8 @@ def main():
     build = commands.add_parser('assemble')
     build.add_argument('--tag', required=True)
     build.add_argument('--advance-testing', action='store_true')
+    build.add_argument('--advance-edge', action='store_true')
+    build.add_argument('--edge-train', help="aurora-distributions' adopted site/installer/edge-train.json")
     build.add_argument('--allow-downgrade', action='store_true')
     build.add_argument('--site', required=True)
     build.add_argument('--work', required=True)

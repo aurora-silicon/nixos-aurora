@@ -9,6 +9,10 @@ on:
         description: Point channel-testing at the release's commit
         type: boolean
         default: true
+      advance-edge:
+        description: Point channel-edge at the release's commit (only the commit the adopted Edge train names)
+        type: boolean
+        default: false
       allow-downgrade:
         description: Allow cache, testing or source-pin rollback; requires stable-promotion approval
         type: boolean
@@ -25,6 +29,9 @@ on:
       advance-testing:
         type: boolean
         default: true
+      advance-edge:
+        type: boolean
+        default: false
       allow-downgrade:
         type: boolean
         default: false
@@ -66,11 +73,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release-tag }}
           ADVANCE: ${{ inputs.advance-testing }}
+          ADVANCE_EDGE: ${{ inputs.advance-edge }}
           ALLOW_DOWNGRADE: ${{ inputs.allow-downgrade }}
         run: |
           set -euo pipefail
           flags=()
           [[ $ADVANCE != true ]] || flags+=(--advance-testing)
+          if [[ $ADVANCE_EDGE == true ]]; then
+            # Every distribution's Edge moves with the adopted aurora-distributions train.
+            gh api 'repos/aurora-silicon/aurora-distributions/contents/site/installer/edge-train.json?ref=main' \
+              -H 'Accept: application/vnd.github.raw' > "$RUNNER_TEMP/edge-train.json"
+            flags+=(--advance-edge --edge-train "$RUNNER_TEMP/edge-train.json")
+          fi
           [[ $ALLOW_DOWNGRADE != true ]] || flags+=(--allow-downgrade)
           python3 scripts/cache-channels.py assemble --tag "$RELEASE_TAG" "${flags[@]}" --site site \
             --work "$RUNNER_TEMP/assemble" --state-out channel-state.json | tee -a "$GITHUB_STEP_SUMMARY"
@@ -170,7 +184,9 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           ADVANCE: ${{ inputs.advance-testing }}
+          ADVANCE_EDGE: ${{ inputs.advance-edge }}
         run: |
           channels=()
           [[ $ADVANCE != true ]] || channels=(testing)
+          [[ $ADVANCE_EDGE != true ]] || channels+=(edge)
           python3 scripts/cache-channels.py record --state channel-state.json --channels "${channels[@]}"

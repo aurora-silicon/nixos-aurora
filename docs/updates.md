@@ -277,3 +277,16 @@ See [development](development.md) for local checks and the
 [shared update policy](https://github.com/aurora-silicon/aurora-distributions/blob/main/docs/updates.md)
 for cross-distribution signing procedures. Artifact verification and physical
 installation or hardware qualification remain separate results.
+
+## Edge
+
+Edge is offered to the Macs whose chip family the adopted Edge train's rows qualify, one named machine per family; every other Mac stays on Nightly. The [Edge train document](https://github.com/aurora-silicon/aurora-distributions/blob/main/docs/edge-train.md) lists the families and machines. On NixOS it is the ref `channel-edge`: images built with `images.yml -f channel=edge` follow it, and `deploy-cache.yml -f advance-edge=true` moves it. That deploy reads `site/installer/edge-train.json` from aurora-distributions main and refuses any commit the adopted train does not name, or whose Edge pins (`kernel-aurora-edge`, `mesa-aurora-edge` in `sources.json`) are not the train's aurora-edge pair (`scripts/edgelib.py`).
+
+Signing (`testing-signing`) and cache releases accept only commits on main, so the Edge kernel and Mesa live on main beside Testing's:
+
+- `sources.json` carries `kernel-aurora-edge` and `mesa-aurora-edge`, with their own `kernel/edge/config` and `kernel/edge/provenance.json`. `tracking.json` never tracks them: they move only in a train PR.
+- `packages.aarch64-linux` exports the Edge kernel and Mesa, built and cached like every hardware output.
+- `aurora.edge.enable` (set by Edge images) selects them for the system kernel, `hardware.graphics.package` and the FEX guest Mesa.
+- An Edge image emits `edge-image-proof.json` (schema 2) with its kernel image and `libvulkan_asahi.so` digests.
+
+Until those land, `channel-edge` cannot move: the gate refuses every commit.

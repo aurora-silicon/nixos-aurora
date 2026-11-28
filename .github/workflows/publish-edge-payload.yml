@@ -1,0 +1,37 @@
+name: Publish a NixOS Edge train payload
+# One profile of an Edge train (aurora-distributions docs/edge-train.md). The
+# train record (edge/train.json with this profile's staged payload, and
+# edge/evidence.json with the manifests it names) must be on
+# aurora-distributions main; the catalog signer binds them from there. Adoption
+# of all ten profiles is one step there (adopt-edge-set.yml).
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        type: choice
+        options: [nixos-kde, nixos-gnome, nixos-minimal]
+        required: true
+      image-run:
+        description: The profile's Edge images.yml run the train names
+        required: true
+      train-revision:
+        description: aurora-distributions main commit whose edge/train.json records this profile's staging
+        required: true
+permissions:
+  contents: write
+  actions: read
+  id-token: write
+  attestations: write
+concurrency:
+  group: nixos-edge-train-${{ inputs.profile }}
+  cancel-in-progress: false
+jobs:
+  delivery:
+    if: github.repository == 'aurora-silicon/nixos-aurora' && github.ref == 'refs/heads/main'
+    uses: aurora-silicon/aurora-distributions/.github/workflows/build-payload.yml@3814ebb6db7b624ef6947f60a89408ee1d14efbd
+    with:
+      profile: ${{ inputs.profile }}
+      image-run: ${{ inputs.image-run }}
+      edge-train-revision: ${{ inputs.train-revision }}
+    secrets:
+      INSTALLER_CATALOG_SIGNING_KEY: ${{ secrets.INSTALLER_CATALOG_SIGNING_KEY }}
