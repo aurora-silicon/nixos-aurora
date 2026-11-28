@@ -30,7 +30,7 @@ in {
   # tiny-dfr's udev rule starts it only when a Touch Bar display appears, so
   # it stays inert on every other Mac.
   hardware.apple.touchBar.enable = lib.mkDefault true;
-  hardware.enableRedistributableFirmware = true;
+  hardware.enableRedistributableFirmware = lib.mkDefault false;
   hardware.firmware = [ avdFirmware ];
   services.upower.enable = true;
   hardware.wirelessRegulatoryDatabase = true;
