@@ -70,8 +70,12 @@ chmod 755 "$dir"
 # The same file system on both paths: the bind already shows this mount.
 if ! mountpoint -q "$rootfs" || [ "$(stat -c %d "$rootfs")" != "$(stat -c %d "$provider")" ]; then
 	release
-	mount --bind -o ro "$provider" "$rootfs" || fail "can't bind-mount $provider at $rootfs"
+	mount --bind -o ro,nosuid,nodev "$provider" "$rootfs" || fail "can't bind-mount $provider at $rootfs"
 fi
+# Read-only, nosuid and nodev, as the provider is. Set them on the bind in
+# place too: a bind kept from an earlier start may have been made without them.
+mount -o remount,bind,ro,nosuid,nodev "$rootfs" ||
+	fail "can't make $rootfs read-only, nosuid and nodev"
 # FEX refuses to start on an empty or partly written config: write it in full
 # beside the old one, check it, then rename it into place. A full /run leaves
 # no config at all.
