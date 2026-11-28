@@ -739,10 +739,13 @@ builds none and removes the ones this module made.
 ## `aurora.sep.greeterFingerprint.enable`
 
 Patch GNOME Shell's greeter to offer fingerprint sign-in as well as
-lock-screen authentication. The greeter waits for Touch ID readiness,
-up to 90 seconds after boot; fingerprint sign-in does not unlock the
-keyring. False leaves the normal password greeter and keeps lock-screen,
-sudo and polkit fingerprint authentication enabled.
+lock-screen authentication. The greeter does not wait for Touch ID: it
+asks for the reader once, as it comes up, so the one right after boot
+takes the password and does not offer the fingerprint, whatever
+aurora.sep.requirePasswordAfterBoot says; greeters after a log out
+find the reader. Fingerprint sign-in does not unlock the keyring.
+False leaves the normal password greeter and keeps lock-screen, sudo
+and polkit fingerprint authentication enabled.
 
 **Type:** boolean
 
