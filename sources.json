@@ -19,12 +19,12 @@
   },
   "uboot-aurora": {
     "repository": "https://github.com/aurora-silicon/u-boot",
-    "commit": "250385f8c8aaafd47a8f7990f6efe0443c28d0b5",
+    "commit": "84382f65f6725263f1bdb3c9594607cef610e0a7",
     "version": "2026.07",
-    "source_url": "https://codeload.github.com/aurora-silicon/u-boot/tar.gz/250385f8c8aaafd47a8f7990f6efe0443c28d0b5",
-    "archive_root": "u-boot-250385f8c8aaafd47a8f7990f6efe0443c28d0b5",
-    "sha256": "54733c99013b87f7703065fd7a96e0960dfbbeeefaf3462c1fd0789526105e8a",
-    "nix_hash": "sha256-VHM8mQE7h/dwMGX9epbglg37vu7680YsH9B4lSYQXoo="
+    "source_url": "https://codeload.github.com/aurora-silicon/u-boot/tar.gz/84382f65f6725263f1bdb3c9594607cef610e0a7",
+    "archive_root": "u-boot-84382f65f6725263f1bdb3c9594607cef610e0a7",
+    "sha256": "ea253d86dbb4438dadb5194a3c6cd7949cab803cd85073782d13156ea96d1b00",
+    "nix_hash": "sha256-6iU9htu0Q42ttRlKPGzXlJyrgDzYUHN4LRMVbqltGwA="
   },
   "mesa-aurora": {
     "repository": "https://github.com/aurora-silicon/mesa",
