@@ -909,7 +909,7 @@ follow a change of an expired password at login.
 
 ## `aurora.speakerguardd.upgrade.enable`
 
-Install aurora-speaker-upgrade and run it at boot: it moves the speakers to speakerguardd v2 when this Mac's own tuning passes the silent self-check (needs aurora.speakerguardd.v2.enable). The legacy protection keeps a refused Mac; sudo aurora-speaker-upgrade --revert goes back. The Aurora platform turns it on.
+Install aurora-speaker-upgrade and run it at boot: it moves the speakers to speakerguardd v2 when this Mac's own tuning passes the silent self-check (needs aurora.speakerguardd.v2.enable). The Aurora platform turns it on when `aurora.speakers.stack` is `"sgv2"`.
 
 **Type:** boolean
 
@@ -919,12 +919,9 @@ Install aurora-speaker-upgrade and run it at boot: it moves the speakers to spea
 
 ## `aurora.speakerguardd.v2.enable`
 
-Install speakerguardd 1.0 beside the 0.1 speakerguardd and
-speakersafetyd, with its gate on both stacks. Nothing changes for the
-speakers by itself: the gate keeps speakersafetyd in charge until
-aurora-speaker-upgrade (aurora.speakerguardd.upgrade.enable) has
-verified this Mac's own tuning and switched the dual-interface
-kernel to v2's lease. The Aurora platform turns it on.
+Install speakerguardd 1.0 (speakerguardd v2), the default Apple Silicon
+speaker protection and voicing stack. The Aurora platform turns it on
+when `aurora.speakers.stack` is `"sgv2"`.
 
 **Type:** boolean
 
@@ -941,6 +938,20 @@ The speakerguardd-v2 package to use.
 **Default:** `pkgs.speakerguardd-v2`
 
 **Declared in:** [speakerguardd-v2.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/speakerguardd-v2.nix)
+
+## `aurora.speakers.stack`
+
+Active Apple Silicon speaker protection stack. The default (`sgv2`)
+runs speakerguardd v2 with aurora-speaker-upgrade and installs no
+legacy speaker protection daemon or Asahi speaker DSP graphs. Set
+to `speakersafetyd` (or run `sudo aurora-speaker-stack select
+speakersafetyd`) as an explicit user opt-out that survives upgrades.
+
+**Type:** one of "sgv2", "speakersafetyd"
+
+**Default:** `"sgv2"`
+
+**Declared in:** [audio.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/audio.nix)
 
 ## `aurora.stage2.enable`
 

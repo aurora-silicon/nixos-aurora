@@ -57,16 +57,15 @@ NEEDS = {
     'omarchy-ane-tools': ['omarchy-ane-tools'],
     'mil-hwx-compiler': ['mil-hwx-compiler'],
     'upower': ['upower-aurora'],
-    'speakerguardd': ['speakerguardd'],
     'speakerguardd-v2': ['speakerguardd-v2'],
     'speaker-upgrade': ['aurora-speaker-upgrade', 'speakerguardd-v2'],
+    'speaker-stack': [],  # vendored in this Git source
     'wifi-firmware': ['aurora-wifi-firmware'],
     'mutter': [],
     'iio-sensor-proxy': [],  # nixpkgs' pinned release, with the local patch
     'gnome-settings-daemon': [],  # nixpkgs' pinned release, with the local patch
     'kwin': [],  # nixpkgs' pinned release, with the local patch
     'docker': [],  # nixpkgs' pinned release, with the local engine patch
-    'speakersafetyd': [],
     'bankstown': ['bankstown'],
     'neo-platform': ['aurora-neo-platform-config'],
     'aurora-bless': ['aurora-bless'],

@@ -1,0 +1,77 @@
+.TH AURORA-SPEAKER-STACK 8 "2026-11-28" "Aurora Silicon" "System Administration"
+.SH NAME
+aurora-speaker-stack \- select the Apple Silicon speaker protection stack
+.SH SYNOPSIS
+.B aurora-speaker-stack status
+[\fB\-\-json\fR]
+.br
+.B aurora-speaker-stack select sgv2
+[\fB\-\-no\-switch\fR]
+.br
+.B aurora-speaker-stack select speakersafetyd
+[\fB\-\-no\-install\fR] [\fB\-\-no\-switch\fR]
+.SH DESCRIPTION
+.B speakerguardd v2
+(\fBsgv2\fR) is the default speaker protection and voicing stack on all Aurora
+Silicon installations. New installs and upgraded existing installs migrate to
+.B sgv2
+automatically, removing the legacy Asahi speaker DSP graphs and retiring
+\fBspeakerguardd\fR 0.1 and \fBspeakersafetyd\fR from the default package set.
+.PP
+Users who explicitly prefer to run \fBspeakersafetyd\fR instead of \fBsgv2\fR
+can opt out with a single command:
+.PP
+.RS
+.nf
+sudo aurora-speaker-stack select speakersafetyd
+.fi
+.RE
+.PP
+This records the user's explicit choice in
+.IR /etc/aurora/speaker-stack.conf ,
+stops and masks the \fBspeakerguardd-v2\fR and \fBaurora-speaker-upgrade\fR
+systemd units, installs \fBspeakersafetyd\fR via the distribution's package
+manager (or writes the NixOS module drop-in on NixOS), switches the kernel
+speaker protection interlock cleanly where supported, and enables
+\fBspeakersafetyd.service\fR.
+.PP
+Future package upgrades read
+.I /etc/aurora/speaker-stack.conf
+and preserve an explicit \fBspeakersafetyd\fR opt-out instead of migrating the
+machine back to \fBsgv2\fR.
+.PP
+To return to the default \fBspeakerguardd v2\fR stack at any time:
+.PP
+.RS
+.nf
+sudo aurora-speaker-stack select sgv2
+.fi
+.RE
+.SH COMMANDS
+.TP
+.B status [\-\-json]
+Display the configured stack (default or explicit override), unit states, and
+detected ALSA speaker interlock state. Does not require root privileges.
+.TP
+.B select sgv2 [\-\-no\-switch]
+Select \fBspeakerguardd v2\fR, mask \fBspeakersafetyd.service\fR, unmask and
+enable the \fBspeakerguardd-v2\fR and \fBaurora-speaker-upgrade\fR units, and
+run \fBaurora-speaker-upgrade\fR unless \fB\-\-no\-switch\fR is passed.
+.TP
+.B select speakersafetyd [\-\-no\-install] [\-\-no\-switch]
+Record an explicit user opt-out to \fBspeakersafetyd\fR, mask
+\fBspeakerguardd-v2\fR and \fBaurora-speaker-upgrade\fR, install
+\fBspeakersafetyd\fR (unless \fB\-\-no\-install\fR), hand over the kernel
+interlock when the running kernel supports it, and start
+\fBspeakersafetyd.service\fR.
+.SH FILES
+.TP
+.I /etc/aurora/speaker-stack.conf
+Persistent user selection (\fBstack=sgv2\fR or \fBstack=speakersafetyd\fR).
+Absent by default, which means \fBsgv2\fR.
+.TP
+.I /etc/nixos/aurora-speaker-stack.nix
+Generated NixOS module override written on NixOS systems.
+.SH SEE ALSO
+.BR aurora-speaker-upgrade (8),
+.BR systemctl (1)

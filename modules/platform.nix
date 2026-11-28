@@ -34,15 +34,11 @@ in {
   hardware.firmware = [ avdFirmware ];
   services.upower.enable = true;
   hardware.wirelessRegulatoryDatabase = true;
-  systemd.packages = [ pkgs.speakerguardd ];
-  # Speakers on speakerguardd v2: v2 installs beside the legacy
-  # daemons behind its gate, and aurora-speaker-upgrade switches a Mac at boot
-  # only when its own tuning passes the silent self-check. A refused Mac keeps
-  # speakersafetyd. Both stay user options (set them to false to opt out).
-  aurora.speakerguardd.v2.enable = lib.mkDefault true;
-  aurora.speakerguardd.upgrade.enable = lib.mkDefault true;
+  # Speakers default to speakerguardd v2 with aurora-speaker-upgrade; set
+  # `aurora.speakers.stack = "speakersafetyd"` for an explicit user opt-out.
+  aurora.speakerguardd.v2.enable = lib.mkDefault (config.aurora.speakers.stack == "sgv2");
+  aurora.speakerguardd.upgrade.enable = lib.mkDefault (config.aurora.speakers.stack == "sgv2");
   services.udev.packages = [
-    pkgs.speakerguardd
     # Keep the firmware's product name unchanged in ID_MODEL (hostnamed's
     # hardware model): udev turns parentheses into underscores in $attr{}.
     (pkgs.writeTextFile {
@@ -92,21 +88,6 @@ in {
         "-${udevadm} trigger --action=add --subsystem-match=accel --settle"
       ];
     };
-  };
-  # The sense-PCM udev rule starts the feed-forward guardian only on J700.
-  systemd.services.speakersafetyd.serviceConfig = {
-    # Preserve the board-specific legacy daemon selector.
-    ExecCondition = [ "${pkgs.speakerguardd}/libexec/speakerguardd/use-feedback-guard" ];
-    # speakersafetyd writes /run/speakersafetyd/speakersafetyd.flag on its
-    # first start after boot, and a start that finds it assumes the speakers
-    # are at their temperature limit. systemd removes the RuntimeDirectory
-    # whenever the unit stops, so every restart within a boot, a crash
-    # included, started cold. Leave a root-owned marker in /run when the
-    # daemon stops and give a start that finds it the flag back. /run is a
-    # tmpfs, so the first start after a reboot stays cold. (Fedora Aurora's
-    # 50-aurora-warm-restart.conf.)
-    ExecStartPre = "+${pkgs.runtimeShell} -c 'if [ -e /run/speakersafetyd.started ]; then : > /run/speakersafetyd/speakersafetyd.flag; fi'";
-    ExecStopPost = "+${pkgs.coreutils}/bin/touch /run/speakersafetyd.started";
   };
   # Power defaults for every Apple silicon Mac, the same unit as Fedora's
   # aurora-platform-core and ALARM's aurora-system-fixes. Neither setting

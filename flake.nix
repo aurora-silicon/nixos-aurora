@@ -42,7 +42,7 @@
       packages.${system} = {
         inherit (pkgs)
           plymouth docker libfprint fprintd omarchy-ane-tools mil-hwx-compiler upower
-          fex steam mesa speakerguardd mutter speakersafetyd aurora-bless
+          fex steam mesa mutter aurora-bless
           plymouth-theme-aurora omdrop-awdl speakerguardd-v2 iio-sensor-proxy
           gnome-settings-daemon;
         logos = pkgs.aurora-logos;
@@ -52,6 +52,7 @@
         sep = pkgs.aurora-sep;
         avd-fw = pkgs.aurora-avd-firmware;
         speaker-upgrade = pkgs.aurora-speaker-upgrade;
+        speaker-stack = pkgs.aurora-speaker-stack;
         wifi-firmware = pkgs.aurora-wifi-firmware;
         libva-v4l2-request-avd = pkgs.libvaV4l2RequestAvd;
         bindgen = pkgs.aurora-bindgen;

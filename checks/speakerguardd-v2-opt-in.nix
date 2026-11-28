@@ -1,9 +1,7 @@
 { pkgs, nixpkgs, makeSystem }:
 let
   inherit (nixpkgs) lib;
-  # speakerguardd v2 is on by default: it installs beside the legacy daemons
-  # behind its gate, which keeps speakersafetyd in charge until
-  # aurora-speaker-upgrade (run at boot) switches the Mac.
+  # speakerguardd v2 is the default speaker stack (`aurora.speakers.stack = "sgv2"`).
   enabled = makeSystem "minimal";
   on = enabled.config;
   incompatible = (enabled.extendModules {
@@ -15,8 +13,6 @@ let
   }).config;
   pkg = on.aurora.speakerguardd.v2.package;
   unit = name: on.systemd.units.${name} or { enable = false; wantedBy = [ ]; text = ""; };
-  gate = builtins.unsafeDiscardStringContext "${pkg}/libexec/speakerguardd-v2/speakerguardd-gate legacy";
-  gated = name: lib.hasInfix "ExecCondition=+${gate}" (unit "${name}.service").text;
 in assert lib.assertMsg (lib.all (entry: entry.assertion) on.assertions
      && lib.count (entry: !entry.assertion) incompatible.assertions == 1)
      "The v2 module must accept the current package and reject an incompatible kernel interface";
@@ -25,9 +21,6 @@ in assert lib.assertMsg (lib.all (entry: entry.assertion) on.assertions
      "enable = true must install speakerguardd 1.0";
    assert lib.assertMsg (builtins.elem "multi-user.target" (unit "speakerguardd-v2.service").wantedBy)
      "speakerguardd-v2.service must be wanted by multi-user.target when enabled";
-   assert lib.assertMsg (gated "speakersafetyd" && gated "speakerguardd"
-     && lib.hasInfix "use-feedback-guard" (unit "speakersafetyd.service").text)
-     "the legacy daemons stay enabled behind the gate, beside their own ExecCondition";
    assert lib.assertMsg (on.aurora.speakerguardd.upgrade.enable
      && builtins.elem "multi-user.target" (unit "aurora-speaker-upgrade.service").wantedBy)
      "aurora-speaker-upgrade must run at boot on the image";
