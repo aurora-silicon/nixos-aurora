@@ -12,7 +12,6 @@ in (import ./nix-lint.nix { inherit pkgs; }) // {
   documentation-site = import ../docs/site.nix { inherit pkgs self system; };
   steam-packaging = import ./steam-packaging.nix { inherit pkgs self nixpkgs; };
   clean-boot = import ./clean-boot.nix { inherit pkgs nixpkgs self; };
-  legacy-speaker-protection = import ./legacy-speaker-protection.nix { inherit pkgs nixpkgs makeSystem; };
   speakerguardd-v2-opt-in = import ./speakerguardd-v2-opt-in.nix { inherit pkgs nixpkgs makeSystem; };
   removed-options = import ./removed-options.nix { inherit pkgs nixpkgs makeSystem; };
   diag-opt-in = import ./diag-opt-in.nix { inherit pkgs nixpkgs makeSystem; };

@@ -37,7 +37,7 @@ stdenvNoCC.mkDerivation {
     runHook postInstall
   '';
   meta = {
-    description = "Move the speakers to speakerguardd v2 with this Mac's own tuning (runs at boot; the legacy protection keeps a refused Mac)";
+    description = "Move the speakers to speakerguardd v2 with this Mac's own tuning (runs at boot; a refused Mac keeps its speakers at the kernel's floor)";
     license = lib.licenses.mit;
     platforms = [ "aarch64-linux" ];
     mainProgram = "aurora-speaker-upgrade";

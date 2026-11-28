@@ -1,7 +1,7 @@
 { config, lib, pkgs, ... }:
 {
-  # aurora-speaker-upgrade moves a Mac from the legacy speaker protection to
-  # speakerguardd v2 with its own tuning (and back with --revert). The option
+  # aurora-speaker-upgrade moves a Mac's speakers to speakerguardd v2, the only
+  # speaker stack, with its own tuning. The option
   # defaults to false; the Aurora platform turns it on (modules/platform.nix).
   # Enabled, its unit runs at every boot (run --at-boot): it switches only on
   # a passing self-check and does not retry a refusal until the kernel,
@@ -9,7 +9,7 @@
   options.aurora.speakerguardd.upgrade.enable = lib.mkOption {
     type = lib.types.bool;
     default = false;
-    description = "Install aurora-speaker-upgrade and run it at boot: it moves the speakers to speakerguardd v2 when this Mac's own tuning passes the silent self-check (needs aurora.speakerguardd.v2.enable). The legacy protection keeps a refused Mac; sudo aurora-speaker-upgrade --revert goes back. The Aurora platform turns it on.";
+    description = "Install aurora-speaker-upgrade and run it at boot: it moves the speakers to speakerguardd v2 when this Mac's own tuning passes the silent self-check (needs aurora.speakerguardd.v2.enable). A refused Mac keeps its speakers at the kernel's floor (speakersafetyd and speakerguardd 0.1 are no longer shipped). The Aurora platform turns it on.";
   };
   config = lib.mkIf config.aurora.speakerguardd.upgrade.enable {
     assertions = [{

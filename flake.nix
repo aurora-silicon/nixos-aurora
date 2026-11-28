@@ -42,7 +42,7 @@
       packages.${system} = {
         inherit (pkgs)
           plymouth docker libfprint fprintd omarchy-ane-tools mil-hwx-compiler upower
-          fex steam mesa speakerguardd mutter speakersafetyd aurora-bless
+          fex steam mesa mutter aurora-bless
           plymouth-theme-aurora omdrop-awdl speakerguardd-v2 iio-sensor-proxy
           gnome-settings-daemon;
         logos = pkgs.aurora-logos;

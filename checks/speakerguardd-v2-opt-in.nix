@@ -1,9 +1,9 @@
 { pkgs, nixpkgs, makeSystem }:
 let
   inherit (nixpkgs) lib;
-  # speakerguardd v2 is on by default: it installs beside the legacy daemons
-  # behind its gate, which keeps speakersafetyd in charge until
-  # aurora-speaker-upgrade (run at boot) switches the Mac.
+  # speakerguardd v2 is the only speaker stack: on with the platform, with
+  # aurora-speaker-upgrade (run at boot); speakersafetyd and speakerguardd 0.1
+  # are not shipped and no unit of theirs can start.
   enabled = makeSystem "minimal";
   on = enabled.config;
   incompatible = (enabled.extendModules {
@@ -15,8 +15,6 @@ let
   }).config;
   pkg = on.aurora.speakerguardd.v2.package;
   unit = name: on.systemd.units.${name} or { enable = false; wantedBy = [ ]; text = ""; };
-  gate = builtins.unsafeDiscardStringContext "${pkg}/libexec/speakerguardd-v2/speakerguardd-gate legacy";
-  gated = name: lib.hasInfix "ExecCondition=+${gate}" (unit "${name}.service").text;
 in assert lib.assertMsg (lib.all (entry: entry.assertion) on.assertions
      && lib.count (entry: !entry.assertion) incompatible.assertions == 1)
      "The v2 module must accept the current package and reject an incompatible kernel interface";
@@ -25,9 +23,11 @@ in assert lib.assertMsg (lib.all (entry: entry.assertion) on.assertions
      "enable = true must install speakerguardd 1.0";
    assert lib.assertMsg (builtins.elem "multi-user.target" (unit "speakerguardd-v2.service").wantedBy)
      "speakerguardd-v2.service must be wanted by multi-user.target when enabled";
-   assert lib.assertMsg (gated "speakersafetyd" && gated "speakerguardd"
-     && lib.hasInfix "use-feedback-guard" (unit "speakersafetyd.service").text)
-     "the legacy daemons stay enabled behind the gate, beside their own ExecCondition";
+   assert lib.assertMsg ((on.systemd.units ? "speakersafetyd.service")
+     && !on.systemd.units."speakersafetyd.service".enable
+     && !(on.systemd.units ? "speakerguardd.service")
+     && !(lib.any (p: (p.pname or "") == "speakerguardd") on.systemd.packages))
+     "speakersafetyd.service must be masked and speakerguardd 0.1 must not be installed";
    assert lib.assertMsg (on.aurora.speakerguardd.upgrade.enable
      && builtins.elem "multi-user.target" (unit "aurora-speaker-upgrade.service").wantedBy)
      "aurora-speaker-upgrade must run at boot on the image";
@@ -80,5 +80,11 @@ in assert lib.assertMsg (lib.all (entry: entry.assertion) on.assertions
      test -f $p/lib/systemd/user/speakerguardd-v2-graph.service
      grep -q "$p/share/speakerguardd/gate.json" $lx/speakerguardd-gate
      test ! -e $p/bin/speakerguardd
+     # nixos-apple-silicon's sound module adds speakersafetyd: it is empty here.
+     test -z "$(ls -A ${enabled.pkgs.speakersafetyd})"
+     # No Asahi speaker graph or FIR; the microphone graphs stay.
+     a=${enabled.pkgs.asahi-audio}
+     test -z "$(find $a/share/asahi-audio \( -name 'graph*.json' -o -name '*.wav' \) -print)"
+     test -s $a/share/asahi-audio/j616/mic.json
      touch $out
    ''

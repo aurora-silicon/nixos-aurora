@@ -44,7 +44,6 @@ let
         # Installed generations check Aura compatibility and record the DT ABI.
         auroraCtxrExecmem = kernelCtxrExecmem;
         auroraDtbAbi = kernelDtbAbi;
-        auroraLegacySpeakerProtection = true;
         # The oldest aurora-avd-firmware this kernel's device trees work with
         # (modules/platform.nix checks it). The T8122 (M3) tree maps the CM3
         # SRAM at +0x90000 (linux#2586), which only the 64 KiB v4 image of

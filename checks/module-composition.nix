@@ -15,7 +15,8 @@ let
     modules = [ { xdg.portal.config.common.default = [ "host-portal" ]; } ];
   };
   noSpeakerUpgrade = installed.extendModules {
-    modules = [ { aurora.speakerguardd.upgrade.enable = false; } ];
+    # The platform turns it on unconditionally; only mkForce turns it off.
+    modules = [ { aurora.speakerguardd.upgrade.enable = lib.mkForce false; } ];
   };
   upgradePackage = installed.pkgs.aurora-speaker-upgrade;
   # avd-fw 6062e851, whose 0x12000-byte v4 image the T8122 (M3) device tree

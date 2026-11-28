@@ -35,15 +35,6 @@
     "sha256": "7906acc54411e0c61b6c4a5539d555cc0831b95603c80d37311a2bcd49313336",
     "nix_hash": "sha256-eQasxUQR4MYbbEpVOdVVzAgxuVYDyA03MRorzUkxMzY="
   },
-  "speakerguardd": {
-    "repository": "https://github.com/aurora-silicon/speakerguardd",
-    "commit": "0287029648842be7b62ce9869ceaf5dbe9555831",
-    "version": "0.1.12",
-    "source_url": "https://codeload.github.com/aurora-silicon/speakerguardd/tar.gz/0287029648842be7b62ce9869ceaf5dbe9555831",
-    "archive_root": "speakerguardd-0287029648842be7b62ce9869ceaf5dbe9555831",
-    "sha256": "2692684c895396aec23fec34d1b9a71f789bbc2a58f35104470a66869f4fca77",
-    "nix_hash": "sha256-JpJoTIlTlq7CP+w00bmnH3ibvCpY81EERwpmhp9Pync="
-  },
   "speakerguardd-v2": {
     "repository": "https://github.com/aurora-silicon/speakerguardd",
     "commit": "89b6e40e6dab5bee69790d783a11628f85591338",
