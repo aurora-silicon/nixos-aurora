@@ -12,7 +12,12 @@ let
     contents = lib.filter (entry: entry.enable && lib.hasPrefix "${theme}/" entry.source)
       system.config.boot.initrd.systemd.storePaths;
   };
-in pkgs.runCommand "aurora-plymouth-initrd" {
+in
+# aura keeps a debug UART out of stdout-path on normal boots: the splash needs
+# no plymouth.ignore-serial-consoles.
+assert lib.assertMsg (!lib.elem "plymouth.ignore-serial-consoles" system.config.boot.kernelParams)
+  "the splash adds plymouth.ignore-serial-consoles";
+pkgs.runCommand "aurora-plymouth-initrd" {
   nativeBuildInputs = [ pkgs.cpio pkgs.zstd ];
 } ''
   mkdir unpacked

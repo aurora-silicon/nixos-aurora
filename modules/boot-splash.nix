@@ -9,11 +9,9 @@
 #   Plymouth starts on appledrm instead of waiting for the real root.
 # * Plymouth starts once udevd runs instead of after the whole coldplug has
 #   been queued (overlay.nix carries the unit patch).
-# * A serial console does not force Plymouth's text view (fedora-aurora #155).
-#   Without console=, the kernel also takes the device tree's stdout-path as a
-#   console (the Neo's DockChannel UART), and Plymouth then shows its details
-#   view on every display, the disk password prompt included. The kernel keeps
-#   the serial console.
+# * No serial console takes Plymouth to its text view: aura removes a debug
+#   UART's stdout-path on normal boots, so the display is the only console
+#   and no plymouth.ignore-serial-consoles is needed.
 #
 # Every setting is a default: a system configuration's own choice wins.
 { config, lib, pkgs, ... }:
@@ -113,8 +111,6 @@ in {
   boot.loader.grub.splashImage = lib.mkOverride 999 null;
   boot.loader.grub.timeoutStyle = lib.mkDefault "hidden";
   boot.loader.timeout = lib.mkDefault 1;
-
-  boot.kernelParams = lib.mkIf config.boot.plymouth.enable [ "plymouth.ignore-serial-consoles" ];
 
   # The external DCPs' Type-C chain comes up with the display: appledrm
   # registers only once every DCP has bound.
