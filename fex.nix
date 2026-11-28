@@ -31,6 +31,15 @@ fex.overrideAttrs (_finalAttrs: old: {
   # FEX reads /run/fex-emu/Config.json over its global config, which
   # modules/fex-mesa.nix writes while the guest graphics provider is mounted.
   patches = (old.patches or [ ]) ++ [ ./patches/fex-runtime-config.patch ];
+  # nixpkgs' postPatch renames CONFIG_THUNK{HOST,GUEST}LIBS to UNUSEDTHUNK* in
+  # Config.json.in and Config.cpp; apply the same rename to SecureExecution.cpp
+  # added in aurora-silicon/fex#42 so APITests keep building with thunks wired
+  # to the Nix store.
+  postPatch = (old.postPatch or "") + ''
+    substituteInPlace unittests/APITests/SecureExecution.cpp \
+      --replace-fail "FEXCore::Config::CONFIG_THUNKGUESTLIBS" "FEXCore::Config::CONFIG_UNUSEDTHUNKGUESTLIBS" \
+      --replace-fail "FEXCore::Config::CONFIG_THUNKHOSTLIBS" "FEXCore::Config::CONFIG_UNUSEDTHUNKHOSTLIBS"
+  '';
   # FEX tunes for the build machine by default (-mcpu from its /proc/cpuinfo),
   # which crashes with SIGILL on Apple CPUs when CI builds on Neoverse.
   cmakeFlags = old.cmakeFlags ++ [ (lib.cmakeFeature "TUNE_CPU" "none") ];
