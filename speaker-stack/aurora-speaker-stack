@@ -1,0 +1,713 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 The Aurora Silicon Contributors
+"""aurora-speaker-stack: select the active speaker protection stack.
+
+Default on every Aurora installation is speakerguardd v2 (sgv2).
+Users who explicitly want speakersafetyd may opt out with one command:
+
+    sudo aurora-speaker-stack select speakersafetyd
+    sudo aurora-speaker-stack select sgv2
+    aurora-speaker-stack status [--json]
+
+The explicit choice is stored in /etc/aurora/speaker-stack.conf (or
+declaratively via aurora.speakers.stack on NixOS) and respected by later
+package upgrades and boot-time speaker migration.
+"""
+
+import argparse
+import datetime
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+
+DEFAULT_CONFIG = Path("/etc/aurora/speaker-stack.conf")
+NIXOS_DROPIN = Path("/etc/nixos/aurora-speaker-stack.nix")
+VALID_STACKS = ("sgv2", "speakersafetyd")
+DROPIN_REL = Path("etc/systemd/system/speakersafetyd.service.d/50-aurora-speaker-stack.conf")
+
+SGV2_SYSTEM_UNITS = (
+    "speakerguardd-v2.service",
+    "speakerguardd-v2-provision.service",
+    "speakerguardd-v2-selfcheck.service",
+    "speakerguardd-v2-switchtest.service",
+    "speakerguardd-v2-seat.path",
+    "speakerguardd-v2-seat.service",
+    "speakerguardd-v2-sleep.service",
+)
+SGV2_PRESET_UNITS = (
+    "speakerguardd-v2.service",
+    "speakerguardd-v2-provision.service",
+    "speakerguardd-v2-selfcheck.service",
+    "speakerguardd-v2-switchtest.service",
+    "speakerguardd-v2-seat.path",
+    "speakerguardd-v2-sleep.service",
+    "aurora-speaker-upgrade.service",
+)
+LEGACY_UNITS = (
+    "speakersafetyd.service",
+    "speakerguardd.service",
+)
+PROVISION_PATHS = (
+    "/usr/libexec/speakerguardd-v2/speakerguardd-provision",
+    "/usr/lib/speakerguardd-v2/speakerguardd-provision",
+)
+INTERFACE_CTL = "Speaker Protection Interface"
+IF_V2 = "Speaker Protection"
+IF_LEGACY = "Speaker Volume Unlock"
+
+
+def say(msg: str) -> None:
+    print(f"aurora-speaker-stack: {msg}", file=sys.stderr)
+
+
+def atomic_write(path: Path, body: str | bytes, mode: int = 0o644) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    data = body.encode("utf-8") if isinstance(body, str) else body
+    fd = os.open(tmp, flags, mode)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def restore_file(path: Path, prior: bytes | None) -> None:
+    if prior is None:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+    else:
+        atomic_write(path, prior, 0o644)
+
+
+def read_selection(config_path: Path = DEFAULT_CONFIG) -> tuple[str, bool]:
+    """Return (stack, explicit). Missing config defaults to ('sgv2', False)."""
+    try:
+        text = config_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "sgv2", False
+    except OSError as exc:
+        raise RuntimeError(f"cannot read {config_path}: {exc}") from exc
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = (part.strip() for part in line.split("=", 1))
+        if key == "stack":
+            if val not in VALID_STACKS:
+                raise RuntimeError(
+                    f"invalid stack {val!r} in {config_path} "
+                    f"(expected one of {', '.join(VALID_STACKS)})"
+                )
+            return val, True
+    return "sgv2", False
+
+
+def write_selection(stack: str, config_path: Path = DEFAULT_CONFIG) -> None:
+    """Atomically write the user's stack selection."""
+    if stack not in VALID_STACKS:
+        raise ValueError(f"unknown speaker stack: {stack!r}")
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    body = (
+        "# Managed by aurora-speaker-stack.\n"
+        "# Explicit user selection respected by package upgrades and boot migration.\n"
+        f"stack={stack}\n"
+        f"updated_at={ts}\n"
+    )
+    atomic_write(config_path, body, 0o644)
+
+
+def dropin_path(root: Path | None = None) -> Path:
+    return (root / DROPIN_REL) if root is not None else (Path("/") / DROPIN_REL)
+
+
+def install_speakersafetyd_dropin(
+    *,
+    root: Path | None = None,
+    tool_path: str = "/usr/bin/aurora-speaker-stack",
+) -> Path:
+    """Install the root ExecStartPre drop-in that arms the kernel opt-in control."""
+    target = dropin_path(root)
+    body = (
+        "# Managed by aurora-speaker-stack (explicit user opt-out).\n"
+        "# Arms the per-bind Speaker Protection Interface control before\n"
+        "# speakersafetyd starts (runs privileged via '+').\n"
+        "[Service]\n"
+        f"ExecStartPre=+{tool_path} interlock-apply\n"
+    )
+    atomic_write(target, body, 0o644)
+    return target
+
+
+def remove_speakersafetyd_dropin(*, root: Path | None = None) -> None:
+    target = dropin_path(root)
+    try:
+        target.unlink()
+    except FileNotFoundError:
+        pass
+    try:
+        target.parent.rmdir()
+    except OSError:
+        pass
+
+
+def detect_distro(os_release: Path = Path("/etc/os-release")) -> str:
+    """Identify fedora, alarm, nixos, or unknown."""
+    if os_release.is_file():
+        text = os_release.read_text(encoding="utf-8", errors="replace").lower()
+        if "id=nixos" in text or 'id="nixos"' in text:
+            return "nixos"
+        if "id=fedora" in text or 'id="fedora"' in text:
+            return "fedora"
+        if "id=archarm" in text or "id=arch" in text or 'id="arch' in text:
+            return "alarm"
+    if shutil.which("nixos-rebuild"):
+        return "nixos"
+    if shutil.which("dnf5") or shutil.which("dnf"):
+        return "fedora"
+    if shutil.which("pacman"):
+        return "alarm"
+    return "unknown"
+
+
+def systemd_running(run_dir: Path = Path("/run/systemd/system")) -> bool:
+    return run_dir.is_dir()
+
+
+def run_cmd(cmd: list[str], *, check: bool = False) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, text=True, capture_output=True, check=check)
+
+
+def unit_state(unit: str) -> dict[str, str]:
+    if not shutil.which("systemctl"):
+        return {"enabled": "unknown", "active": "unknown"}
+    en = run_cmd(["systemctl", "is-enabled", unit])
+    enabled = (en.stdout.strip() or en.stderr.strip() or "unknown").splitlines()[0]
+    if systemd_running():
+        ac = run_cmd(["systemctl", "is-active", unit])
+        active = (ac.stdout.strip() or "unknown").splitlines()[0]
+    else:
+        active = "offline"
+    return {"enabled": enabled, "active": active}
+
+
+def find_speaker_cards(sys_sound: Path = Path("/sys/class/sound")) -> list[dict[str, str]]:
+    """Inspect ALSA cards for speaker protection controls without board tables."""
+    if not sys_sound.is_dir() or not shutil.which("amixer"):
+        return []
+    cards: list[dict[str, str]] = []
+    for entry in sorted(sys_sound.glob("card[0-9]*")):
+        m = re.fullmatch(r"card(\d+)", entry.name)
+        if not m:
+            continue
+        card_num = m.group(1)
+        res = run_cmd(["amixer", "-c", card_num, "controls"])
+        if res.returncode != 0:
+            continue
+        controls = res.stdout
+        has_if = INTERFACE_CTL in controls
+        has_v2 = f"name='{IF_V2}'" in controls
+        has_legacy = f"name='{IF_LEGACY}'" in controls
+        if not (has_if or has_v2 or has_legacy):
+            continue
+        info: dict[str, str] = {"card": card_num}
+        id_file = entry / "id"
+        if id_file.is_file():
+            info["id"] = id_file.read_text(encoding="utf-8", errors="replace").strip()
+        if has_if:
+            cget = run_cmd(["amixer", "-c", card_num, "cget", f"name='{INTERFACE_CTL}'"])
+            info["interface_control"] = "dual"
+            for line in cget.stdout.splitlines():
+                if ": values=" in line:
+                    info["interface_value"] = line.strip()
+                    break
+        elif has_v2:
+            info["interface_control"] = "sgv2-only"
+        else:
+            info["interface_control"] = "legacy-only"
+        cards.append(info)
+    return cards
+
+
+def kernel_supports_stack(target: str, sys_sound: Path = Path("/sys/class/sound")) -> bool:
+    """Return False if any detected speaker card cannot support the requested stack."""
+    ok = True
+    for card in find_speaker_cards(sys_sound):
+        mode = card.get("interface_control")
+        card_num = card["card"]
+        if mode == "sgv2-only" and target == "speakersafetyd":
+            say(
+                f"error: card {card_num} ({card.get('id', 'unknown')}) runs a "
+                "speakerguardd-v2-only kernel interlock; speakersafetyd cannot "
+                "release speaker volume on this kernel"
+            )
+            ok = False
+        elif mode == "legacy-only" and target == "sgv2":
+            say(
+                f"error: card {card_num} ({card.get('id', 'unknown')}) runs a "
+                "legacy-only kernel without the speakerguardd v2 lease interface"
+            )
+            ok = False
+    return ok
+
+
+def switch_kernel_interlock(target: str, sys_sound: Path = Path("/sys/class/sound")) -> bool:
+    """Switch the dual-interface ALSA control when present.
+
+    Returns True if switched (or already on a matching single-interface kernel),
+    False if the running kernel does not expose the requested interface or the
+    ALSA control write failed.
+    """
+    cards = find_speaker_cards(sys_sound)
+    if not cards:
+        return True
+    desired = IF_V2 if target == "sgv2" else IF_LEGACY
+    ok = True
+    for card in cards:
+        mode = card.get("interface_control")
+        card_num = card["card"]
+        if mode == "dual":
+            res = run_cmd(
+                ["amixer", "-c", card_num, "cset", f"name='{INTERFACE_CTL}'", desired]
+            )
+            if res.returncode != 0:
+                say(
+                    f"error: failed to set {INTERFACE_CTL!r} to {desired!r} "
+                    f"on card {card_num}: {res.stderr.strip()}"
+                )
+                ok = False
+        elif mode == "sgv2-only" and target == "speakersafetyd":
+            say(
+                f"error: card {card_num} ({card.get('id', 'unknown')}) runs a "
+                "speakerguardd-v2-only kernel interlock; speakersafetyd cannot "
+                "release speaker volume on this kernel"
+            )
+            ok = False
+        elif mode == "legacy-only" and target == "sgv2":
+            say(
+                f"error: card {card_num} ({card.get('id', 'unknown')}) runs a "
+                "legacy-only kernel without the speakerguardd v2 lease interface"
+            )
+            ok = False
+    return ok
+
+
+def find_provision_helper() -> str | None:
+    for path in PROVISION_PATHS:
+        if os.access(path, os.X_OK):
+            return path
+    return shutil.which("speakerguardd-provision")
+
+
+def mask_units(units: tuple[str, ...], *, root: Path | None = None) -> None:
+    """Stop (if running), disable, and mask units cleanly."""
+    if root is not None:
+        etc_systemd = root / "etc/systemd/system"
+        etc_systemd.mkdir(parents=True, exist_ok=True)
+        for u in units:
+            link = etc_systemd / u
+            if link.is_symlink() or link.exists():
+                link.unlink()
+            link.symlink_to("/dev/null")
+        return
+
+    if not shutil.which("systemctl"):
+        return
+    live = systemd_running()
+    for u in units:
+        if live:
+            run_cmd(["systemctl", "stop", u])
+            run_cmd(["systemctl", "disable", u])
+            run_cmd(["systemctl", "mask", u])
+        else:
+            run_cmd(["systemctl", "--no-reload", "mask", u])
+
+
+def unmask_and_preset_units(
+    units: tuple[str, ...],
+    preset_units: tuple[str, ...],
+    *,
+    root: Path | None = None,
+) -> None:
+    if root is not None:
+        etc_systemd = root / "etc/systemd/system"
+        for u in units:
+            link = etc_systemd / u
+            if link.is_symlink() and os.readlink(link) == "/dev/null":
+                link.unlink()
+        return
+
+    if not shutil.which("systemctl"):
+        return
+    live = systemd_running()
+    base = ["systemctl"] if live else ["systemctl", "--no-reload"]
+    for u in units:
+        run_cmd(base + ["unmask", u])
+    if preset_units:
+        run_cmd(base + ["--preset-mode=enable-only", "preset", *preset_units])
+
+
+def install_speakersafetyd(distro: str) -> None:
+    """Install speakersafetyd using the host package manager."""
+    if distro == "fedora":
+        if run_cmd(["rpm", "-q", "speakersafetyd"]).returncode == 0:
+            return
+        dnf = shutil.which("dnf5") or shutil.which("dnf")
+        if not dnf:
+            raise RuntimeError("dnf not found; install speakersafetyd manually")
+        say("installing speakersafetyd from Fedora repositories")
+        res = subprocess.run([dnf, "install", "-y", "--setopt=obsoletes=0", "speakersafetyd"])
+        if res.returncode != 0:
+            raise RuntimeError(f"{dnf} install speakersafetyd failed (exit {res.returncode})")
+    elif distro == "alarm":
+        if run_cmd(["pacman", "-Q", "speakersafetyd"]).returncode == 0:
+            return
+        pacman = shutil.which("pacman")
+        if not pacman:
+            raise RuntimeError("pacman not found; install speakersafetyd manually")
+        say("installing speakersafetyd via pacman")
+        res = subprocess.run([pacman, "-S", "--needed", "--noconfirm", "speakersafetyd"])
+        if res.returncode != 0:
+            raise RuntimeError(f"pacman install speakersafetyd failed (exit {res.returncode})")
+    elif distro == "nixos":
+        # NixOS installs packages declaratively via nixos-rebuild.
+        return
+    else:
+        raise RuntimeError(
+            "unsupported distribution for automatic package install; "
+            "install speakersafetyd manually and re-run with --no-install"
+        )
+
+
+def write_nixos_dropin(stack: str, dropin: Path = NIXOS_DROPIN) -> None:
+    body = (
+        "# Managed by aurora-speaker-stack.\n"
+        "{ ... }: {\n"
+        f'  aurora.speakers.stack = "{stack}";\n'
+        "}\n"
+    )
+    atomic_write(dropin, body, 0o644)
+
+
+def cmd_interlock_apply(args: argparse.Namespace) -> int:
+    """ExecStartPre helper for speakersafetyd.service: arm the kernel opt-in control.
+
+    Fails closed (exit 1) unless /etc/aurora/speaker-stack.conf explicitly selects
+    speakersafetyd, preventing unconfigured or udev-triggered legacy starts from
+    taking the speaker interlock.
+    """
+    config_path = Path(args.config)
+    try:
+        stack, explicit = read_selection(config_path)
+    except RuntimeError as exc:
+        say(str(exc))
+        return 1
+    if not (explicit and stack == "speakersafetyd"):
+        say(f"refusing legacy interlock: {config_path} does not select speakersafetyd")
+        return 1
+    if not switch_kernel_interlock("speakersafetyd"):
+        return 1
+    return 0
+
+
+def _rollback_speakersafetyd_selection(
+    *,
+    config_path: Path,
+    prior_config: bytes | None,
+    root: Path | None,
+) -> None:
+    """Restore previous config and v2 units after a failed speakersafetyd switch."""
+    remove_speakersafetyd_dropin(root=root)
+    restore_file(config_path, prior_config)
+    mask_units(LEGACY_UNITS, root=root)
+    unmask_and_preset_units(
+        SGV2_SYSTEM_UNITS + ("aurora-speaker-upgrade.service",),
+        SGV2_PRESET_UNITS,
+        root=root,
+    )
+    if root is None and systemd_running() and shutil.which("systemctl"):
+        run_cmd(["systemctl", "daemon-reload"])
+        switch_kernel_interlock("sgv2")
+        run_cmd(["systemctl", "restart", "speakerguardd-v2.service"])
+
+
+def cmd_select(args: argparse.Namespace) -> int:
+    stack = args.stack
+    config_path = Path(args.config)
+    root = Path(args.root) if args.root else None
+
+    if root is None and os.geteuid() != 0:
+        say("must be run as root (try sudo aurora-speaker-stack select ...)")
+        return 1
+
+    distro = args.distro or detect_distro(
+        (root / "etc/os-release") if root else Path("/etc/os-release")
+    )
+
+    if distro == "nixos":
+        # NixOS owns /etc/aurora/speaker-stack.conf declaratively via
+        # environment.etc in modules/audio.nix; never write an unmanaged copy.
+        if stack == "speakersafetyd" and not args.no_switch and root is None:
+            if not kernel_supports_stack("speakersafetyd"):
+                return 1
+        dropin = (root / "etc/nixos/aurora-speaker-stack.nix") if root else NIXOS_DROPIN
+        write_nixos_dropin(stack, dropin)
+        say(f'wrote {dropin} (aurora.speakers.stack = "{stack}")')
+        if not args.no_switch and root is None:
+            if Path("/etc/nixos/configuration.nix").is_file() and shutil.which("nixos-rebuild"):
+                res = subprocess.run(["nixos-rebuild", "switch"])
+                if res.returncode != 0:
+                    say("nixos-rebuild switch failed; check your NixOS configuration")
+                    return res.returncode
+            else:
+                say(
+                    f'add `aurora.speakers.stack = "{stack}";` to your NixOS flake '
+                    "configuration (or import /etc/nixos/aurora-speaker-stack.nix) "
+                    "and run `sudo nixos-rebuild switch`"
+                )
+        return 0
+
+    if stack == "speakersafetyd":
+        # Check kernel support and install speakersafetyd BEFORE modifying
+        # /etc/aurora/speaker-stack.conf or masking speakerguardd-v2 so a
+        # failed install or sgv2-only kernel never leaves v2 disabled.
+        if not args.no_switch and root is None:
+            if not kernel_supports_stack("speakersafetyd"):
+                return 1
+        if not args.no_install and root is None:
+            install_speakersafetyd(distro)
+
+        prior_config = config_path.read_bytes() if config_path.is_file() else None
+        helper = None if (args.no_switch or root is not None) else find_provision_helper()
+        session_stopped = False
+        if helper and systemd_running():
+            if run_cmd([helper, "session-stop"]).returncode == 0:
+                session_stopped = True
+        try:
+            mask_units(SGV2_SYSTEM_UNITS + ("aurora-speaker-upgrade.service",), root=root)
+            if not args.no_switch and root is None:
+                if not switch_kernel_interlock("speakersafetyd"):
+                    _rollback_speakersafetyd_selection(
+                        config_path=config_path,
+                        prior_config=prior_config,
+                        root=root,
+                    )
+                    return 1
+            write_selection(stack, config_path)
+            install_speakersafetyd_dropin(root=root)
+            unmask_and_preset_units(("speakersafetyd.service",), (), root=root)
+            if not args.no_switch and root is None:
+                if systemd_running() and shutil.which("systemctl"):
+                    run_cmd(["systemctl", "daemon-reload"])
+                    run_cmd(["systemctl", "enable", "speakersafetyd.service"])
+                    res = run_cmd(["systemctl", "restart", "speakersafetyd.service"])
+                    if res.returncode != 0:
+                        detail = (res.stderr or res.stdout).strip()
+                        say(
+                            "error: failed to start speakersafetyd.service"
+                            + (f": {detail}" if detail else "")
+                            + "; restoring speakerguardd v2"
+                        )
+                        _rollback_speakersafetyd_selection(
+                            config_path=config_path,
+                            prior_config=prior_config,
+                            root=root,
+                        )
+                        return 1
+                if shutil.which("udevadm") and systemd_running():
+                    run_cmd(
+                        ["udevadm", "trigger", "--subsystem-match=sound", "--action=change"]
+                    )
+        finally:
+            if session_stopped and helper:
+                run_cmd([helper, "session-start"])
+        say("selected speakersafetyd (saved in " + str(config_path) + "; upgrades will keep it)")
+        return 0
+
+    # stack == "sgv2"
+    remove_speakersafetyd_dropin(root=root)
+    write_selection(stack, config_path)
+    mask_units(LEGACY_UNITS, root=root)
+    unmask_and_preset_units(
+        SGV2_SYSTEM_UNITS + ("aurora-speaker-upgrade.service",),
+        SGV2_PRESET_UNITS,
+        root=root,
+    )
+    if not args.no_switch and root is None:
+        if systemd_running() and shutil.which("systemctl"):
+            run_cmd(["systemctl", "daemon-reload"])
+        upgrade_bin = shutil.which("aurora-speaker-upgrade")
+        if upgrade_bin:
+            res = subprocess.run([upgrade_bin])
+            if res.returncode != 0:
+                say(
+                    f"aurora-speaker-upgrade exited {res.returncode}; "
+                    "speakers remain at the kernel's safe floor until it passes"
+                )
+                return res.returncode
+        else:
+            if not switch_kernel_interlock("sgv2"):
+                return 1
+            if systemd_running() and shutil.which("systemctl"):
+                run_cmd(["systemctl", "restart", "speakerguardd-v2.service"])
+    say("selected sgv2 (saved in " + str(config_path) + ")")
+    return 0
+
+
+def cmd_migrate(args: argparse.Namespace) -> int:
+    """Package upgrade hook: move default installs to sgv2 while respecting opt-out."""
+    config_path = Path(args.config)
+    root = Path(args.root) if args.root else None
+    try:
+        stack, explicit = read_selection(config_path)
+    except RuntimeError as exc:
+        say(f"warning: {exc}; leaving current unit state unchanged")
+        return 0
+
+    if explicit and stack == "speakersafetyd":
+        say(f"respecting explicit user choice (speakersafetyd) in {config_path}")
+        return 0
+
+    # Default (no override or explicit sgv2): drop any legacy opt-in drop-in,
+    # mask legacy units and enable sgv2 presets.
+    remove_speakersafetyd_dropin(root=root)
+    mask_units(LEGACY_UNITS, root=root)
+    unmask_and_preset_units(
+        SGV2_SYSTEM_UNITS + ("aurora-speaker-upgrade.service",),
+        SGV2_PRESET_UNITS,
+        root=root,
+    )
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    config_path = Path(args.config)
+    try:
+        stack, explicit = read_selection(config_path)
+    except RuntimeError as exc:
+        say(str(exc))
+        return 1
+
+    distro = args.distro or detect_distro()
+    units = {
+        u: unit_state(u)
+        for u in (
+            "speakerguardd-v2.service",
+            "aurora-speaker-upgrade.service",
+            "speakersafetyd.service",
+            "speakerguardd.service",
+        )
+    }
+    cards = find_speaker_cards()
+    payload = {
+        "selected": stack,
+        "explicit_override": explicit,
+        "config": str(config_path),
+        "distro": distro,
+        "units": units,
+        "cards": cards,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    origin = "explicit override" if explicit else "default"
+    print(f"Selected stack: {stack} ({origin})")
+    print(f"Config file:    {config_path}")
+    print(f"Distribution:   {distro}")
+    print("Units:")
+    for name, st in units.items():
+        print(f"  {name}: enabled={st['enabled']} active={st['active']}")
+    if cards:
+        print("Speaker cards:")
+        for c in cards:
+            desc = f"card {c['card']}"
+            if "id" in c:
+                desc += f" ({c['id']})"
+            desc += f": {c.get('interface_control', 'unknown')}"
+            if "interface_value" in c:
+                desc += f" [{c['interface_value']}]"
+            print(f"  {desc}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="aurora-speaker-stack",
+        description="Select the Apple Silicon speaker protection stack (default: sgv2).",
+    )
+    p.add_argument(
+        "--config",
+        default=str(DEFAULT_CONFIG),
+        help=f"Override config file path (default: {DEFAULT_CONFIG})",
+    )
+    p.add_argument("--root", default=None, help=argparse.SUPPRESS)
+    p.add_argument("--distro", default=None, help=argparse.SUPPRESS)
+    sub = p.add_subparsers(dest="command", required=True)
+
+    sel = sub.add_parser("select", help="Select sgv2 (default) or speakersafetyd (user opt-out)")
+    sel.add_argument("stack", choices=VALID_STACKS, help="Speaker protection stack to use")
+    sel.add_argument(
+        "--no-install",
+        action="store_true",
+        help="Do not invoke the package manager when selecting speakersafetyd",
+    )
+    sel.add_argument(
+        "--no-switch",
+        action="store_true",
+        help="Record selection and unit masks without switching the running daemon/interlock",
+    )
+    sel.set_defaults(func=cmd_select)
+
+    st = sub.add_parser("status", help="Show the selected speaker stack and service state")
+    st.add_argument("--json", action="store_true", help="Print status as JSON")
+    st.set_defaults(func=cmd_status)
+
+    mig = sub.add_parser(
+        "migrate",
+        help="Apply default upgrade migration unless the user opted out",
+    )
+    mig.add_argument(
+        "--on-upgrade",
+        action="store_true",
+        help="Run non-interactively during a package upgrade",
+    )
+    mig.set_defaults(func=cmd_migrate)
+
+    il = sub.add_parser(
+        "interlock-apply",
+        help="Arm the kernel Speaker Protection Interface for speakersafetyd when opted out",
+    )
+    il.set_defaults(func=cmd_interlock_apply)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except RuntimeError as exc:
+        say(str(exc))
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

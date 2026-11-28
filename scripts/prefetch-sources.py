@@ -59,6 +59,7 @@ NEEDS = {
     'upower': ['upower-aurora'],
     'speakerguardd-v2': ['speakerguardd-v2'],
     'speaker-upgrade': ['aurora-speaker-upgrade', 'speakerguardd-v2'],
+    'speaker-stack': [],  # vendored in this Git source
     'wifi-firmware': ['aurora-wifi-firmware'],
     'mutter': [],
     'iio-sensor-proxy': [],  # nixpkgs' pinned release, with the local patch

@@ -52,6 +52,7 @@
         sep = pkgs.aurora-sep;
         avd-fw = pkgs.aurora-avd-firmware;
         speaker-upgrade = pkgs.aurora-speaker-upgrade;
+        speaker-stack = pkgs.aurora-speaker-stack;
         wifi-firmware = pkgs.aurora-wifi-firmware;
         libva-v4l2-request-avd = pkgs.libvaV4l2RequestAvd;
         bindgen = pkgs.aurora-bindgen;

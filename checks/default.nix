@@ -13,6 +13,7 @@ in (import ./nix-lint.nix { inherit pkgs; }) // {
   steam-packaging = import ./steam-packaging.nix { inherit pkgs self nixpkgs; };
   clean-boot = import ./clean-boot.nix { inherit pkgs nixpkgs self; };
   speakerguardd-v2-opt-in = import ./speakerguardd-v2-opt-in.nix { inherit pkgs nixpkgs makeSystem; };
+  speaker-stack = import ./speaker-stack.nix { inherit pkgs nixpkgs makeSystem; };
   removed-options = import ./removed-options.nix { inherit pkgs nixpkgs makeSystem; };
   diag-opt-in = import ./diag-opt-in.nix { inherit pkgs nixpkgs makeSystem; };
   gamemode-defaults = import ./gamemode-defaults.nix { inherit pkgs nixpkgs makeSystem; };

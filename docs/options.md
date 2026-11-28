@@ -942,6 +942,22 @@ The speakerguardd-v2 package to use.
 
 **Declared in:** [speakerguardd-v2.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/speakerguardd-v2.nix)
 
+## `aurora.speakers.stack`
+
+Speaker protection stack for Apple Silicon Macs. The default `"sgv2"`
+runs speakerguardd v2 with `aurora-speaker-upgrade`. Setting
+`"speakersafetyd"` is an explicit user opt-out that disables
+speakerguardd v2 and `aurora-speaker-upgrade`, adds nixpkgs'
+`speakersafetyd` systemd unit and udev rules, installs the privileged
+`aurora-speaker-stack interlock-apply` `ExecStartPre` hook, and writes
+`/etc/aurora/speaker-stack.conf` so upgrades preserve the choice.
+
+**Type:** one of "sgv2", "speakersafetyd"
+
+**Default:** `"sgv2"`
+
+**Declared in:** [audio.nix](https://github.com/aurora-silicon/nixos-aurora/blob/main/modules/audio.nix)
+
 ## `aurora.stage2.enable`
 
 Refresh the checked ESP Stage 2 on bootloader installs and commit trials
