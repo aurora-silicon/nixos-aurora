@@ -4,7 +4,7 @@ let
     install -Dm755 ${./aurora-peripheral-firmware.sh} $out/bin/aurora-peripheral-admission
     patchShebangs $out/bin/aurora-peripheral-admission
   '';
-  firmwareTools = [ pkgs.coreutils pkgs.util-linux pkgs.cpio pkgs.kmod pkgs.gnugrep pkgs.bash pkgs.systemd ];
+  firmwareTools = [ pkgs.coreutils pkgs.findutils pkgs.util-linux pkgs.cpio pkgs.kmod pkgs.gnugrep pkgs.bash pkgs.systemd ];
   extractFirmware = pkgs.writeShellApplication {
     name = "aurora-extract-vendor-firmware";
     runtimeInputs = firmwareTools;

@@ -3,7 +3,7 @@
 # Never reset a running device. Repeated modprobe of a loaded module is inert.
 set -eu
 firmware_root=${AURORA_FIRMWARE_ROOT:-/lib/firmware}
-compatible=${AURORA_DT_COMPATIBLE:-/sys/firmware/devicetree/base/compatible}
+dt=${AURORA_DT_ROOT:-/sys/firmware/devicetree/base}
 modprobe_command=${AURORA_MODPROBE:-modprobe}
 pci_root=${AURORA_PCI_ROOT:-/sys/bus/pci/devices}
 
@@ -19,14 +19,34 @@ has_touch_bar_firmware() {
   return 1
 }
 
-neo=false
-if grep -aq 'apple,j700' "$compatible"; then
-  neo=true
-  if has_firmware apple/j700-aop-als-cal.bin; then
-    "$modprobe_command" aop
-  else
-    echo 'Aurora: ALS calibration missing; Neo AOP probe deferred' >&2
+# Print every device-tree node whose compatible list has the entry $1.
+dt_nodes() {
+  find "$dt" -name compatible -type f -exec grep -lzxF -e "$1" {} + |
+    while read -r path; do echo "${path%/compatible}"; done
+}
+
+# An AOP ambient light sensor whose node names a calibration file reads it
+# while aop probes, and aop does not probe again. Hold aop back until the
+# file is in place.
+aop_ready=true
+for node in $(dt_nodes apple,aop-als); do
+  [ -r "$node/firmware-name" ] || continue
+  calibration=$(tr -d '\000' < "$node/firmware-name")
+  if ! has_firmware "$calibration"; then
+    echo "Aurora: ALS calibration $calibration missing; AOP probe deferred" >&2
+    aop_ready=false
   fi
+done
+
+# A MediaTek MT7932 radio (Wi-Fi and Bluetooth, the PCI function behind the
+# wifi0 alias) is held back from autoload: its drivers read these files
+# while probing and do not probe again.
+radio_ready=false
+wifi=
+if [ -r "$dt/aliases/wifi0" ]; then
+  wifi=$(tr -d '\000' < "$dt/aliases/wifi0")
+fi
+if [ -n "$wifi" ] && tr '\000' '\n' < "$dt$wifi/compatible" | grep -qxF pci14c3,7932; then
   radio_ready=true
   for name in \
     mediatek/mt7932/IZUBA_WIFI_MT7932_patch_mcu_1_2_hdr.bin \
@@ -45,24 +65,29 @@ if grep -aq 'apple,j700' "$compatible"; then
   done
 fi
 
-if "$neo" && ! has_firmware apple/tpmtfw-j700.bin; then
-  echo 'Aurora: trackpad firmware missing; keyboard probe continues' >&2
-fi
-# The built-in keyboard and trackpad of every M2-and-later MacBook, the Neo
-# included. It is held back from autoloading only so that it probes here,
-# after this Mac's firmware is in place.
+# A built-in trackpad on the keyboard's DockChannel reads the file that its
+# multi-touch node names in firmware-name while it probes. Without the
+# property the driver sends no firmware, so there is nothing to check.
+for node in $(dt_nodes apple,dockchannel-hid); do
+  [ -r "$node/multi-touch/firmware-name" ] || continue
+  trackpad=$(tr -d '\000' < "$node/multi-touch/firmware-name")
+  if ! has_firmware "$trackpad"; then
+    echo "Aurora: trackpad firmware $trackpad missing; keyboard probe continues" >&2
+  fi
+done
+# The Neo and M2 and later MacBooks share this keyboard and trackpad driver.
+# Its autoload waits for firmware, so load it on every Mac; a Mac without
+# the device only loads the module.
 "$modprobe_command" dockchannel-hid
 
-if "$neo"; then
-  if "$radio_ready"; then
-    "$modprobe_command" mt7932-fullmac
-    if [ "${AURORA_ADMIT_BLUETOOTH:-0}" = 1 ]; then
-      "$modprobe_command" mt7932_bt_pcie
-    fi
-  fi
-else
-  # Preserve ordinary non-Neo admission even if vendor extraction failed.
+if "$aop_ready"; then
   "$modprobe_command" aop
+fi
+if "$radio_ready"; then
+  "$modprobe_command" mt7932-fullmac
+  if [ "${AURORA_ADMIT_BLUETOOTH:-0}" = 1 ]; then
+    "$modprobe_command" mt7932_bt_pcie
+  fi
 fi
 
 if [ "${AURORA_RUNTIME_FIRMWARE_READY:-0}" = 1 ]; then

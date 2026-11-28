@@ -44,7 +44,7 @@ class RuntimePeripheralTests(unittest.TestCase):
         modprobe.chmod(0o755)
         env = dict(
             os.environ,
-            AURORA_DT_COMPATIBLE=str(compatible),
+            AURORA_DT_ROOT=str(root),
             AURORA_FIRMWARE_ROOT=str(fw),
             AURORA_PCI_ROOT=str(pci),
             AURORA_MODPROBE=str(modprobe),
