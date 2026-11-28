@@ -201,3 +201,42 @@ class CacheDeploymentTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ChannelRecordTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.state = Path(self.temporary.name) / 'state.json'
+        self.commit = 'c' * 40
+        self.state.write_text(json.dumps({'repository': 'aurora-silicon/nixos-aurora',
+                                          'channels': {'testing': {'commit': self.commit}}}))
+        self.args = SimpleNamespace(state=str(self.state), repository='aurora-silicon/nixos-aurora',
+                                    channels=['testing'])
+
+    def test_channel_moves_only_to_a_commit_on_main(self):
+        with patch.object(module.lib, 'is_ancestor', return_value=False) as ancestor, \
+             patch.object(module, 'move_ref') as move, \
+             patch.object(module.lib, 'commit_channels') as commit:
+            with self.assertRaisesRegex(SystemExit, 'only name a commit on main'):
+                module.record(self.args)
+        ancestor.assert_called_once_with(module.ROOT, self.commit, 'origin/main')
+        move.assert_not_called()
+        commit.assert_not_called()
+
+    def test_channel_on_main_is_moved_and_recorded(self):
+        with patch.object(module.lib, 'is_ancestor', return_value=True), \
+             patch.object(module, 'move_ref') as move, \
+             patch.object(module.lib, 'commit_channels') as commit:
+            module.record(self.args)
+        move.assert_called_once_with('aurora-silicon/nixos-aurora', 'channel-testing', self.commit)
+        commit.assert_called_once()
+
+    def test_malformed_commit_is_refused_without_git(self):
+        self.state.write_text(json.dumps({'repository': 'aurora-silicon/nixos-aurora',
+                                          'channels': {'testing': {'commit': 'main'}}}))
+        with patch.object(module.lib, 'is_ancestor') as ancestor, patch.object(module, 'move_ref') as move:
+            with self.assertRaises(SystemExit):
+                module.record(self.args)
+        ancestor.assert_not_called()
+        move.assert_not_called()

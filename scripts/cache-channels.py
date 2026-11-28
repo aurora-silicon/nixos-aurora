@@ -225,6 +225,10 @@ def record(args):
         raise SystemExit('state belongs to another repository')
     for channel in args.channels:
         entry = state['channels'][channel]
+        # Installed systems accept a channel commit only from main's reviewed
+        # history (aurora-update); never point a channel anywhere else.
+        if not lib.HEX40.fullmatch(entry['commit']) or not lib.is_ancestor(ROOT, entry['commit'], 'origin/main'):
+            raise SystemExit(f'{REFS[channel]} may only name a commit on main, not {entry["commit"]}')
         move_ref(args.repository, REFS[channel], entry['commit'])
         print(f'{REFS[channel]} -> {entry["commit"]}')
     summary = ', '.join(f'{c} {state["channels"][c]["commit"][:12]}' for c in args.channels) or 'cache only'

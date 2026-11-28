@@ -31,6 +31,17 @@ You can also select a source explicitly:
 sudo aurora-update --flake '/home/owner/my flake#macbook'
 ```
 
+When the Aurora input follows `channel-testing` or `channel-stable`, the
+channel ref is only a pointer. `aurora-update` takes the commit it names only if
+that commit is in the history of nixos-aurora's `main` branch, which changes
+only through reviewed pull requests, and only if it includes the commit
+installed now. It fetches `main`'s commit graph (no files) from GitHub to check,
+on every update, also when the channel has not moved. If the check fails, is
+interrupted, or GitHub cannot be reached, it puts the lockfile back exactly as
+it was and changes nothing. To take an announced rollback, pass
+`--allow-downgrade`; the commit must still be on `main`. Inputs that follow
+anything else (a fork, a local path, an exact commit) are not checked.
+
 After a successful local activation, this command remembers the canonical
 source for that exact `/run/current-system` target. Selection order is explicit
 `--flake`, matching-generation memory, `aurora.update.flake`, then the factory
@@ -220,7 +231,8 @@ later updates use `sudo aurora-update`.
 
 One cumulative cache serves both channels. Deploying a cache release can advance
 `channel-testing`; `promote.yml` advances `channel-stable` after its approval,
-soak-time and signed-cache coverage checks. The `channels` branch records the
+soak-time and signed-cache coverage checks. Both move a channel only to a commit
+on `main`, as installed systems require. The `channels` branch records the
 live release and channel history in `channels.json`.
 
 Build jobs export **unsigned** candidate caches. Collection checks eligible source
