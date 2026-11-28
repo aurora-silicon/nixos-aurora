@@ -492,6 +492,60 @@ class NixosTrialTests(unittest.TestCase):
         self.assertIn('aurora-stage2 check: this Stage 2 uses DT ABI generation 1', written)
         self.assertIn('the boot menu and Stage 2 were left unchanged', written)
 
+    # fedora-aurora#452: only the file this boot's Stage 1 loads, never an older aura.
+
+    def loaded(self, data):
+        """This boot's record of the image Stage 1 loaded (aura 1.0.0b12 on, secboot.c)."""
+        node = '/proc/device-tree/chosen/aurora,boot-security/measurement@0'
+        for name, value in (('stage', 'stage1'), ('component', 'next-stage')):
+            self.put(f'{node}/{name}', value.encode() + b'\0')
+        self.put(f'{node}/sha256', hashlib.sha256(data).digest())
+
+    def esp(self):
+        esp = self.root / 'esp'
+        return {p.relative_to(esp).as_posix(): p.read_bytes() for p in sorted(esp.rglob('*')) if p.is_file()}
+
+    def test_stage1_loading_another_file_gets_no_trial(self):
+        self.put('/proc/device-tree/chosen/asahi,m1n1-stage1-version', b'1.0.0b13\0')
+        self.loaded(self.put('/esp/aura/stage2.bin', b'LAB-STAGE2').read_bytes())
+        before = self.esp()
+        with patch('sys.stderr') as stderr:
+            self.install()
+        self.assertEqual(self.esp(), before)
+        self.assertFalse(self.attempts.exists() and list(self.attempts.iterdir()))
+        written = ''.join(call.args[0] for call in stderr.write.call_args_list)
+        self.assertIn('Stage 1 loads aura/stage2.bin, not m1n1/boot.bin: not touching the boot chain', written)
+        self.loaded(self.target.read_bytes())
+        self.install()
+        self.assertEqual(self.marker.read_bytes(), b'armed\nm1n1/boot.bin.next\n')
+
+    def test_an_armed_candidate_stage1_does_not_load_is_withdrawn(self):
+        # Armed by an adapter without the check; the same image installed again.
+        self.install()
+        digest = hashlib.sha256(self.payload).hexdigest()
+        self.assertTrue((self.attempts / digest).exists())
+        self.put('/proc/device-tree/chosen/asahi,m1n1-stage1-version', b'1.0.0b13\0')
+        self.loaded(self.put('/esp/aura/stage2.bin', b'LAB-STAGE2').read_bytes())
+        with patch('sys.stderr'), patch('sys.stdout') as stdout:
+            self.install()
+        self.assertFalse(self.marker.exists())
+        self.assertFalse(self.candidate.exists())
+        self.assertFalse((self.attempts / digest).exists())
+        self.assertIn('withdrawn before it was booted: Stage 1 loads aura/stage2.bin',
+                      ''.join(call.args[0] for call in stdout.write.call_args_list))
+        self.unchanged()
+
+    def test_an_older_aura_is_not_installed_without_aura_try_either(self):
+        self.put('/proc/device-tree/chosen/asahi,m1n1-stage1-version', b'1.0.0b3\0')
+        self.put('/proc/device-tree/chosen/asahi,m1n1-stage2-version', b'1.0.0b13\0')
+        self.payload = self.stage2(image(dtb('j413', cells=5), aura=b'AURA##aura_ver##1.0.0b12\0'))
+        with patch('sys.stderr'):
+            self.install()
+        self.unchanged()
+        self.env['AURORA_STAGE2_ALLOW_DOWNGRADE'] = '1'
+        self.install()
+        self.assertEqual(self.target.read_bytes(), self.payload)
+
 
 class ProvenanceTests(unittest.TestCase):
     def test_bootchain_is_fedora_auroras_unchanged(self):
