@@ -34,17 +34,19 @@ in {
   hardware.firmware = [ avdFirmware ];
   services.upower.enable = true;
   hardware.wirelessRegulatoryDatabase = true;
-  # speakerguardd v2 is the only speaker stack and the only program that takes
-  # the kernel's speaker interlock. aurora-speaker-upgrade moves a Mac to it at
-  # boot when its own tuning passes the silent self-check; a refused Mac keeps
-  # its speakers at the kernel's floor. Both are on with the platform, as the
-  # Fedora and ALARM packages require them; only lib.mkForce false turns one
-  # off, which leaves the speakers at that floor (there is no other stack).
-  aurora.speakerguardd.v2.enable = true;
-  aurora.speakerguardd.upgrade.enable = true;
-  # speakersafetyd never runs: nixos-apple-silicon's sound module adds its unit
-  # (overlay.nix ships it empty), and this masks speakersafetyd.service.
-  systemd.services.speakersafetyd.enable = lib.mkForce false;
+  # speakerguardd v2 is the speaker stack of every Aurora install and the
+  # program that takes the kernel's speaker interlock. aurora-speaker-upgrade
+  # moves a Mac to it at boot when its own tuning passes the silent
+  # self-check; a refused Mac keeps its speakers at the kernel's floor. Both
+  # are on with the platform, as the Fedora and ALARM packages require them.
+  # They are defaults, like the speakersafetyd mask below, so that a user's
+  # own explicit choice of speaker stack can still be expressed in options.
+  aurora.speakerguardd.v2.enable = lib.mkDefault true;
+  aurora.speakerguardd.upgrade.enable = lib.mkDefault true;
+  # speakersafetyd does not run by default: nixos-apple-silicon's sound module
+  # adds its unit (overlay.nix ships that attribute empty and keeps nixpkgs'
+  # build as speakersafetyd-nixpkgs), and this masks speakersafetyd.service.
+  systemd.services.speakersafetyd.enable = lib.mkDefault false;
   services.udev.packages = [
     # Keep the firmware's product name unchanged in ID_MODEL (hostnamed's
     # hardware model): udev turns parentheses into underscores in $attr{}.

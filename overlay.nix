@@ -572,14 +572,17 @@ in {
     src = source "alsa-ucm-conf-aurora";
     pin = pins.alsa-ucm-conf-aurora;
   };
-  # speakerguardd v2 is the only speaker stack: speakersafetyd is not shipped.
+  # speakerguardd v2 is the speaker stack: speakersafetyd is not installed.
   # nixos-apple-silicon's sound module (hardware.asahi.setupAsahiSound, which
   # also sets up PipeWire and WirePlumber with asahi-audio) adds this package's
   # unit and udev rule; an empty package leaves nothing of it to install, and
   # modules/platform.nix masks speakersafetyd.service.
   speakersafetyd = final.runCommand "speakersafetyd-not-shipped" {
-    meta.description = "Empty: speakerguardd v2 is the only speaker protection on Aurora";
+    meta.description = "Empty: speakerguardd v2 is the speaker protection on Aurora";
   } "mkdir -p $out";
+  # nixpkgs' own build, unchanged and installed by nothing here: kept so that a
+  # user's explicit choice of speakersafetyd can still name it.
+  speakersafetyd-nixpkgs = prev.speakersafetyd;
   # speakerguardd 1.0, the only speaker stack (packaged as speakerguardd-v2;
   # the 0.1 daemon is gone). modules/speakerguardd-v2.nix installs it, and the
   # Aurora platform always turns it on with aurora-speaker-upgrade.
