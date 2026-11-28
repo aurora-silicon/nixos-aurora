@@ -1,3 +1,4 @@
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -64,9 +65,10 @@ class PeripheralAdmissionTests(unittest.TestCase):
                 self.assertEqual(calls.read_text().splitlines(), ["dockchannel-hid", "aop"])
                 self.assertNotIn(b"trackpad firmware missing", result.stderr)
 
-    def extract(self, root, esp, cpio_body=None):
+    def extract(self, root, esp, cpio_body=None, cmdline=""):
         """Runs the module's extraction script with the ESP mounted at esp."""
         (root / "property").write_bytes(b"5A1E0001-0000-4000-8000-00000000E5B0\0")
+        (root / "cmdline").write_text(cmdline + "\n")
         tools = root / "bin"
         tools.mkdir(exist_ok=True)
         cpio_body = cpio_body or ('echo "cpio $*" >> "$AURORA_TEST_CALLS"; mkdir -p vendorfw; '
@@ -80,6 +82,7 @@ class PeripheralAdmissionTests(unittest.TestCase):
         calls.touch()
         env = dict(os.environ, PATH=f'{tools}:{os.environ["PATH"]}', AURORA_TEST_CALLS=str(calls),
                    AURORA_EFI_PROPERTY=str(root / "property"),
+                   AURORA_KERNEL_CMDLINE=str(root / "cmdline"),
                    AURORA_FIRMWARE_DESTINATION=str(root / "destination"),
                    AURORA_PARTUUID_ROOT=str(root / "devices"),
                    AURORA_ESP_MOUNT=str(root / "mount"))
@@ -98,6 +101,39 @@ class PeripheralAdmissionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(calls, ["cpio --quiet --extract --unconditional --no-absolute-filenames"])
             self.assertEqual((root / "destination/vendorfw/.vendorfw.manifest").read_bytes(), b"fixture")
+
+    def test_signed_boot_extracts_only_the_archive_it_binds(self):
+        # A signed UKI's command line carries the archive's digest; the ESP is
+        # outside the signature, so any other archive is refused before cpio
+        # runs, and nothing reaches the firmware search path.
+        digest = "sha256:" + hashlib.sha256(b"fixture").hexdigest()
+        other = "sha256:" + hashlib.sha256(b"replaced").hexdigest()
+        cases = {
+            "matching digest": (f"root=fstab aurora.vendorfw={digest} lockdown=integrity", 0),
+            "other digest": (f"aurora.vendorfw={other}", 1),
+            "no archive trusted": ("aurora.vendorfw=none", 1),
+            "malformed digest": ("aurora.vendorfw=sha256:XYZ", 1),
+            "empty value": ("quiet aurora.vendorfw= splash", 1),
+            "unsigned boot": ("root=fstab", 0),
+        }
+        for name, (cmdline, status) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "esp/vendorfw").mkdir(parents=True)
+                (root / "esp/vendorfw/firmware.cpio").write_bytes(b"fixture")
+                result, calls = self.extract(root, root / "esp", cmdline=cmdline)
+                destination = root / "destination"
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertFalse((destination / ".vendorfw.cpio").exists(), "the private copy is removed")
+                if status == 0:
+                    self.assertEqual(len(calls), 1)
+                    self.assertEqual((destination / "vendorfw/.vendorfw.manifest").read_bytes(), b"fixture")
+                    self.assertTrue((destination / ".vendorfw-extracted").is_file())
+                else:
+                    self.assertEqual(calls, [])
+                    self.assertIn(b"<3>Aurora:", result.stderr)
+                    self.assertFalse((destination / "vendorfw").exists())
+                    self.assertFalse((destination / ".vendorfw-extracted").exists())
 
     def test_esp_without_vendor_firmware_is_not_a_failure(self):
         with tempfile.TemporaryDirectory() as temporary:

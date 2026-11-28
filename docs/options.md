@@ -641,7 +641,13 @@ every bootloader install, with aurora-secboot: the generation's kernel,
 its initrd (boot.initrd.secrets included) and its kernel parameters
 plus init= and lockdown=, minus debug and shell parameters. UKIs go to
 ESP/EFI/Linux/aurora-nixos-<hash>.efi and are signed with the db key in
-keyDir. The keys stay in keyDir and never enter the Nix store. GRUB
+keyDir. The keys stay in keyDir and never enter the Nix store. The
+command line also binds this Mac's vendor firmware archive on the ESP
+(aurora.vendorfw=): its digest, or none without one, is pinned in
+keyDir/vendorfw.sha256 by the first UKI built, and the initrd refuses
+any other archive, also one that appears later. After the installer
+replaces or adds the archive, remove that file and install the boot
+loader again (nixos-rebuild boot). GRUB
 stays the boot loader unless securePath is set. Writes
 /etc/aurora/secboot.conf; `aurora-secboot status` reports the chain.
 
