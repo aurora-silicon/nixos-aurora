@@ -236,6 +236,63 @@ in {
         StandardError = "journal";
       };
     };
+    # After the rekey, aurora-firstboot leaves a recovery key in
+    # /var/lib/aurora/firstboot/recovery-key: the owner's own way back in when
+    # the Secure Enclave or the password is gone (there is no iCloud on Linux).
+    # These units show it once in the owner's session and then shred every
+    # stored copy, as the package's own unit files do on Fedora and ALARM; NixOS
+    # declares units in its modules, so they are repeated here. The key exists on
+    # both paths (sealed to the password, or a passphrase slot plus the key), so
+    # this is gated on the file, not on aurora.sepLuks. A console-only install
+    # prints it from the text wizard instead.
+    systemd.services.aurora-recovery-key = {
+      description = "Hand the disk recovery key to its owner's session once";
+      wantedBy = [ "multi-user.target" ];
+      unitConfig.ConditionPathExists = [
+        "/var/lib/aurora/firstboot/recovery-key"
+        "!/var/lib/aurora/firstboot/recovery-key-shown"
+      ];
+      # id and install (coreutils), logger (util-linux); the script is not
+      # PATH-wrapped by the package.
+      path = [ pkgs.coreutils pkgs.util-linux ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${pkgs.aurora-firstboot}/lib/aurora/aurora-recovery-key --publish";
+      };
+    };
+    # aurora-recovery-key --show writes /run/aurora-recovery-key/acknowledged
+    # once the owner has confirmed they wrote the key down; this path then runs
+    # the matching service to delete the stored copies.
+    systemd.paths.aurora-recovery-key-done = {
+      description = "Watch for the owner's confirmation of the disk recovery key";
+      wantedBy = [ "multi-user.target" ];
+      unitConfig.ConditionPathExists = "/var/lib/aurora/firstboot/recovery-key";
+      pathConfig.PathExists = "/run/aurora-recovery-key/acknowledged";
+    };
+    systemd.services.aurora-recovery-key-done = {
+      description = "Delete the stored copies of the disk recovery key once it was shown";
+      # shred, rm and sync (coreutils), logger (util-linux).
+      path = [ pkgs.coreutils pkgs.util-linux ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${pkgs.aurora-firstboot}/lib/aurora/aurora-recovery-key --acknowledged";
+      };
+    };
+    # The session autostart entry that actually shows the key (zenity or
+    # kdialog, else a notification pointing at `aurora-recovery-key --console`).
+    # The packaged /etc/xdg/autostart entry names /usr/lib; on NixOS the Exec
+    # must point into the store, so it is declared here rather than taken from
+    # the package.
+    environment.etc."xdg/autostart/aurora-recovery-key.desktop".text = ''
+      [Desktop Entry]
+      Type=Application
+      Name=Disk recovery key
+      Comment=Shows the disk recovery key once after setup
+      Exec=${pkgs.aurora-firstboot}/lib/aurora/aurora-recovery-key --show
+      NoDisplay=true
+      X-GNOME-Autostart-enabled=true
+      X-KDE-autostart-phase=2
+    '';
     # The shared plymouth-quit.service drop-in: the splash stays up until
     # first-boot setup has finished, with any display manager.
     systemd.services.plymouth-quit = lib.mkIf config.boot.plymouth.enable {
